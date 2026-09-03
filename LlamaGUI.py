@@ -2,6 +2,7 @@ import sys
 import customtkinter as ctk
 from tkinter import filedialog
 from tkinterdnd2 import DND_FILES, TkinterDnD
+import cv2
 from PIL import Image
 
 
@@ -21,6 +22,7 @@ app.grid_rowconfigure(0, weight=1)
 app.grid_columnconfigure(1, weight=1)
 
 
+# Close behavior
 def on_close():
     app.destroy()
     sys.exit(0)
@@ -28,64 +30,116 @@ def on_close():
 
 app.protocol("WM_DELETE_WINDOW", on_close)
 
+# Globale file path
+current_file_path = ""
 
-# Helper function to clean paths from TkinterDnD
-def process_file_path(file_path, label_widget):
+
+def extract_video_thumbnail(video_path, max_size=(300, 200)):
+    cap = cv2.VideoCapture(video_path)
+    success, frame = cap.read()
+    cap.release()
+
+    if not success or frame is None:
+        return None
+
+    orig_h, orig_w, _ = frame.shape
+    max_w, max_h = max_size
+    scale = min(max_w / orig_w, max_h / orig_h)
+
+    if scale < 1.0:
+        new_w = int(orig_w * scale)
+        new_h = int(orig_h * scale)
+    else:
+        new_w, new_h = orig_w, orig_h
+
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(frame_rgb)
+
+    return ctk.CTkImage(
+        light_image=pil_img,
+        dark_image=pil_img,
+        size=(new_w, new_h)
+    )
+
+# Update and clean file path for Encoding and Muxing
+
+
+def process_file_path(file_path, label_widget, img_label):
     clean_path = file_path.strip("{}").strip()
     if clean_path:
         label_widget.configure(text=f"Selected File:\n{clean_path}")
 
+    thumbnail = extract_video_thumbnail(clean_path, max_size=(350, 200))
+    if thumbnail:
+        img_label.configure(image=thumbnail, text="")
 
-def import_file(label_widget):
+
+def import_file(label_widget, img_label):
     path = filedialog.askopenfilename(
         title="Select a File", filetypes=[("All Files", "*.*")]
     )
-    process_file_path(path, label_widget)
+    if path:
+        process_file_path(path, label_widget, img_label)
+
+# Create a Drag & Drop Box
 
 
-# 2. Reusable Component: Create a Drag & Drop Box
-def create_drop_box(parent_frame, target_label):
+def create_drop_box(parent_frame, target_label, img_label):
     # Outer frame container
     drop_box = ctk.CTkFrame(
         master=parent_frame,
         width=350,
-        height=120,
+        height=250,
         corner_radius=10,
         border_width=2,
-        border_color="#1f538d",
+        border_color="#FDCA3C",
     )
     drop_box.pack(pady=10)
     drop_box.pack_propagate(False)
 
-    # Internal instruction text
+    content_frame = ctk.CTkFrame(master=drop_box, fg_color="transparent")
+    content_frame.pack(expand=True)  # Centers the entire group inside drop_box
+
     drop_label = ctk.CTkLabel(
-        master=drop_box,
-        text="Drag & Drop File Here\n— or —",
+        master=content_frame,
+        text="Drag & Drop File Here\n\n— or —\n",
         font=ctk.CTkFont(size=14),
     )
-    drop_label.pack(expand=True)
+    drop_label.pack(pady=(0, 10))  # Small gap below the text
 
-    # Register Drag & Drop event
-    drop_box.drop_target_register(DND_FILES)
-    drop_box.dnd_bind(
-        "<<Drop>>", lambda event: process_file_path(event.data, target_label)
+    import_btn = ctk.CTkButton(
+        master=content_frame,
+        text="Browse File",
+        command=lambda: import_file(target_label, img_label),
     )
+    import_btn.pack(pady=(0, 0))
+
+    for widget in (drop_box, content_frame, drop_label):  # Register Drag & Drop events
+        widget.drop_target_register(DND_FILES)
+        widget.dnd_bind(
+            "<<Drop>>",
+            lambda event: process_file_path(
+                event.data, target_label, img_label),
+        )
 
     return drop_box
 
 
-# 3. Tab Switcher Function
+# Tab Switcher
 def show_tab(tab_name):
     tab1_frame.grid_forget()
     tab2_frame.grid_forget()
+    tab3_frame.grid_forget()
 
     if tab_name == "Tab 1":
         tab1_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
     elif tab_name == "Tab 2":
         tab2_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+    elif tab_name == "Tab 3":
+        tab3_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
 
 
-# 4. Left Sidebar Frame
+# Left Sidebar Frame
 sidebar = ctk.CTkFrame(master=app, width=180, corner_radius=0)
 sidebar.grid(row=0, column=0, sticky="nsew")
 
@@ -93,14 +147,13 @@ title_label = ctk.CTkLabel(
     master=sidebar, text="LlamaMXD", font=ctk.CTkFont(size=20, weight="bold")
 )
 title_label.pack(padx=20, pady=(20, 10))
-
-# Logo
-pil_llama = Image.open("llama.png")
+pil_llama = Image.open("llama.png")  # Logo
 title_llama = ctk.CTkImage(
     light_image=pil_llama, dark_image=pil_llama, size=(140, 140)
 )
 image_label = ctk.CTkLabel(master=sidebar, image=title_llama, text="")
 image_label.pack(pady=10)
+
 
 btn_tab1 = ctk.CTkButton(
     master=sidebar, text="Muxing", command=lambda: show_tab("Tab 1")
@@ -112,45 +165,41 @@ btn_tab2 = ctk.CTkButton(
 )
 btn_tab2.pack(padx=20, pady=10)
 
+btn_tab3 = ctk.CTkButton(
+    master=sidebar, text="YT-DLP", command=lambda: show_tab("Tab 3")
+)
+btn_tab3.pack(padx=20, pady=10)
 
-# 5. Tab 1 Content Frame (Muxing)
+
+# Tab 1: Muxing
 tab1_frame = ctk.CTkFrame(master=app)
-
 tab1_label = ctk.CTkLabel(
-    master=tab1_frame, text="No file selected", font=ctk.CTkFont(size=14)
+    master=tab1_frame, text=""
 )
 tab1_label.pack(pady=(20, 10))
-
-# Add Drop Box & Import Button to Tab 1
-create_drop_box(tab1_frame, tab1_label)
-
-tab1_import_btn = ctk.CTkButton(
-    master=tab1_frame,
-    text="Import File to Tab 1",
-    command=lambda: import_file(tab1_label),
-)
-tab1_import_btn.pack(pady=10)
+tab1_img_label = ctk.CTkLabel(master=tab1_frame, text="")
+tab1_img_label.pack(pady=5)
+create_drop_box(tab1_frame, tab1_label, tab1_img_label)
 
 
-# 6. Tab 2 Content Frame (Encoding)
+# Tab 2: Encoding
 tab2_frame = ctk.CTkFrame(master=app)
-
 tab2_label = ctk.CTkLabel(
-    master=tab2_frame, text="No file selected", font=ctk.CTkFont(size=14)
+    master=tab2_frame, text=""
 )
 tab2_label.pack(pady=(20, 10))
+tab2_img_label = ctk.CTkLabel(master=tab2_frame, text="")
+tab2_img_label.pack(pady=5)
+create_drop_box(tab2_frame, tab2_label, tab2_img_label)
 
-# Add Drop Box & Import Button to Tab 2
-create_drop_box(tab2_frame, tab2_label)
 
-tab2_import_btn = ctk.CTkButton(
-    master=tab2_frame,
-    text="Import File to Tab 2",
-    command=lambda: import_file(tab2_label),
+# Tab 3: YT-DLP
+tab3_frame = ctk.CTkFrame(master=app)
+tab3_label = ctk.CTkLabel(
+    master=tab3_frame, text="Nothin but us birds", font=ctk.CTkFont(size=14)
 )
-tab2_import_btn.pack(pady=10)
+tab3_label.pack(pady=(20, 10))
 
 
-# Start on Tab 1
-show_tab("Tab 1")
+show_tab("Tab 1")  # Launch on Tab 1
 app.mainloop()
