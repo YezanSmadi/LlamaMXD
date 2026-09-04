@@ -45,35 +45,42 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         }
         self.show_tab("Muxing")
 
-    def register_tab_ui(self, label_widget, img_widget):
+    def register_tab_ui(self, label_widget, img_widget, on_thumbnail=None):
         """Registers a tab's UI controls for batch cross-tab updates."""
-        self.tab_ui_registry.append({"label": label_widget, "img": img_widget})
+        if on_thumbnail is None:
+            def on_thumbnail(pil_img, _img_widget=img_widget):
+                ctk_img = ctk.CTkImage(
+                    light_image=pil_img, dark_image=pil_img, size=(350, 200)
+                )
+                _img_widget.configure(image=ctk_img, text="")
+
+        self.tab_ui_registry.append(
+            {"label": label_widget, "img": img_widget, "on_thumbnail": on_thumbnail}
+        )
 
     def update_global_file(self, file_path):
-            """Central method triggered by drop box imports."""
-            clean_path = file_path.strip("{}").strip()
-            if not clean_path:
-                return
+        """Central method triggered by drop box imports."""
+        clean_path = file_path.strip("{}").strip()
+        if not clean_path:
+            return
 
-            self.current_file_path = clean_path
-            thumbnail = extract_video_thumbnail(self.current_file_path, max_size=(350, 200))
+        self.current_file_path = clean_path
+        raw_thumbnail = extract_video_thumbnail(self.current_file_path)
 
-            # Update labels across registered tabs
-            for ui in self.tab_ui_registry:
-                if ui["label"]:
-                    ui["label"].configure(text=f"Selected File:\n{self.current_file_path}")
-                if ui["img"] and thumbnail:
-                    ui["img"].configure(image=thumbnail, text="")
+        for ui in self.tab_ui_registry:
+            if ui["label"]:
+                ui["label"].configure(text=f"Selected File:\n{self.current_file_path}")
+            if raw_thumbnail is not None:
+                ui["on_thumbnail"](raw_thumbnail)
 
-            # Hide the drag-and-drop prompt across all tabs
-            for tab in self.tabs.values():
-                if hasattr(tab, "drop_box"):
-                    tab.drop_box.hide_drop_text()
+        for tab in self.tabs.values():
+            if hasattr(tab, "drop_box"):
+                tab.drop_box.hide_drop_text()
 
     def show_tab(self, name):
         for tab in self.tabs.values():
             tab.grid_forget()
-        self.tabs[name].grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.tabs[name].grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
 
     def on_close(self):
         self.destroy()
