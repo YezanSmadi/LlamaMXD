@@ -6,19 +6,26 @@ import cv2
 from PIL import Image
 
 
-# 1. Main Window Setup with Drag & Drop capabilities
+#Main Window Setup with Drag & Drop capabilities
 class TkinterDnDCTk(ctk.CTk, TkinterDnD.DnDWrapper):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.TkdndVersion = TkinterDnD._require(self)
 
+ctk.set_appearance_mode("system")
 
 app = TkinterDnDCTk()
-app.geometry("850x650")
-app.title("LlamaGUI")
+width, height = app.winfo_screenwidth(), app.winfo_screenheight()
+scaled_width = int(width * .35)
+scaled_height = int(height * .4)
+X_center = (width - scaled_width)  // 2
+Y_center = (height - scaled_height) // 2
+app.geometry(f"{scaled_width}x{scaled_height}+{X_center}+{Y_center}") 
+app.title("LlamaMXD")
+app.iconbitmap("llama.ico")
+app.resizable(False, False)
 
-# Configure main grid
-app.grid_rowconfigure(0, weight=1)
+app.grid_rowconfigure(0, weight=1) # Configure main grid
 app.grid_columnconfigure(1, weight=1)
 
 
@@ -34,7 +41,7 @@ app.protocol("WM_DELETE_WINDOW", on_close)
 current_file_path = ""
 
 
-def extract_video_thumbnail(video_path, max_size=(300, 200)):
+def extract_video_thumbnail(video_path, max_size=(1920, 1080)):
     cap = cv2.VideoCapture(video_path)
     success, frame = cap.read()
     cap.release()
@@ -61,29 +68,27 @@ def extract_video_thumbnail(video_path, max_size=(300, 200)):
         size=(new_w, new_h)
     )
 
+
 # Update and clean file path for Encoding and Muxing
-
-
 def process_file_path(file_path, label_widget, img_label):
-    clean_path = file_path.strip("{}").strip()
-    if clean_path:
-        label_widget.configure(text=f"Selected File:\n{clean_path}")
+    current_file_path = file_path.strip("{}").strip()
+    if current_file_path:
+        label_widget.configure(text=f"Selected File:\n{current_file_path}")
 
-    thumbnail = extract_video_thumbnail(clean_path, max_size=(350, 200))
+    thumbnail = extract_video_thumbnail(current_file_path, max_size=(350, 200))
     if thumbnail:
         img_label.configure(image=thumbnail, text="")
 
 
 def import_file(label_widget, img_label):
-    path = filedialog.askopenfilename(
+    current_file_path = filedialog.askopenfilename(
         title="Select a File", filetypes=[("All Files", "*.*")]
     )
-    if path:
-        process_file_path(path, label_widget, img_label)
+    if current_file_path:
+        process_file_path(current_file_path, label_widget, img_label)
+
 
 # Create a Drag & Drop Box
-
-
 def create_drop_box(parent_frame, target_label, img_label):
     # Outer frame container
     drop_box = ctk.CTkFrame(
@@ -119,8 +124,14 @@ def create_drop_box(parent_frame, target_label, img_label):
         widget.dnd_bind(
             "<<Drop>>",
             lambda event: process_file_path(
-                event.data, target_label, img_label),
+                event.data, target_label, img_label)
         )
+        widget.bind(
+            "<Double-Button-1>", 
+            lambda event: import_file(
+                target_label, img_label)
+                    )
+
 
     return drop_box
 
@@ -140,11 +151,11 @@ def show_tab(tab_name):
 
 
 # Left Sidebar Frame
-sidebar = ctk.CTkFrame(master=app, width=180, corner_radius=0)
+sidebar = ctk.CTkFrame(master=app, width=180, corner_radius=0, fg_color="#FDCA3C")
 sidebar.grid(row=0, column=0, sticky="nsew")
 
 title_label = ctk.CTkLabel(
-    master=sidebar, text="LlamaMXD", font=ctk.CTkFont(size=20, weight="bold")
+    master=sidebar, text="LlamaMXD", font=ctk.CTkFont(size=20, weight="bold"), text_color="black"
 )
 title_label.pack(padx=20, pady=(20, 10))
 pil_llama = Image.open("llama.png")  # Logo
