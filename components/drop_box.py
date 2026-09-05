@@ -2,15 +2,17 @@ import customtkinter as ctk
 from tkinter import filedialog
 from tkinterdnd2 import DND_FILES
 
+from core.theme import get_active_theme
+
 class DropBox(ctk.CTkFrame):
-    def __init__(self, master, on_file_selected):
+    def __init__(self, master, on_file_selected, height=280):
         super().__init__(
             master=master,
             width=350,
-            height=250,
+            height=height,
             corner_radius=10,
             border_width=2,
-            border_color="#FDCA3C",
+            border_color=get_active_theme()["primary"],
         )
         self.on_file_selected = on_file_selected
         self.pack(pady=10)

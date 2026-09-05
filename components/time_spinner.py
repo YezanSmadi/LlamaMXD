@@ -1,15 +1,20 @@
 import customtkinter as ctk
 
 class TimeSpinner(ctk.CTkFrame):
+    # String index (within "HH:MM:SS") of each of the 6 digit slots, in order.
+    _SEGMENT_POSITIONS = (0, 1, 3, 4, 6, 7)
+
     def __init__(self, master, initial_seconds=0):
         super().__init__(master=master, fg_color="transparent")
-        
+
         # Internal state representation [H, H, M, M, S, S]
         self.digits = ["0", "0", "0", "0", "0", "0"]
         self._set_from_seconds(initial_seconds)
 
-        # Start cursor on far-right digit (index 7 in "HH:MM:SS" string)
-        self.cursor_pos = 7
+        # cursor_pos indexes directly into self.digits (0-5) — the single
+        # source of truth for where the block cursor sits. Only rendering
+        # needs to translate that into a string position (see _SEGMENT_POSITIONS).
+        self.cursor_pos = 5
 
         # Auto-repeat loop tracking attributes
         self._repeat_job = None
@@ -21,7 +26,7 @@ class TimeSpinner(ctk.CTkFrame):
             self, text="-", width=30, height=30
         )
         self.btn_minus.pack(side="left", padx=(0, 5))
-        
+
         # Bind press/release events for accelerating auto-repeat
         self.btn_minus.bind("<ButtonPress-1>", lambda e: self._start_hold(self.decrement))
         self.btn_minus.bind("<ButtonRelease-1>", lambda e: self._stop_hold())
@@ -29,16 +34,16 @@ class TimeSpinner(ctk.CTkFrame):
 
         # Time Entry Field
         self.entry = ctk.CTkEntry(
-            self, 
-            width=100, 
+            self,
+            width=100,
             justify="center"
         )
         self.entry.pack(side="left")
 
         # Explicit key bindings to intercept native Tkinter overrides
         self.entry.bind("<Key>", self._on_key_press)
-        self.entry.bind("<BackSpace>", self._on_delete_backspace)
-        self.entry.bind("<Delete>", self._on_delete_backspace)
+        self.entry.bind("<BackSpace>", self._on_backspace)
+        self.entry.bind("<Delete>", self._on_delete)
         self.entry.bind("<Button-1>", lambda e: self.after(10, self._on_click))
         self.entry.bind("<FocusIn>", lambda e: self.after(10, self._render_block_cursor))
         self.entry.bind("<FocusOut>", lambda e: self._on_focus_out())
@@ -79,10 +84,11 @@ class TimeSpinner(ctk.CTkFrame):
             self.after_cancel(self._repeat_job)
             self._repeat_job = None
 
-    def _get_digit_index(self, str_pos):
-        """Maps 'HH:MM:SS' string index (0-7) to self.digits index (0-5)."""
-        mapping = {0: 0, 1: 1, 3: 2, 4: 3, 6: 4, 7: 5}
-        return mapping.get(str_pos, 5)
+    def _nearest_digit_index(self, str_pos):
+        """Maps a raw string index (e.g. from a click, which may land on a
+        colon) to the closest digit segment."""
+        distances = [abs(seg - str_pos) for seg in self._SEGMENT_POSITIONS]
+        return distances.index(min(distances))
 
     def _hide_caret(self):
         """Enforces absolute removal of the native vertical blinking caret."""
@@ -91,48 +97,50 @@ class TimeSpinner(ctk.CTkFrame):
         except Exception:
             pass
 
-    def _on_delete_backspace(self, event):
-        """Dedicated handler to ensure Backspace/Delete cascade works reliably."""
-        digit_idx = self._get_digit_index(self.cursor_pos)
-        
-        left_side = ["0"] + self.digits[:digit_idx]
-        right_side = self.digits[digit_idx + 1:]
-        self.digits = (left_side + right_side)[:6]
-        
+    def _on_backspace(self, event):
+        """Steps the cursor back and clears that digit — the mirror image of
+        typing a digit (which writes, then steps forward)."""
+        if self.cursor_pos > 0:
+            self.cursor_pos -= 1
+        self.digits[self.cursor_pos] = "0"
+        self.update_display()
+        return "break"
+
+    def _on_delete(self, event):
+        """Clears the digit under the cursor without moving it."""
+        self.digits[self.cursor_pos] = "0"
         self.update_display()
         return "break"
 
     def _on_key_press(self, event):
-        """Handles numeric typing and arrow navigation."""
+        """Handles numeric typing and cursor navigation."""
         if event.keysym in ("Tab", "ISO_Left_Tab"):
             return
 
         if event.char.isdigit():
-            digit_idx = self._get_digit_index(self.cursor_pos)
-            self.digits[digit_idx] = event.char
-            
+            self.digits[self.cursor_pos] = event.char
             self._validate_and_clamp_limits()
-
-            self.cursor_pos -= 1
-            if self.cursor_pos in (2, 5):
-                self.cursor_pos -= 1
-            
+            self.cursor_pos = min(5, self.cursor_pos + 1)
             self.update_display()
             return "break"
 
-        elif event.keysym == "Left":
-            self.cursor_pos -= 1
-            if self.cursor_pos in (2, 5):
-                self.cursor_pos -= 1
-            self.cursor_pos = max(0, min(7, self.cursor_pos))
+        if event.keysym == "Left":
+            self.cursor_pos = max(0, self.cursor_pos - 1)
             self.after(1, self._render_block_cursor)
             return "break"
 
-        elif event.keysym == "Right":
-            self.cursor_pos += 1
-            if self.cursor_pos in (2, 5):
-                self.cursor_pos += 1
-            self.cursor_pos = max(0, min(7, self.cursor_pos))
+        if event.keysym == "Right":
+            self.cursor_pos = min(5, self.cursor_pos + 1)
+            self.after(1, self._render_block_cursor)
+            return "break"
+
+        if event.keysym == "Home":
+            self.cursor_pos = 0
+            self.after(1, self._render_block_cursor)
+            return "break"
+
+        if event.keysym == "End":
+            self.cursor_pos = 5
             self.after(1, self._render_block_cursor)
             return "break"
 
@@ -140,20 +148,18 @@ class TimeSpinner(ctk.CTkFrame):
 
     def _validate_and_clamp_limits(self):
         """Ensures minutes and seconds do not exceed 59."""
-        mins = int(f"{self.digits[2]}{self.digits[3]}")
-        secs = int(f"{self.digits[4]}{self.digits[5]}")
+        mins = int("".join(self.digits[2:4]))
+        secs = int("".join(self.digits[4:6]))
 
         if mins > 59:
-            self.digits[2], self.digits[3] = "5", "9"
+            self.digits[2:4] = ["5", "9"]
         if secs > 59:
-            self.digits[4], self.digits[5] = "5", "9"
+            self.digits[4:6] = ["5", "9"]
 
     def _on_click(self):
         """Syncs internal cursor position when clicking into the box."""
         click_idx = self.entry.index("insert")
-        if click_idx in (2, 5):
-            click_idx -= 1
-        self.cursor_pos = max(0, min(7, click_idx))
+        self.cursor_pos = self._nearest_digit_index(click_idx)
         self._render_block_cursor()
 
     def _on_focus_out(self):
@@ -175,22 +181,18 @@ class TimeSpinner(ctk.CTkFrame):
         if not self._is_focused():
             self.entry.selection_clear()
             return
-            
-        if self.cursor_pos in (2, 5):
-            self.cursor_pos -= 1
-            
-        self.cursor_pos = max(0, min(7, self.cursor_pos))
 
         self._hide_caret()
-        self.entry.select_range(self.cursor_pos, self.cursor_pos + 1)
+        str_pos = self._SEGMENT_POSITIONS[self.cursor_pos]
+        self.entry.select_range(str_pos, str_pos + 1)
 
     def update_display(self):
         """Writes formatted HH:MM:SS text and updates cursor if focused."""
         formatted = f"{self.digits[0]}{self.digits[1]}:{self.digits[2]}{self.digits[3]}:{self.digits[4]}{self.digits[5]}"
-        
+
         self.entry.delete(0, "end")
         self.entry.insert(0, formatted)
-        
+
         # Only highlight cursor block if this field is currently focused
         if self._is_focused():
             self.after(1, self._render_block_cursor)
@@ -211,7 +213,7 @@ class TimeSpinner(ctk.CTkFrame):
         hrs = min(99, total_secs // 3600)
         mins = (total_secs % 3600) // 60
         secs = total_secs % 60
-        
+
         s_str = f"{hrs:02d}{mins:02d}{secs:02d}"
         self.digits = list(s_str)
 
@@ -226,12 +228,17 @@ class TimeSpinner(ctk.CTkFrame):
         """Returns formatted string 'HH:MM:SS'."""
         return f"{self.digits[0]}{self.digits[1]}:{self.digits[2]}{self.digits[3]}:{self.digits[4]}{self.digits[5]}"
 
+    def set(self, total_seconds):
+        """Sets the spinner's value from a total-seconds count and refreshes the display."""
+        self._set_from_seconds(total_seconds)
+        self.update_display()
+
     def set_state(self, state="normal"):
         """Enables ('normal') or greys out/disables ('disabled') the spinner."""
         self.entry.configure(state=state)
         self.btn_minus.configure(state=state)
         self.btn_plus.configure(state=state)
-        
+
         if state == "disabled":
             self.entry.configure(text_color="gray50")
             self.entry.selection_clear()

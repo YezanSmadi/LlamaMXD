@@ -1,9 +1,13 @@
+from datetime import datetime
+
 import customtkinter as ctk
 from PIL import Image
 
+from core.theme import get_active_theme
+
 class Sidebar(ctk.CTkFrame):
     def __init__(self, master, app):
-        super().__init__(master=master, width=180, corner_radius=0, fg_color="#FDCA3C")
+        super().__init__(master=master, width=180, corner_radius=0, fg_color=get_active_theme()["primary"])
         self.app = app
 
         # Title Label
@@ -35,6 +39,48 @@ class Sidebar(ctk.CTkFrame):
         self.btn_tab2.pack(padx=20, pady=10)
 
         self.btn_tab3 = ctk.CTkButton(
-            master=self, text="YT-DLP", command=lambda: self.app.show_tab("YT-DLP")
+            master=self, text="Queue", command=lambda: self.app.show_tab("Queue")
         )
         self.btn_tab3.pack(padx=20, pady=10)
+
+        self.btn_tab4 = ctk.CTkButton(
+            master=self, text="YT-DLP", command=lambda: self.app.show_tab("YT-DLP")
+        )
+        self.btn_tab4.pack(padx=20, pady=10)
+
+        # Settings + footer anchor to the sidebar's bottom edge via
+        # side="bottom", and must be packed BEFORE the expanding spacer below.
+        # Tk carves cavity space in .pack() *call order*, independent of
+        # side — an expand=True widget claims whatever's left at the moment
+        # it's packed, so packing it first would leave nothing for anything
+        # packed after it, regardless of side. (Same call-order convention as
+        # controls_frame/top_container in EncodingTab.) footer_label is
+        # packed first so it claims the true bottom edge; btn_settings packs
+        # second, landing just above it.
+        self.footer_label = ctk.CTkLabel(
+            master=self,
+            text=f"{datetime.now().year} Yezan Smadi     v0.5.0-alpha.1",
+            font=ctk.CTkFont(size=10),
+            text_color="black",
+        )
+        self.footer_label.pack(side="bottom", pady=(0, 10))
+
+        self.btn_settings = ctk.CTkButton(
+            master=self, text="Settings", command=lambda: self.app.show_tab("Settings")
+        )
+        self.btn_settings.pack(side="bottom", padx=20, pady=(10, 4))
+
+        # Spacer: consumes whatever cavity remains between the tab group above
+        # and Settings/footer below, visually separating them.
+        self.spacer = ctk.CTkFrame(master=self, fg_color="transparent")
+        self.spacer.pack(fill="both", expand=True)
+
+        # Lookup used by the app to align the active-tab accent strip with
+        # whichever button is currently selected.
+        self.buttons = {
+            "Muxing": self.btn_tab1,
+            "Encoding": self.btn_tab2,
+            "Queue": self.btn_tab3,
+            "YT-DLP": self.btn_tab4,
+            "Settings": self.btn_settings,
+        }
