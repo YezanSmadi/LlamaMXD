@@ -1,5 +1,7 @@
+import os
 import customtkinter as ctk
 from tkinter import filedialog
+from components.dialogs import show_message
 from components.drop_box import DropBox
 from components.time_spinner import TimeSpinner
 from core.theme import get_active_theme
@@ -59,6 +61,14 @@ class MuxingTab(ctk.CTkFrame):
         )
         self.save_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
+        # Pre-fill with the default save folder and keep refining it to
+        # "<folder>/<input name>_muxed.mp4" as files are picked, until the
+        # user overrides it themselves (tracked via self._auto_output).
+        self._auto_output = ""
+        if self.app.default_save_location:
+            self.save_entry.insert(0, self.app.default_save_location)
+            self._auto_output = self.app.default_save_location
+
         self.browse_save_btn = ctk.CTkButton(
             master=self.save_frame,
             text="Browse",
@@ -78,7 +88,7 @@ class MuxingTab(ctk.CTkFrame):
             text="Queue Task",
             fg_color=theme["secondary"],
             hover_color=theme["secondary_hover"],
-            text_color="white",
+            text_color=theme["secondary_text"],
             command=self.add_to_queue
         )
         self.queue_btn.grid(row=0, column=0, sticky="ew", padx=(0, 4))
@@ -87,7 +97,7 @@ class MuxingTab(ctk.CTkFrame):
             master=self.action_frame,
             text="Mux",
             fg_color=theme["primary"],
-            text_color="black",
+            text_color=theme["primary_text"],
             hover_color=theme["primary_hover"],
             command=self.mux_now
         )
@@ -138,6 +148,25 @@ class MuxingTab(ctk.CTkFrame):
         # Hide initial dropbox now that a file/thumbnail is shown
         self.drop_box.pack_forget()
         self._resize_thumbnail()
+
+    def _autofill_output_path(self):
+        """Suggests '<default folder>/<input basename>_muxed.mp4' in the
+        output field — but only while the user hasn't set their own path
+        (self._auto_output holds the last value we filled; None once the
+        user picks via Browse)."""
+        current = self.save_entry.get().strip()
+        if current and current != self._auto_output:
+            return
+        input_file = self.app.current_file_path
+        if not input_file:
+            return
+        base = os.path.splitext(os.path.basename(input_file.replace("\\", "/")))[0]
+        suggested = os.path.normpath(
+            os.path.join(self.app.default_save_location or "", f"{base}_muxed.mp4")
+        )
+        self.save_entry.delete(0, "end")
+        self.save_entry.insert(0, suggested)
+        self._auto_output = suggested
 
     def _on_resize(self, event):
         """Dynamic resize handler for the video thumbnail."""
@@ -215,6 +244,7 @@ class MuxingTab(ctk.CTkFrame):
         if file_path:
             self.save_entry.delete(0, "end")
             self.save_entry.insert(0, file_path)
+            self._auto_output = None  # user chose their own — stop auto-filling
 
     def _gather_settings(self):
         """Collects the current Muxing tab state into a plain dict."""
@@ -237,6 +267,7 @@ class MuxingTab(ctk.CTkFrame):
 
         self.save_entry.delete(0, "end")
         self.save_entry.insert(0, settings.get("output_path", ""))
+        self._auto_output = self.save_entry.get().strip()
 
         self.start_time_spinner.set(settings.get("start_secs", 0))
         self.duration_time_spinner.set(settings.get("duration_secs", 0))
@@ -249,12 +280,22 @@ class MuxingTab(ctk.CTkFrame):
 
     def _validate_settings(self, settings):
         """Checks that the minimum required fields are filled in before
-        queueing/muxing. Returns True if valid, else False."""
+        queueing/muxing, raising a modal dialog on the first thing missing.
+        Returns True if valid, else False."""
         if not settings["input_file"]:
-            print("Cannot proceed: no input file selected.")
+            show_message(
+                self.app, "No File Selected",
+                "Add a video file before queueing or muxing — drag one onto "
+                "the drop box, or double-click it to browse.",
+            )
             return False
         if not settings["output_path"]:
-            print("Cannot proceed: no output save location chosen.")
+            show_message(
+                self.app, "No Save Location",
+                "Choose where the muxed file should be saved before "
+                "continuing. Use Browse, or set a default save location on the "
+                "Settings tab.",
+            )
             return False
         return True
 
@@ -270,6 +311,7 @@ class MuxingTab(ctk.CTkFrame):
         if queue_tab:
             task_id = queue_tab.add_task(description, settings=settings, status="Queued", source_tab="Muxing")
             queue_tab.start_task(task_id)
+            self.app.notify("Muxing job has begun.")
         else:
             print(f"Queue tab unavailable — would have muxed now: {settings}")
 
@@ -284,5 +326,6 @@ class MuxingTab(ctk.CTkFrame):
         queue_tab = self.app.tabs.get("Queue")
         if queue_tab:
             queue_tab.add_task(description, settings=settings, status="Queued", source_tab="Muxing")
+            self.app.notify("Job added to queue.")
         else:
             print(f"Queue tab unavailable — would have queued: {settings}")
