@@ -7,7 +7,8 @@ from core.theme import get_active_theme
 
 class Sidebar(ctk.CTkFrame):
     def __init__(self, master, app):
-        super().__init__(master=master, width=180, corner_radius=0, fg_color=get_active_theme()["primary"])
+        theme = get_active_theme()
+        super().__init__(master=master, width=180, corner_radius=0, fg_color=theme["primary"])
         self.app = app
 
         # Title Label
@@ -15,7 +16,7 @@ class Sidebar(ctk.CTkFrame):
             master=self,
             text="LlamaMXD",
             font=ctk.CTkFont(size=20, weight="bold"),
-            text_color="black",
+            text_color=theme["primary_text"],
         )
         self.title_label.pack(padx=20, pady=(20, 10))
 
@@ -59,9 +60,9 @@ class Sidebar(ctk.CTkFrame):
         # second, landing just above it.
         self.footer_label = ctk.CTkLabel(
             master=self,
-            text=f"{datetime.now().year} Yezan Smadi     v0.5.0-alpha.1",
+            text=f"{datetime.now().year} Yezan Smadi     v0.5.0-alpha.2",
             font=ctk.CTkFont(size=10),
-            text_color="black",
+            text_color=theme["primary_text"],
         )
         self.footer_label.pack(side="bottom", pady=(0, 10))
 

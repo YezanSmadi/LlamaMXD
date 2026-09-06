@@ -1,3 +1,4 @@
+import os
 import sys
 import customtkinter as ctk
 from tkinterdnd2 import TkinterDnD
@@ -5,7 +6,9 @@ from PIL import Image
 
 from core.utilities import extract_video_thumbnail
 from core.theme import get_active_theme, load_settings, apply_ctk_theme
+from components.dialogs import ask_yes_no
 from components.sidebar import Sidebar
+from components.toast import ToastManager
 from tabs.muxing_tab import MuxingTab
 from tabs.encoding_tab import EncodingTab
 from tabs.queue_tab import QueueTab
@@ -39,11 +42,28 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         self.grid_columnconfigure(1, weight=1)
 
         # Shared State & Registry
+        _settings = load_settings()
         self.current_file_path = ""
-        self.default_save_location = load_settings()["default_save_location"]
+        self.default_save_location = _settings["default_save_location"]
+        # Hardware-acceleration is a global preference now (moved off the
+        # Encoding tab into Settings) — every queued Encode task reads it.
+        self.gpu_enabled = bool(_settings["gpu_enabled"])
         self.tab_ui_registry = []
         self._tab_indicator_job = None
         self._current_tab_name = "Muxing"
+        # In-window drop-down notifications ("job added to queue" etc). Built
+        # before the tabs since anything constructed below may want to post one.
+        self.toasts = ToastManager(self)
+
+        # Make sure the export folder actually exists so the first save
+        # dialog opens somewhere real. Best-effort — a hand-picked path that
+        # can't be created (bad drive, permissions) just falls back to the
+        # dialog's own default.
+        if self.default_save_location:
+            try:
+                os.makedirs(self.default_save_location, exist_ok=True)
+            except OSError:
+                pass
 
         # Loads (generating on first use) a CTk theme JSON where every
         # default-styled widget's accent color — checkboxes, switches,
@@ -56,16 +76,34 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         self.sidebar = Sidebar(master=self, app=self)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
 
-        # Active-tab indicator: a strip of the brand primary color that
-        # pokes out from behind the sidebar into the gutter beside whichever
-        # sidebar button is active, rather than recoloring the button or
-        # adding a highlight. Placed with .place() so it can float
-        # independently of the grid, and lowered so the sidebar and the
-        # active tab's own frame (both opaque) render on top of it wherever
-        # they overlap — only the uncovered sliver in between actually
-        # shows through.
-        self.tab_indicator = ctk.CTkFrame(master=self, fg_color=get_active_theme()["primary"], corner_radius=0)
-        self.tab_indicator.lower()
+        # Active-tab indicator: a primary-color strip that runs from the
+        # active sidebar button, across the sidebar/content gutter, to the
+        # tab frame's left edge — a visible connector between the button and
+        # its content. Placed + raised (not gridded) by _update_tab_indicator
+        # on every tab switch; it stops exactly at the frame edge so it never
+        # covers content. The tab_indicator_line is a secondary-color band
+        # crossing it through the vertical middle, stacked just above it.
+        # corner_radius=0 on both, for two reasons: the pipes should read as
+        # flat rectangles, and a rounded CTkFrame paints its *master's* color
+        # in the corner nooks outside the rounded shape — the master here is
+        # the root window (dark), while the pipes sit over the sidebar
+        # (primary), so those nooks rendered as dark notches that looked like
+        # a drop shadow. Flat corners have no nooks at all.
+        # bg_color is pinned to primary on both, not left at its default
+        # (a frozen snapshot of the root window's dark color). CTk floors a
+        # drawn shape's width/height to the nearest even number, so an odd
+        # dimension leaves a 1px strip of the widget's raw canvas showing at
+        # its edge — which rendered as a dark line under the pipe. Matching
+        # bg_color to what surrounds the pipe makes any such strip invisible.
+        # (_update_tab_indicator also keeps the band's height even.)
+        self.tab_indicator = ctk.CTkFrame(
+            master=self, fg_color=get_active_theme()["primary"],
+            bg_color=get_active_theme()["primary"], corner_radius=0,
+        )
+        self.tab_indicator_line = ctk.CTkFrame(
+            master=self, fg_color=get_active_theme()["secondary"],
+            bg_color=get_active_theme()["primary"], corner_radius=0,
+        )
 
         # Tabs
         self.tabs = {
@@ -108,8 +146,22 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         for tab in self.tabs.values():
             if hasattr(tab, "drop_box"):
                 tab.drop_box.hide_drop_text()
+            # Let tabs that keep an output field refresh their suggested
+            # path for the new input (independent of thumbnail success).
+            autofill = getattr(tab, "_autofill_output_path", None)
+            if callable(autofill):
+                autofill()
 
     def show_tab(self, name):
+        # Give the tab being left a chance to flush state (Settings uses this
+        # to auto-persist). Runs before the switch so the outgoing tab's
+        # widgets are still fully alive.
+        outgoing = self.tabs.get(self._current_tab_name)
+        if outgoing is not None and outgoing is not self.tabs.get(name):
+            on_leave = getattr(outgoing, "on_leave", None)
+            if callable(on_leave):
+                on_leave()
+
         self._current_tab_name = name
         for tab in self.tabs.values():
             tab.grid_forget()
@@ -133,14 +185,50 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         if not button:
             return
 
-        self.update_idletasks()
+        # Only force a layout pass when the button genuinely hasn't been laid
+        # out yet (winfo_* still reporting the 1px placeholder). update_
+        # idletasks() synchronously re-lays-out and redraws the whole window,
+        # which profiling put at ~47ms — 28% of the cost of a tab switch, paid
+        # on every switch for a geometry answer that the 50ms defer in
+        # show_tab has already made valid. The guard keeps the safety net for
+        # the one call that needs it (the first, during __init__) without
+        # charging every later switch for it.
+        if button.winfo_height() <= 1 or self.sidebar.winfo_width() <= 1:
+            self.update_idletasks()
+
         sidebar_width = self.sidebar.winfo_width()
-        # Straddles the sidebar/content seam: starts a little inside the
-        # sidebar (invisible there — same yellow) and tucks a little under
-        # the tab frame's left edge (hidden — the frame renders on top).
-        # CTk widgets take width/height via configure(), not place().
-        self.tab_indicator.configure(width=24, height=button.winfo_height())
-        self.tab_indicator.place(x=sidebar_width - 8, y=button.winfo_y())
+        button_x = button.winfo_x()
+        button_y = button.winfo_y()
+        button_w = button.winfo_width()
+        button_h = button.winfo_height()
+
+        # A flat connector from the active button to the tab frame's left edge
+        # (sidebar_width + 10 = the padx in show_tab). It starts exactly at
+        # the button's right edge rather than overlapping into it — the pipes
+        # are square-cornered, so any overlap would square off the button's
+        # own rounded corner. At mid-height (where the line band crosses) the
+        # button's rounded edge reaches its full bounding width, so the two
+        # still meet flush. Raised so the run over the sidebar shows; stops
+        # exactly at the frame edge, never on content. CTk widgets take
+        # width/height via configure(), not place().
+        strip_left = button_x + button_w
+        strip_right = sidebar_width + 10
+        strip_w = max(1, strip_right - strip_left)
+        self.tab_indicator.configure(width=strip_w, height=button_h)
+        self.tab_indicator.place(x=strip_left, y=button_y)
+        self.tab_indicator.lift()
+
+        # Secondary-color band crossing the strip through its vertical middle,
+        # same horizontal span, raised just above it. Height must stay EVEN:
+        # CTk floors a drawn shape to the nearest even number of pixels, so an
+        # odd height paints one row short and exposes a strip of the widget's
+        # own canvas along the bottom edge (this was a visible dark line under
+        # the pipe at height 9 — see the bg_color note where these are built).
+        line_h = 8
+        line_y = button_y + button_h // 2 - line_h // 2
+        self.tab_indicator_line.configure(width=strip_w, height=line_h)
+        self.tab_indicator_line.place(x=strip_left, y=line_y)
+        self.tab_indicator_line.lift()
 
     def apply_theme(self, theme_name):
         """Live-applies a theme with no restart required. CTk never
@@ -160,12 +248,18 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         without touching self._rows or any in-flight animation."""
         apply_ctk_theme(theme_name)
 
+        # Live toasts are placed against tab frames that are about to be
+        # destroyed, and carry the old palette — drop them rather than leave
+        # them floating over the rebuilt UI.
+        self.toasts.clear()
+
         muxing_settings = self.tabs["Muxing"]._gather_settings()
         encoding_settings = self.tabs["Encoding"]._gather_settings()
         active_tab_name = self._current_tab_name
 
         self.sidebar.destroy()
         self.tab_indicator.destroy()
+        self.tab_indicator_line.destroy()
         for name in ("Muxing", "Encoding", "YT-DLP", "Settings"):
             self.tabs[name].destroy()
         self.tab_ui_registry = []  # entries above pointed at widgets just destroyed
@@ -173,8 +267,27 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         self.sidebar = Sidebar(master=self, app=self)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
 
-        self.tab_indicator = ctk.CTkFrame(master=self, fg_color=get_active_theme()["primary"], corner_radius=0)
-        self.tab_indicator.lower()
+        # corner_radius=0 on both, for two reasons: the pipes should read as
+        # flat rectangles, and a rounded CTkFrame paints its *master's* color
+        # in the corner nooks outside the rounded shape — the master here is
+        # the root window (dark), while the pipes sit over the sidebar
+        # (primary), so those nooks rendered as dark notches that looked like
+        # a drop shadow. Flat corners have no nooks at all.
+        # bg_color is pinned to primary on both, not left at its default
+        # (a frozen snapshot of the root window's dark color). CTk floors a
+        # drawn shape's width/height to the nearest even number, so an odd
+        # dimension leaves a 1px strip of the widget's raw canvas showing at
+        # its edge — which rendered as a dark line under the pipe. Matching
+        # bg_color to what surrounds the pipe makes any such strip invisible.
+        # (_update_tab_indicator also keeps the band's height even.)
+        self.tab_indicator = ctk.CTkFrame(
+            master=self, fg_color=get_active_theme()["primary"],
+            bg_color=get_active_theme()["primary"], corner_radius=0,
+        )
+        self.tab_indicator_line = ctk.CTkFrame(
+            master=self, fg_color=get_active_theme()["secondary"],
+            bg_color=get_active_theme()["primary"], corner_radius=0,
+        )
 
         self.tabs["Muxing"] = MuxingTab(master=self, app=self)
         self.tabs["Encoding"] = EncodingTab(master=self, app=self)
@@ -187,6 +300,41 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
 
         self.show_tab(active_tab_name)
 
+    def notify(self, message, go_to_queue=True):
+        """Drops a notification toast in at the current tab's top-left corner.
+        By default clicking it jumps to the Queue tab, since every notification
+        so far is about a job that landed there."""
+        on_click = (lambda: self.show_tab("Queue")) if go_to_queue else None
+        self.toasts.show(message, on_click=on_click)
+
     def on_close(self):
+        """Confirms before discarding unfinished queue work, then hard-exits.
+
+        Processing is paused for the duration of the prompt and resumed if the
+        user backs out — otherwise a job would keep animating (and could even
+        finish) behind a modal dialog asking whether to cancel it. Pausing
+        rather than stopping is what makes that reversible: pause_queue keeps
+        the in-flight task's progress in `_paused_state`, so start_queue picks
+        it up from the exact step it left off at."""
+        queue_tab = self.tabs.get("Queue")
+        pending = queue_tab.pending_task_count() if queue_tab else 0
+        if pending:
+            was_running = queue_tab.is_running()
+            if was_running:
+                queue_tab.pause_queue()
+
+            plural = "job" if pending == 1 else "jobs"
+            confirmed = ask_yes_no(
+                self,
+                "Close LlamaMXD?",
+                f"There {'is' if pending == 1 else 'are'} still {pending} unfinished "
+                f"{plural} in the queue. Closing now would cancel "
+                f"{'it' if pending == 1 else 'them all'}.\n\n"
+                "Are you sure you want to close?",
+            )
+            if not confirmed:
+                if was_running:
+                    queue_tab.start_queue()
+                return
         self.destroy()
         sys.exit(0)

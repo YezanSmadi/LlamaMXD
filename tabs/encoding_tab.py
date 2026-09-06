@@ -1,7 +1,10 @@
+import os
 import customtkinter as ctk
 from tkinter import filedialog
 from PIL import Image
+from components.dialogs import show_message
 from components.drop_box import DropBox
+from components.dropdown import ThemedDropdown
 from components.time_spinner import TimeSpinner
 from core.theme import get_active_theme
 
@@ -77,7 +80,7 @@ class EncodingTab(ctk.CTkFrame):
         self.profile_label = ctk.CTkLabel(master=self.profile_frame, text="Profile:", font=("Arial", 12, "bold"))
         self.profile_label.pack(anchor="w", pady=(0, 1))
 
-        self.profile_menu = ctk.CTkOptionMenu(
+        self.profile_menu = ThemedDropdown(
             master=self.profile_frame,
             values=["High", "Main", "Main 10", "Baseline"],
             width=110,
@@ -90,17 +93,19 @@ class EncodingTab(ctk.CTkFrame):
         self.level_label = ctk.CTkLabel(master=self.level_frame, text="Level:", font=("Arial", 12, "bold"))
         self.level_label.pack(anchor="w", pady=(0, 1))
 
-        self.level_menu = ctk.CTkOptionMenu(
+        self.level_menu = ThemedDropdown(
             master=self.level_frame,
             values=["4.0", "4.1", "5.0", "5.1"],
             width=90,
         )
         self.level_menu.pack(anchor="w")
 
-        # -- Right column: switches (label to the LEFT of the toggle), then
-        # the CRF slider directly beneath them --
+        # -- Right column: HDR switch (label to the LEFT of the toggle), then
+        # the CRF slider directly beneath it. Hardware Acceleration (GPU)
+        # used to live here too but is now a global preference on the
+        # Settings tab (read as self.app.gpu_enabled in _gather_settings). --
 
-        # Hardware Acceleration Switch — built without its own text so a
+        # HDR to SDR Conversion Switch — built without its own text so a
         # separate label can sit to its left instead of CTkSwitch's default
         # label-on-the-right layout; clicking the label toggles the switch.
         # CTkSwitch's internal grid always reserves its (here-empty) text
@@ -108,17 +113,6 @@ class EncodingTab(ctk.CTkFrame):
         # with text="" — width=42 trims that down to just the toggle track,
         # so anchor="e" on the row actually lands the visible switch flush
         # against the right edge instead of leaving phantom label space.
-        self.gpu_row = ctk.CTkFrame(master=self.right_col, fg_color="transparent")
-        self.gpu_row.pack(anchor="e", pady=(0, 2))
-
-        self.gpu_label = ctk.CTkLabel(master=self.gpu_row, text="Hardware Acceleration (GPU)")
-        self.gpu_label.pack(side="left", padx=(0, 8))
-        self.gpu_label.bind("<Button-1>", lambda e: self.switch.toggle())
-
-        self.switch = ctk.CTkSwitch(master=self.gpu_row, text="", width=42)
-        self.switch.pack(side="left")
-
-        # HDR to SDR Conversion Switch — same label-left layout
         self.hdr_row = ctk.CTkFrame(master=self.right_col, fg_color="transparent")
         self.hdr_row.pack(anchor="e", pady=2)
 
@@ -164,10 +158,18 @@ class EncodingTab(ctk.CTkFrame):
         self.save_frame.pack(fill="x", pady=4)
 
         self.save_entry = ctk.CTkEntry(
-            master=self.save_frame, 
+            master=self.save_frame,
             placeholder_text="Save file as..."
         )
         self.save_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        # Pre-fill with the default save folder and keep refining it to
+        # "<folder>/<input name>_encoded.mp4" as files are picked, until the
+        # user overrides it themselves (tracked via self._auto_output).
+        self._auto_output = ""
+        if self.app.default_save_location:
+            self.save_entry.insert(0, self.app.default_save_location)
+            self._auto_output = self.app.default_save_location
 
         self.browse_save_btn = ctk.CTkButton(
             master=self.save_frame, 
@@ -188,7 +190,7 @@ class EncodingTab(ctk.CTkFrame):
             text="Queue Task",
             fg_color=theme["secondary"],
             hover_color=theme["secondary_hover"],
-            text_color="white",
+            text_color=theme["secondary_text"],
             command=self.add_to_queue
         )
         self.queue_btn.grid(row=0, column=0, sticky="ew", padx=(0, 4))
@@ -197,7 +199,7 @@ class EncodingTab(ctk.CTkFrame):
             master=self.action_frame,
             text="Encode",
             fg_color=theme["primary"],
-            text_color="black",
+            text_color=theme["primary_text"],
             hover_color=theme["primary_hover"],
             command=self.encode_now
         )
@@ -287,6 +289,25 @@ class EncodingTab(ctk.CTkFrame):
         )
         self.img_label.configure(image=ctk_img)
 
+    def _autofill_output_path(self):
+        """Suggests '<default folder>/<input basename>_encoded.mp4' in the
+        output field — but only while the user hasn't set their own path
+        (self._auto_output holds the last value we filled; None once the
+        user picks via Browse)."""
+        current = self.save_entry.get().strip()
+        if current and current != self._auto_output:
+            return
+        input_file = self.app.current_file_path
+        if not input_file:
+            return
+        base = os.path.splitext(os.path.basename(input_file.replace("\\", "/")))[0]
+        suggested = os.path.normpath(
+            os.path.join(self.app.default_save_location or "", f"{base}_encoded.mp4")
+        )
+        self.save_entry.delete(0, "end")
+        self.save_entry.insert(0, suggested)
+        self._auto_output = suggested
+
     def _on_crf_change(self, value):
         """Updates the live CRF value readout in the slider's title label."""
         self.crf_label.configure(text=f"Quality (CRF): {int(round(value))}")
@@ -336,15 +357,18 @@ class EncodingTab(ctk.CTkFrame):
         if file_path:
             self.save_entry.delete(0, "end")
             self.save_entry.insert(0, file_path)
+            self._auto_output = None  # user chose their own — stop auto-filling
 
     def _gather_settings(self):
-        """Collects the current Encoding tab state into a plain dict."""
+        """Collects the current Encoding tab state into a plain dict.
+        `gpu_enabled` is the global Settings-tab preference, not a per-tab
+        control anymore."""
         return {
             "input_file": self.app.current_file_path,
             "output_path": self.save_entry.get(),
             "start_secs": self.start_time_spinner.get_total_seconds(),
             "duration_secs": self.duration_time_spinner.get_total_seconds(),
-            "gpu_enabled": bool(self.switch.get()),
+            "gpu_enabled": bool(self.app.gpu_enabled),
             "hdr_to_sdr": bool(self.hdr_switch.get()),
             "retain_length": bool(self.checkbox.get()),
             "crf": int(round(self.crf_slider.get())),
@@ -363,14 +387,10 @@ class EncodingTab(ctk.CTkFrame):
 
         self.save_entry.delete(0, "end")
         self.save_entry.insert(0, settings.get("output_path", ""))
+        self._auto_output = self.save_entry.get().strip()
 
         self.start_time_spinner.set(settings.get("start_secs", 0))
         self.duration_time_spinner.set(settings.get("duration_secs", 0))
-
-        if settings.get("gpu_enabled"):
-            self.switch.select()
-        else:
-            self.switch.deselect()
 
         if settings.get("hdr_to_sdr"):
             self.hdr_switch.select()
@@ -392,12 +412,22 @@ class EncodingTab(ctk.CTkFrame):
 
     def _validate_settings(self, settings):
         """Checks that the minimum required fields are filled in before
-        queueing/encoding. Returns True if valid, else False."""
+        queueing/encoding, raising a modal dialog on the first thing missing.
+        Returns True if valid, else False."""
         if not settings["input_file"]:
-            print("Cannot proceed: no input file selected.")
+            show_message(
+                self.app, "No File Selected",
+                "Add a video file before queueing or encoding — drag one onto "
+                "the drop box, or double-click it to browse.",
+            )
             return False
         if not settings["output_path"]:
-            print("Cannot proceed: no output save location chosen.")
+            show_message(
+                self.app, "No Save Location",
+                "Choose where the encoded file should be saved before "
+                "continuing. Use Browse, or set a default save location on the "
+                "Settings tab.",
+            )
             return False
         return True
 
@@ -413,6 +443,7 @@ class EncodingTab(ctk.CTkFrame):
         if queue_tab:
             task_id = queue_tab.add_task(description, settings=settings, status="Queued", source_tab="Encoding")
             queue_tab.start_task(task_id)
+            self.app.notify("Encoding job has begun.")
         else:
             print(f"Queue tab unavailable — would have encoded now: {settings}")
 
@@ -427,5 +458,6 @@ class EncodingTab(ctk.CTkFrame):
         queue_tab = self.app.tabs.get("Queue")
         if queue_tab:
             queue_tab.add_task(description, settings=settings, status="Queued", source_tab="Encoding")
+            self.app.notify("Job added to queue.")
         else:
             print(f"Queue tab unavailable — would have queued: {settings}")

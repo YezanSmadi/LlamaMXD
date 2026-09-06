@@ -240,7 +240,7 @@ class TimeSpinner(ctk.CTkFrame):
         self.btn_plus.configure(state=state)
 
         if state == "disabled":
-            self.entry.configure(text_color="gray50")
+            self.entry.configure(text_color="gray35")
             self.entry.selection_clear()
         else:
             self.entry.configure(text_color=ctk.ThemeManager.theme["CTkEntry"]["text_color"])

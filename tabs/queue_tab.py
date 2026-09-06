@@ -2,8 +2,16 @@ import tkinter
 
 import customtkinter as ctk
 
+from components.dialogs import ask_yes_no
 from core.utilities import extract_video_thumbnail
-from core.theme import get_active_theme
+from core.theme import get_active_theme, readable_text_on
+
+# The Stop Queue button's red is a permanent, theme-independent exception
+# (see CLAUDE.md), but its label still picks a legible color against that
+# fixed red the same adaptive way every themed color does.
+_STOP_RED = "#E5484D"
+_STOP_RED_HOVER = "#C93C40"
+_STOP_TEXT = readable_text_on(_STOP_RED)
 
 # Read once at import time, and reassigned by refresh_theme() on a live
 # theme switch (see LlamaGUI.apply_theme) — every row construction and
@@ -14,11 +22,13 @@ _THEME = get_active_theme()
 # Row styling by state: not-yet-started tasks read as solid brand primary;
 # once a task starts, the row goes grey and progress_canvas (a primary-
 # colored overlay placed on top) grows left-to-right to show its individual
-# progress: Done just drops back to flat grey with the fill hidden. The
-# remove button's "X" is darkened on the primary (queued) state for contrast.
-_QUEUED_STYLE = {"bg": _THEME["primary"], "text": "black", "remove_text": "black", "remove_hover": _THEME["primary_hover"]}
+# progress: Done just drops back to flat grey with the fill hidden. Text on
+# the primary (queued) state — the row label and the "X" — uses the theme's
+# adaptive primary_text (black or white, whichever is legible on that primary).
+_QUEUED_STYLE = {"bg": _THEME["primary"], "text": _THEME["primary_text"], "remove_text": _THEME["primary_text"], "remove_hover": _THEME["primary_hover"]}
 _GREY_STYLE = {"bg": ("gray85", "gray20"), "text": None, "remove_text": None, "remove_hover": ("gray75", "gray30")}
 _THUMB_SIZE = (60, 40)
+_ROW_CORNER = 8  # row frame corner_radius; the running fill echoes it on its left
 _PROGRESS_STEPS = 15
 _PROGRESS_INTERVAL_MS = 100  # 15 * 100ms = 1500ms total — same overall duration as before
 _DETAIL_SCROLL_HEIGHT = 140  # fixed so Encode/Mux popups match height; Encode's extra fields scroll
@@ -59,10 +69,9 @@ class QueueTab(ctk.CTkFrame):
         self._paused_state = None  # (task_id, step, rest) captured for Pause/Resume
         self._animation_job = None
 
-        # Reset the overall progress bar once a fully-completed queue is
-        # navigated away from, so returning later (or starting a new batch)
-        # doesn't show a stale "100% done" from a batch already dealt with.
-        self.bind("<Unmap>", lambda e: self._on_hide())
+        # on_leave() (called by LlamaGUI.show_tab) resets a fully-completed
+        # overall progress bar — but ONLY when actually switching to a
+        # different tab, not on a Queue->Queue re-click or a window minimize.
 
         # Overall queue progress — how many of the current tasks are Done.
         # corner_radius=0: CTkProgressBar's rounded end-caps are drawn as full
@@ -122,10 +131,21 @@ class QueueTab(ctk.CTkFrame):
             text="Clear Completed",
             fg_color=_THEME["secondary"],
             hover_color=_THEME["secondary_hover"],
-            text_color="white",
+            text_color=_THEME["secondary_text"],
             command=self.clear_completed,
         )
         self.clear_btn.pack(side="left")
+
+        self.clear_all_btn = ctk.CTkButton(
+            master=self.controls_frame,
+            text="Clear All",
+            width=90,
+            fg_color=_THEME["secondary"],
+            hover_color=_THEME["secondary_hover"],
+            text_color=_THEME["secondary_text"],
+            command=self.clear_all,
+        )
+        self.clear_all_btn.pack(side="left", padx=(8, 0))
 
         # Packed side="right" in this order (start first, stop second) so
         # Stop lands immediately to Start/Pause's left.
@@ -133,7 +153,7 @@ class QueueTab(ctk.CTkFrame):
             master=self.controls_frame,
             text="Start Queue",
             fg_color=_THEME["primary"],
-            text_color="black",
+            text_color=_THEME["primary_text"],
             hover_color=_THEME["primary_hover"],
             command=self.start_queue,
         )
@@ -142,9 +162,9 @@ class QueueTab(ctk.CTkFrame):
         self.stop_btn = ctk.CTkButton(
             master=self.controls_frame,
             text="Stop Queue",
-            text_color="black",
-            fg_color="#E5484D",
-            hover_color="#C93C40",
+            text_color=_STOP_TEXT,
+            fg_color=_STOP_RED,
+            hover_color=_STOP_RED_HOVER,
             command=self.stop_queue,
         )
         self.stop_btn.pack(side="right", padx=(0, 8))
@@ -154,52 +174,62 @@ class QueueTab(ctk.CTkFrame):
         encoding/muxing parameters that can later be sent back to the tab that
         queued it (`source_tab`, e.g. "Encoding" or "Muxing"). Returns the
         task's internal id."""
-        if self.empty_label.winfo_ismapped():
-            self.empty_label.pack_forget()
+        # Unconditionally — winfo_ismapped() is False while the tab has
+        # never been shown, which used to leave the placeholder packed above
+        # the first real rows until the tab was opened.
+        self.empty_label.pack_forget()
 
         task_id = self._next_id
         self._next_id += 1
         settings = settings or {}
 
-        row = ctk.CTkFrame(master=self.list_frame, corner_radius=8)
+        row = ctk.CTkFrame(master=self.list_frame, corner_radius=_ROW_CORNER)
         row.pack(fill="x", pady=4)
 
-        # description_label is constructed (but not yet packed) before
-        # progress_canvas, and thumb_label after it — construction order is
-        # what determines default stacking order in Tk (later = higher), so
-        # this ordering alone (no explicit lift()/lower() needed) gives
-        # progress_canvas exactly the z-position it needs: above
-        # description_label, so its own paint can replace what's under it,
-        # but below thumb_label, so the thumbnail is never covered
-        # regardless of how far the fill has grown. Confirmed by isolating
-        # this exact construction order and comparing rendered pixels.
-        # Packing happens afterward, in the actual left-to-right visual
-        # order — pack() call order controls layout position independently
-        # of construction order controlling stacking.
+        # Construction order below IS the stacking order — in Tk, a
+        # later-constructed sibling sits higher, so this ordering alone (no
+        # explicit lift()/lower() anywhere) gives every widget the z-position
+        # it needs:
+        #   description_label < base_canvas < progress_canvas < thumb_label
+        # i.e. both canvases paint over the label (replacing its text with
+        # their own while running), the fill paints over the grey base, and
+        # the thumbnail stays on top of all of it so the fill can never cover
+        # it no matter how far it grows. Confirmed by isolating this exact
+        # construction order and comparing rendered pixels. Packing happens
+        # afterward, in the actual left-to-right visual order — pack() call
+        # order controls layout position independently of construction order
+        # controlling stacking.
         description_label = ctk.CTkLabel(master=row, text=description, anchor="w", justify="left")
 
-        # One raw tkinter.Canvas does the job that used to take two widgets
-        # (a plain CTkFrame fill plus a separately-clipped text canvas).
-        # Its own bg IS the theme's primary fill color, and the description
-        # is drawn on top of that in black — so growing/shrinking this single
-        # canvas's pixel width simultaneously grows the visible yellow fill
-        # AND clips the black text at exactly the same edge, since they're
-        # the same number by construction: there's no second, independently
-        # -rounded width calculation left to ever disagree with it (unlike
-        # the old two-widget version, which needed reading one widget's
-        # resolved geometry back into the other to avoid an intermittent
-        # 1px seam — see CLAUDE.md). A raw Canvas genuinely clips whatever
-        # it draws to its own configured width/height, unlike CTkLabel,
-        # which silently ignores a width smaller than its natural text size
-        # and always renders the full, unclipped string (confirmed
-        # empirically) — so this couldn't be done with CTkLabel alone.
-        # Left unplaced (invisible) until the row starts running.
+        # While a row is running its description is rendered by TWO stacked
+        # raw tkinter.Canvases, not by description_label — see
+        # _paint_row_canvas for the full why. Short version: the moving fill
+        # edge has to cut a glyph in half, so the text either side of it must
+        # come from the *same* renderer at the *same* coordinates, or the two
+        # halves don't line up. `base_canvas` spans the whole description
+        # region in the row's grey; `progress_canvas` is the same drawing
+        # clipped to `fill_width` in the theme's primary. Both draw their text
+        # via create_text at identical local coords with the same font, so the
+        # halves are pixel-identical by construction. Both sit unplaced
+        # (invisible) until the row actually starts running.
+        #
+        # A raw Canvas is what makes the clip possible at all: it genuinely
+        # crops whatever it draws to its configured width/height, unlike
+        # CTkLabel, which silently ignores a width smaller than its natural
+        # text size (confirmed empirically — see CLAUDE.md).
         char_font = description_label.cget("font")
+        backdrop = self._row_backdrop_bg(row)
+        base_canvas = tkinter.Canvas(
+            master=row, bg=backdrop, highlightthickness=0, bd=0
+        )
+        base_text_item = base_canvas.create_text(
+            0, 0, anchor="w", text=description, fill=self._grey_row_text(), font=char_font
+        )
         progress_canvas = tkinter.Canvas(
-            master=row, bg=_THEME["primary"], highlightthickness=0, bd=0
+            master=row, bg=backdrop, highlightthickness=0, bd=0
         )
         progress_text_item = progress_canvas.create_text(
-            0, 0, anchor="w", text=description, fill="black", font=char_font
+            0, 0, anchor="w", text=description, fill=_THEME["primary_text"], font=char_font
         )
 
         thumb_label = ctk.CTkLabel(master=row, text="", width=_THUMB_SIZE[0], height=_THUMB_SIZE[1])
@@ -226,6 +256,8 @@ class QueueTab(ctk.CTkFrame):
         self._rows[task_id] = {
             "frame": row,
             "description_label": description_label,
+            "base_canvas": base_canvas,
+            "base_text_item": base_text_item,
             "progress_canvas": progress_canvas,
             "progress_text_item": progress_text_item,
             "status_label": status_label,
@@ -236,6 +268,37 @@ class QueueTab(ctk.CTkFrame):
         self._apply_row_style(task_id)
         self._update_overall_progress()
         return task_id
+
+    @staticmethod
+    def _flatten_color(color):
+        """Picks the light or dark half of a CTk (light, dark) color pair for
+        the current appearance mode — a raw tkinter.Canvas can only take a
+        single Tk color, never a pair. Passes a plain string through."""
+        if isinstance(color, (list, tuple)):
+            return color[0] if ctk.get_appearance_mode() == "Light" else color[1]
+        return color
+
+    def _grey_row_text(self):
+        """The label color a running (grey) row's text uses, flattened to a
+        single Tk color — base_canvas has to reproduce description_label's
+        appearance exactly, so it reads the same CTk default the label does."""
+        return self._flatten_color(ctk.ThemeManager.theme["CTkLabel"]["text_color"])
+
+    def _row_backdrop_bg(self, row_frame):
+        """The color visible *behind* a task row — i.e. what shows through the
+        row's own rounded-corner cutouts. CTk already resolves this for every
+        frame as its `bg_color` (the color it paints outside the rounded
+        rectangle it draws in `fg_color`), so we just ask the row for it.
+
+        This is what progress_canvas uses as its Tk `bg`, and it matters: the
+        canvas is a hard rectangle covering the row's left end, and the only
+        pixels of it left unpainted by the fill are the two corner nooks
+        outside the fill's rounded left corners. Painting those the *row's*
+        grey (as this used to) filled the row's own corner cutouts with a
+        solid block, so a running row read as a square grey box with a
+        rounded fill floating inside it. Painting them the backdrop instead
+        leaves the row looking rounded on all four corners, fill or no fill."""
+        return self._flatten_color(row_frame.cget("bg_color"))
 
     def _load_thumbnail(self, thumb_label, input_file):
         """Extracts a small preview frame from the task's input file, if any."""
@@ -256,14 +319,18 @@ class QueueTab(ctk.CTkFrame):
             return
 
         status = row["status_label"].cget("text")
+        # Both canvases only ever exist to draw a running row; hiding them
+        # hands the description back to description_label's own rendering.
         if status == "Queued":
             style = _QUEUED_STYLE
+            row["base_canvas"].place_forget()
             row["progress_canvas"].place_forget()
         else:
             style = _GREY_STYLE
             if status == "Done":
+                row["base_canvas"].place_forget()
                 row["progress_canvas"].place_forget()
-            # else: mid-run — _animate_progress owns progress_canvas's geometry
+            # else: mid-run — _animate_progress owns both canvases' geometry
 
         text_color = style["text"] or ctk.ThemeManager.theme["CTkLabel"]["text_color"]
         remove_text_color = style["remove_text"] or ctk.ThemeManager.theme["CTkButton"]["text_color"]
@@ -285,13 +352,28 @@ class QueueTab(ctk.CTkFrame):
         _THEME = get_active_theme()
         _QUEUED_STYLE["bg"] = _THEME["primary"]
         _QUEUED_STYLE["remove_hover"] = _THEME["primary_hover"]
+        # Adaptive label color (black/white) for the new primary — picked up
+        # per row by _apply_row_style below, which reads these keys every call.
+        _QUEUED_STYLE["text"] = _THEME["primary_text"]
+        _QUEUED_STYLE["remove_text"] = _THEME["primary_text"]
 
         self.progress_bar.configure(progress_color=_THEME["primary"])
-        self.clear_btn.configure(fg_color=_THEME["secondary"], hover_color=_THEME["secondary_hover"])
-        self.start_all_btn.configure(fg_color=_THEME["primary"], hover_color=_THEME["primary_hover"])
+        for button in (self.clear_btn, self.clear_all_btn):
+            button.configure(
+                fg_color=_THEME["secondary"], hover_color=_THEME["secondary_hover"],
+                text_color=_THEME["secondary_text"],
+            )
+        self.start_all_btn.configure(
+            fg_color=_THEME["primary"], hover_color=_THEME["primary_hover"],
+            text_color=_THEME["primary_text"],
+        )
 
         for task_id, row in self._rows.items():
-            row["progress_canvas"].configure(bg=_THEME["primary"])
+            backdrop = self._row_backdrop_bg(row["frame"])
+            row["base_canvas"].configure(bg=backdrop)
+            row["base_canvas"].itemconfigure(row["base_text_item"], fill=self._grey_row_text())
+            row["progress_canvas"].configure(bg=backdrop)
+            row["progress_canvas"].itemconfigure(row["progress_text_item"], fill=_THEME["primary_text"])
             self._apply_row_style(task_id)
 
     def _show_details(self, task_id):
@@ -344,8 +426,21 @@ class QueueTab(ctk.CTkFrame):
         done = sum(1 for row in self._rows.values() if row["status_label"].cget("text") == "Done")
         self.progress_bar.set(done / total)
 
-    def _on_hide(self):
-        """Resets a fully-completed overall progress bar when this tab is switched away from."""
+    def is_running(self):
+        """Whether the queue is actively processing right now."""
+        return self._is_running
+
+    def pending_task_count(self):
+        """How many tasks would be lost if the app closed right now — i.e.
+        everything not yet Done, whether it's mid-run or still Queued behind
+        it. Read by LlamaGUI.on_close to decide whether to confirm."""
+        return sum(1 for row in self._rows.values() if row["status_label"].cget("text") != "Done")
+
+    def on_leave(self):
+        """Called by LlamaGUI.show_tab when switching to a *different* tab
+        (not on a Queue->Queue re-click, not on minimize). Resets the
+        overall progress bar only if it was sitting at a completed 100%, so
+        a finished batch doesn't linger as a stale full bar."""
         if self.progress_bar.get() >= 1.0:
             self.progress_bar.set(0)
 
@@ -361,6 +456,25 @@ class QueueTab(ctk.CTkFrame):
         for task_id, row in list(self._rows.items()):
             if row["status_label"].cget("text") == "Done":
                 self.remove_task(task_id)
+
+    def clear_all(self):
+        """Empties the queue outright. Confirms first if anything unfinished
+        would be thrown away (same reasoning as the close prompt — queued work
+        shouldn't vanish on a stray click), then halts processing before
+        removing rows so no animation tick can fire against a dead row."""
+        pending = self.pending_task_count()
+        if pending:
+            plural = "job" if pending == 1 else "jobs"
+            if not ask_yes_no(
+                self.app,
+                "Clear the whole queue?",
+                f"{pending} unfinished {plural} would be cancelled and removed.\n\n"
+                "Clear the queue anyway?",
+            ):
+                return
+        self.stop_queue()
+        for task_id in list(self._rows):
+            self.remove_task(task_id)
 
     def _set_running(self, is_running):
         self._is_running = is_running
@@ -432,29 +546,75 @@ class QueueTab(ctk.CTkFrame):
 
         self._animate_progress(task_id, 0, rest)
 
-    def _update_progress_canvas(self, row, fill_width, row_height):
-        """Resizes progress_canvas to `fill_width` pixels wide (its own bg
-        is the theme's primary fill color) and repositions its text item to
-        description_label's current spot. `fill_width` is the one and only
-        number driving both the visible fill width and the text clip edge —
-        there's no second, independently-computed width for it to ever
-        disagree with (that used to be two separate widgets — see
-        CLAUDE.md's "Pixel-accurate progress-text clip" section for why
-        that needed extra care to keep in sync). Hides the canvas entirely
-        once `fill_width` is 0 or less."""
-        canvas = row["progress_canvas"]
-        if fill_width <= 0:
-            canvas.place_forget()
-            return
+    def _paint_row_canvas(self, canvas, text_item, w, h, color, backdrop, text_xy):
+        """Draws one of a running row's two stacked canvases: a `w`x`h` block
+        of `color` with its two LEFT corners rounded (radius _ROW_CORNER,
+        echoing the row) and a square right edge, with `text_item` raised on
+        top at `text_xy`.
 
-        label = row["description_label"]
-        label_x = label.winfo_x()
-        label_y = label.winfo_y()
-        label_height = label.winfo_height()
-
-        canvas.configure(width=fill_width, height=row_height)
-        canvas.coords(row["progress_text_item"], label_x, label_y + label_height / 2)
+        The right edge stays square because on the fill canvas it's mid-row
+        and moving — a rounded end there would read as a floating blob. The
+        shape is a body rectangle plus a left edge-strip and two
+        quarter-circle pieslices rather than one smooth-spline polygon; the
+        spline version bowed the straight edges into visible curves. The only
+        pixels of the canvas the shape leaves unpainted are the two ~8px
+        corner nooks outside the arcs, which is why `backdrop` (not the row's
+        grey) is the canvas bg — see _row_backdrop_bg."""
+        r = min(_ROW_CORNER, w, h // 2)  # don't let the corners exceed the shape
+        canvas.configure(width=w, height=h, bg=backdrop)
+        canvas.delete("shape")
+        canvas.create_rectangle(r, 0, w, h, fill=color, outline=color, tags="shape")
+        canvas.create_rectangle(0, r, r, h - r, fill=color, outline=color, tags="shape")
+        canvas.create_arc(
+            0, 0, 2 * r, 2 * r, start=90, extent=90, style="pieslice",
+            fill=color, outline=color, tags="shape",
+        )
+        canvas.create_arc(
+            0, h - 2 * r, 2 * r, h, start=180, extent=90, style="pieslice",
+            fill=color, outline=color, tags="shape",
+        )
+        canvas.tag_raise(text_item)
+        canvas.coords(text_item, *text_xy)
         canvas.place(x=0, y=0)
+
+    def _paint_progress(self, row, fill_width, max_fill_width, row_height):
+        """Repaints a running row's description area as two stacked canvases:
+        `base_canvas` (the row's grey, spanning the whole description region)
+        with `progress_canvas` (the theme's primary, clipped to `fill_width`)
+        on top. Both draw their own copy of the description text at the same
+        local coordinates in the same font, so the fill edge can cut a glyph
+        in half and the two halves still line up exactly.
+
+        That stacking is the whole point. This used to be one canvas drawn
+        over `description_label`, letting the fill edge fall between a
+        *canvas*-rendered glyph half and a *CTkLabel*-rendered one — and
+        those two renderers don't agree: measured against each other, the
+        canvas copy landed exactly 1px right and 1px down of the label's,
+        so every glyph the edge crossed visibly sheared. Covering the label
+        entirely with base_canvas means the seam is now only ever between
+        two canvases, which can't disagree. (The label still owns the row's
+        layout, and still renders the text itself while the row is Queued or
+        Done, when both canvases are hidden.)"""
+        label = row["description_label"]
+        # Canvases are placed at row-local (0,0), so label coords are already
+        # canvas coords — no translation needed, and both canvases get the
+        # identical value.
+        text_xy = (label.winfo_x(), label.winfo_y() + label.winfo_height() / 2)
+        backdrop = self._row_backdrop_bg(row["frame"])
+
+        self._paint_row_canvas(
+            row["base_canvas"], row["base_text_item"], max_fill_width, row_height,
+            self._flatten_color(_GREY_STYLE["bg"]), backdrop, text_xy,
+        )
+        # Stay hidden until the fill is at least as wide as the corner radius,
+        # so it never flashes a partial square corner on the way in.
+        if fill_width < _ROW_CORNER:
+            row["progress_canvas"].place_forget()
+            return
+        self._paint_row_canvas(
+            row["progress_canvas"], row["progress_text_item"], fill_width, row_height,
+            _THEME["primary"], backdrop, text_xy,
+        )
 
     def _animate_progress(self, task_id, step, rest):
         """Simulated per-job progress — replace with real ffmpeg progress
@@ -481,7 +641,7 @@ class QueueTab(ctk.CTkFrame):
         # recoloring on every other widget in the row.
         max_fill_width = row["status_label"].winfo_x()
         fill_width = round(fraction * max_fill_width)
-        self._update_progress_canvas(row, fill_width, row_height)
+        self._paint_progress(row, fill_width, max_fill_width, row_height)
 
         if step >= _PROGRESS_STEPS:
             self._paused_state = None

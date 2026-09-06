@@ -20,6 +20,15 @@ _GENERATED_THEME_DIR = os.path.join(_REPO_ROOT, "_generated_themes")
 _CTK_ACCENT = ["#3B8ED0", "#1F6AA5"]
 _CTK_ACCENT_HOVER = ["#36719F", "#144870"]
 _CTK_ACCENT_PRESSED = ["#27577D", "#203A4F"]
+# The flat near-white pair CTk uses for label text that sits *on* an accent
+# fill — CTkButton, CTkOptionMenu, and CTkSegmentedButton's `text_color`
+# (confirmed by dumping blue.json: it appears in exactly those three spots,
+# every other `text_color` is the adaptive `["gray10", "#DCE4EE"]` pair for
+# text on the window background, which must stay untouched). Since those
+# three fills all become `secondary`, this pair becomes readable_text_on
+# (secondary) — otherwise a light secondary (e.g. Shire's #DAE2ED) leaves
+# near-white text on a near-white button, i.e. invisible.
+_CTK_ACCENT_TEXT = ["#DCE4EE", "#DCE4EE"]
 
 DEFAULT_THEME_NAME = "Lemon"
 
@@ -37,6 +46,10 @@ THEMES = {
     "Lemon": {"primary": "#FDCA3C", "primary_hover": "#e0b234", "secondary": "#3B8ED0"},
     "Cupid": {"primary": "#FA6E99", "secondary": "#780219"},
     "Lilac": {"primary": "#a58fd7", "secondary": "#3e6d04"},
+    "Ranger": {"primary":"#F98524", "secondary": "#104E4B" },
+    "Noir": {"primary": "#131317", "secondary": "#5A5B63"},
+    "Luck": {"primary": "#ADBCDE", "secondary": "#0E5914"},
+    "Vaporwave": {"primary": "#3B41B8", "secondary": "#ED72D4"}
 }
 
 
@@ -50,24 +63,65 @@ def _darken(hex_color, factor=0.87):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def _relative_luminance(hex_color):
+    """WCAG 2.x relative luminance of an "#rrggbb" color, in [0, 1]."""
+    hex_color = hex_color.lstrip("#")
+    channels = (int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    linear = [
+        c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        for c in channels
+    ]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def readable_text_on(hex_color):
+    """Returns "black" or "white" — whichever has the higher WCAG contrast
+    ratio against hex_color. This is what lets every theme's primary/
+    secondary color carry legible text without a hand-picked per-theme text
+    color: pale primaries (Lemon's yellow, Cupid's pink) get black text,
+    and a near-black primary like Noir's #131317 gets white instead."""
+    lum = _relative_luminance(hex_color)
+    contrast_black = (lum + 0.05) / 0.05
+    contrast_white = 1.05 / (lum + 0.05)
+    return "black" if contrast_black >= contrast_white else "white"
+
+
 def get_theme(name=None):
     """Returns the full color palette for a theme name — primary/
-    primary_hover/secondary/secondary_hover — falling back to the default
-    theme for an unknown or missing name."""
+    primary_hover/primary_text/secondary/secondary_hover/secondary_text —
+    falling back to the default theme for an unknown or missing name. The
+    *_text entries are derived (see readable_text_on), not stored in THEMES,
+    so adding a palette never needs a matching text color hand-picked."""
     colors = THEMES.get(name, THEMES[DEFAULT_THEME_NAME])
     return {
         "primary": colors["primary"],
         "primary_hover": colors.get("primary_hover") or _darken(colors["primary"]),
+        "primary_text": readable_text_on(colors["primary"]),
         "secondary": colors["secondary"],
         "secondary_hover": colors.get("secondary_hover") or _darken(colors["secondary"]),
+        "secondary_text": readable_text_on(colors["secondary"]),
     }
+
+
+def default_output_dir():
+    """The out-of-the-box export folder — `<user home>/Videos/LlamaMXD
+    Export`. Used as `default_save_location`'s fallback on a fresh install
+    (no settings.json yet); the folder itself is created lazily by
+    LlamaGUI.__init__, not here."""
+    return os.path.join(os.path.expanduser("~"), "Videos", "LlamaMXD Export")
 
 
 def load_settings():
     """Reads persisted app settings (theme, appearance mode, default save
-    location), filling in defaults for anything missing or if the file
-    doesn't exist yet (e.g. first run)."""
-    settings = {"theme": DEFAULT_THEME_NAME, "appearance_mode": "System", "default_save_location": ""}
+    location, GPU acceleration), filling in defaults for anything missing or
+    if the file doesn't exist yet (e.g. first run). Appearance mode defaults
+    to "System"; default save location defaults to default_output_dir()."""
+    settings = {
+        "theme": DEFAULT_THEME_NAME,
+        "appearance_mode": "System",
+        "default_save_location": default_output_dir(),
+        "gpu_enabled": True,
+    }
     if not os.path.exists(_SETTINGS_PATH):
         return settings
     try:
@@ -92,17 +146,20 @@ def get_active_theme():
     return get_theme(load_settings().get("theme"))
 
 
-def _substitute_ctk_accents(node, secondary, secondary_hover, secondary_pressed):
+def _substitute_ctk_accents(node, secondary, secondary_hover, secondary_pressed, secondary_text):
     """Recursively walks a CTk theme JSON structure, replacing every
     occurrence of CTk's own hardcoded accent-blue value pairs with the
     given theme's secondary colors (flattened to a single shade repeated
     for both the light and dark slots, so appearance mode never changes
-    them) — everything else (backgrounds, borders, neutral greys, corner
-    radii) is left exactly as CTk's own bundled theme defines it, since
-    only the accent color role is part of "the theme" here."""
+    them), and CTk's on-accent label color with `secondary_text` (the
+    adaptive black/white for that secondary) — everything else
+    (backgrounds, borders, neutral greys, corner radii, and the separate
+    text-on-window-background color) is left exactly as CTk's own bundled
+    theme defines it, since only the accent color role is part of "the
+    theme" here."""
     if isinstance(node, dict):
         return {
-            key: _substitute_ctk_accents(value, secondary, secondary_hover, secondary_pressed)
+            key: _substitute_ctk_accents(value, secondary, secondary_hover, secondary_pressed, secondary_text)
             for key, value in node.items()
         }
     if isinstance(node, list):
@@ -112,6 +169,8 @@ def _substitute_ctk_accents(node, secondary, secondary_hover, secondary_pressed)
             return [secondary_hover, secondary_hover]
         if node == _CTK_ACCENT_PRESSED:
             return [secondary_pressed, secondary_pressed]
+        if node == _CTK_ACCENT_TEXT:
+            return [secondary_text, secondary_text]
         return node
     return node
 
@@ -134,7 +193,8 @@ def _ctk_theme_path(theme_name):
 
     secondary_pressed = _darken(palette["secondary_hover"])
     generated_theme = _substitute_ctk_accents(
-        base_theme, palette["secondary"], palette["secondary_hover"], secondary_pressed
+        base_theme, palette["secondary"], palette["secondary_hover"],
+        secondary_pressed, palette["secondary_text"],
     )
 
     with open(generated_path, "w") as f:

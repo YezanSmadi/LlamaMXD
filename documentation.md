@@ -22,9 +22,12 @@ LlamaPY GUI/
 │   ├── theme.py
 │   └── utilities.py
 ├── components/
+│   ├── dialogs.py
 │   ├── drop_box.py
+│   ├── dropdown.py
 │   ├── sidebar.py
-│   └── time_spinner.py
+│   ├── time_spinner.py
+│   └── toast.py
 └── tabs/
     ├── muxing_tab.py
     ├── encoding_tab.py
@@ -80,8 +83,8 @@ the software is released with no copyright restrictions and no warranty.
 
 ### `.gitignore`
 
-Excludes Python bytecode/cache artifacts and virtual environment
-directories from version control:
+Excludes Python bytecode/cache artifacts, virtual environment directories,
+and the two local-only generated files from version control:
 
 ```
 __pycache__/
@@ -90,7 +93,14 @@ __pycache__/
 *.pyd
 .venv/
 venv/
+settings.json
+_generated_themes/
 ```
+
+`settings.json` is the per-user preference file written by the Settings tab
+(see `core/theme.py` and `tabs/settings_tab.py` below); `_generated_themes/`
+holds the CTk theme JSON files `core/theme.py` builds on demand. Both are
+machine-local build/runtime artifacts, not shared repo state.
 
 ### `.vscode/settings.json`
 
@@ -152,12 +162,15 @@ interpreter instance.
   starting directory for Encoding/Muxing's save dialogs when no input file
   is loaded yet — read from `core.theme.load_settings()`, so it survives a
   restart once the Settings tab's Save button has written it),
-  `self.tab_ui_registry` (a list of per-tab UI hooks — see
-  `register_tab_ui` below), `self._tab_indicator_job` (an `after()` job
-  id used to debounce the tab indicator's positioning — see below), and
-  `self._current_tab_name` (starts as `"Muxing"`, kept in sync by
+  `self.gpu_enabled` (the global hardware-acceleration preference, moved off
+  the Encoding tab onto Settings), `self.tab_ui_registry` (a list of per-tab
+  UI hooks — see `register_tab_ui` below), `self._tab_indicator_job` (an
+  `after()` job id used to debounce the tab indicator's positioning — see
+  below), `self._current_tab_name` (starts as `"Muxing"`, kept in sync by
   `show_tab` — this is what lets `apply_theme` re-show whichever tab was
-  active before a live theme rebuild).
+  active before a live theme rebuild), and `self.toasts` (a `ToastManager`,
+  built before the tabs so anything constructed below can post a
+  notification).
 - Calls `apply_ctk_theme(load_settings()["theme"])` (from `core/theme.py`)
   *before* constructing any widget below — this loads (generating on first
   use) a CTk theme JSON where every default-styled widget's accent color
@@ -166,15 +179,15 @@ interpreter instance.
   up from their very first construction.
 - Constructs `self.sidebar` (a `Sidebar` instance) and grids it into column
   0.
-- Constructs `self.tab_indicator`: a flat, unrounded `CTkFrame` colored
-  with the active theme's primary color (`core.theme.get_active_theme()
-  ["primary"]` — see `core/theme.py` below), immediately `.lower()`ed so it
-  renders behind everything else that might overlap it. This is the
-  active-tab accent strip described in `CLAUDE.md` — a sliver of the brand
-  color that pokes out from behind the sidebar next to whichever nav
-  button is currently selected. It's positioned with `.place()`
-  (independent of the grid), not packed or
-  gridded.
+- Constructs the active-tab indicator: `self.tab_indicator`, a flat
+  (`corner_radius=0`) `CTkFrame` in the active theme's primary color, and
+  `self.tab_indicator_line`, a narrower band in the secondary color that
+  crosses it through the vertical middle. Both are positioned with `.place()`
+  (independent of the grid), not packed or gridded. Both also pin `bg_color`
+  to the primary rather than leaving it at its default: CTk floors a drawn
+  shape to an even number of pixels, and any strip of raw canvas that leaves
+  exposed paints `bg_color`, which defaulted to a snapshot of the dark root
+  window and showed as a dark line under the pipe.
 - Builds `self.tabs`, a `dict` mapping tab name → tab instance, constructing
   all five tabs eagerly at startup: `MuxingTab`, `EncodingTab`, `QueueTab`,
   `YtDlpTab`, `SettingsTab` — each is given `master=self, app=self`.
@@ -199,7 +212,9 @@ whitespace; if the result is empty, bails out. Otherwise:
    with it.
 4. Walks every tab in `self.tabs`, and for any tab that has a `drop_box`
    attribute, calls `tab.drop_box.hide_drop_text()` (collapsing that tab's
-   drop-target hint/border now that a file is selected).
+   drop-target hint/border now that a file is selected); for any tab
+   exposing `_autofill_output_path`, calls it so the suggested output path
+   updates for the newly-selected input.
 
 `show_tab(self, name)`: records `name` into `self._current_tab_name`, then
 `grid_forget()`s every tab, then `grid()`s only the
@@ -215,14 +230,33 @@ haven't been mapped onscreen yet and `winfo_height()` on them would return a
 stale placeholder even after `update_idletasks()`.
 
 `_update_tab_indicator(self, name)`: Looks up the sidebar button for `name`
-via `self.sidebar.buttons`, calls `update_idletasks()` to force fresh
-geometry, then sizes `self.tab_indicator` to `width=24,
-height=button.winfo_height()` (via `.configure()`, since CTk widgets don't
-accept width/height through `.place()`) and places it at
-`x=sidebar_width - 8, y=button.winfo_y()` — straddling the sidebar/content
-seam so it's invisible over the sidebar (both are the same theme primary
-color) and hidden under the tab frame's left edge, leaving only a thin
-visible sliver.
+via `self.sidebar.buttons`, then sizes and places both indicator pieces (via
+`.configure()` for width/height, since CTk widgets don't accept those through
+`.place()`). The strip runs from the button's right edge (`button_x +
+button_w`) to the tab frame's left edge (`sidebar_width + 10`, matching
+`show_tab`'s padx), at the button's own height; the band is 8px tall, same
+horizontal span, centered on the button. Both are `.lift()`ed. Because the
+strip is primary-on-primary against the sidebar, only the part crossing the
+gutter is actually visible.
+
+Three details are load-bearing here:
+- The strip starts *at* the button's right edge rather than overlapping into
+  it. The pipes are square-cornered, so any overlap would square off the
+  active button's own rounded corner. At mid-height the button's rounded edge
+  has reached its full bounding width, so the two still meet flush.
+- The band's height must stay **even**. CTk floors a drawn shape's dimensions
+  to the nearest even number, so at its original 9px it painted 8 rows and
+  left the 9th showing the widget's raw canvas — a 1px dark line that read as
+  a drop shadow.
+- `update_idletasks()` is called **only** when the button's geometry is still
+  the 1px placeholder, not unconditionally. That call synchronously
+  re-lays-out and redraws the whole window; profiling measured it at ~47ms,
+  28% of the cost of a tab switch, paid every switch for a geometry answer
+  the 50ms defer above has already made valid.
+
+`notify(self, message, go_to_queue=True)`: posts a notification toast through
+`self.toasts`. By default clicking it jumps to the Queue tab, since every
+notification so far concerns a job that landed there.
 
 `apply_theme(self, theme_name)`: makes a theme switch actually live, no
 restart, called from `SettingsTab._on_save` when the theme changed. Since
@@ -231,7 +265,9 @@ apply_ctk_theme`) only affects widgets constructed *after* the call, the
 only way to make CTk-default-styled widgets (checkboxes, switches,
 sliders, dropdowns, the sidebar's nav buttons) genuinely change color live
 is to reload the theme and then reconstruct the widgets that read it:
-1. `apply_ctk_theme(theme_name)` — reload CTk's default theme.
+1. `apply_ctk_theme(theme_name)` — reload CTk's default theme, then
+   `self.toasts.clear()`, since live toasts are positioned against tab frames
+   that are about to be destroyed and carry the outgoing palette.
 2. Snapshot `Muxing`/`Encoding`'s current field values via
    `_gather_settings()`, and the currently-active tab name.
 3. `.destroy()` the sidebar, the tab indicator, and the `Muxing`/
@@ -249,9 +285,17 @@ is to reload the theme and then reconstruct the widgets that read it:
 7. `self.show_tab(active_tab_name)` — re-show whatever was on screen
    before the rebuild.
 
-`on_close(self)`: Calls `self.destroy()` then `sys.exit(0)` — a clean full
-process exit on window close, rather than leaving the Python process
-lingering.
+`on_close(self)`: Bound to the OS close button. Asks
+`QueueTab.pending_task_count()` how many tasks are not yet `Done`; if any
+are, it **pauses the queue**, raises a Yes/No confirmation
+(`components.dialogs.ask_yes_no`) saying that closing would cancel them, and
+either proceeds or resumes processing and returns. Pausing matters twice
+over: without it a job would keep animating (and could finish) behind a
+modal dialog asking whether to cancel it, and `pause_queue` — unlike
+`stop_queue` — keeps the in-flight task's progress in `_paused_state`, so
+`start_queue` resumes from the exact step it left off at. Once confirmed (or
+if nothing was pending) it calls `self.destroy()` then `sys.exit(0)` — a
+clean full process exit rather than leaving the Python process lingering.
 
 ### `core/theme.py`
 
@@ -259,7 +303,7 @@ The app's central color-theming and settings-persistence module. Every
 other file that used to hardcode the brand yellow (`"#FDCA3C"`) now imports
 from here instead.
 
-**`THEMES`**: a dict of three named palettes, each a `{"primary": ...,
+**`THEMES`**: a dict of seven named palettes, each a `{"primary": ...,
 "secondary": ...}` pair of flat hex strings (plus an optional
 `"primary_hover"` override, used only by `"Lemon"`):
 
@@ -268,7 +312,14 @@ from here instead.
   flattened to a single shade (CTk's own default varies it between light
   and dark mode; this app's theme colors deliberately never do).
 - `"Cupid"` — `#FA6E99` primary, `#780219` secondary.
-- `"Lilac"` — `#B769D6` primary, `#154D33` secondary.
+- `"Lilac"` — `#a58fd7` primary, `#3e6d04` secondary.
+- `"Ranger"` — `#F98524` primary, `#104E4B` secondary.
+- `"Noir"` — `#131317` primary, `#5A5B63` secondary. The near-black primary
+  is why text color is adaptive rather than hardcoded (see
+  `readable_text_on` below) — on this theme the label color resolves to
+  white on the primary.
+- `"Luck"` — `#ADBCDE` primary, `#0E5914` secondary.
+- `"Vaporwave"` — `#3B41B8` primary, `#ED72D4` secondary.
 
 **`_darken(hex_color, factor=0.87)`**: returns a slightly-darker shade of a
 given hex color for hover states, by scaling each RGB channel down by
@@ -276,11 +327,29 @@ given hex color for hover states, by scaling each RGB channel down by
 implicit in the brand yellow's pre-existing, hand-picked hover
 (`#FDCA3C` → `#e0b234`).
 
-**`get_theme(name=None)`**: returns the *full* four-color palette for a
-theme name — `primary`, `primary_hover`, `secondary`, `secondary_hover` —
-filling in any missing hover color via `_darken()`. Falls back to
-`DEFAULT_THEME_NAME` (`"Lemon"`) for an unrecognized or `None` name, so
-callers never need to guard against a bad theme name themselves.
+**`_relative_luminance(hex_color)`**: the WCAG 2.x relative luminance of an
+`#rrggbb` color as a float in `[0, 1]` — each channel normalized to `[0,1]`,
+gamma-expanded (`c/12.92` below the 0.03928 knee, `((c+0.055)/1.055)**2.4`
+above it), then combined `0.2126 R + 0.7152 G + 0.0722 B`.
+
+**`readable_text_on(hex_color)`**: returns `"black"` or `"white"` —
+whichever has the higher WCAG contrast ratio against `hex_color`
+(`contrast_black = (L+0.05)/0.05` vs `contrast_white = 1.05/(L+0.05)`, where
+`L` is `_relative_luminance`). This is what lets any theme's primary/
+secondary color carry legible text without a hand-picked per-theme text
+color. Public (no leading underscore) because `queue_tab.py` also calls it
+directly for the Stop Queue button's fixed red.
+
+**`get_theme(name=None)`**: returns the *full* palette for a theme name —
+`primary`, `primary_hover`, `primary_text`, `secondary`, `secondary_hover`,
+`secondary_text` — filling in any missing hover color via `_darken()` and
+deriving the two `*_text` entries via `readable_text_on()` (they are *not*
+stored in `THEMES`, so adding a palette never needs a matching text color
+picked by hand). Falls back to `DEFAULT_THEME_NAME` (`"Lemon"`) for an
+unrecognized or `None` name, so callers never need to guard against a bad
+theme name themselves. Current `*_text` results: black on every primary
+except `Noir` (white); white on every secondary except `Lemon`'s brighter
+`#3B8ED0` (black).
 
 **`load_settings()` / `save_settings(settings)`**: read/write a small
 `settings.json` file at the repo root (derived from this file's own
@@ -355,6 +424,155 @@ re-decoding the video itself).
 
 ## `components/` — reusable, tab-agnostic widgets
 
+### `components/dialogs.py`
+
+Defines the app's modal message boxes. Custom CTk widgets rather than
+`tkinter.messagebox` because the native Windows dialogs ignore the app's
+theme entirely, and the whole look here is theme-driven.
+
+**Class `MessageDialog(ctk.CTkToplevel)`** —
+`__init__(self, app, title, message, buttons=("OK",))` builds a fixed-size,
+non-resizable toplevel holding a bold title label, a wrapped message label,
+and one button per entry in `buttons`. The **first** button is treated as the
+affirmative one and gets the theme's `primary`; the rest get `secondary`.
+`.result` holds the label of whichever button was pressed, or `None` if the
+window was closed outright.
+
+Ordering details that matter:
+- `grab_set()` raises *"window not viewable"* if called before the toplevel
+  is mapped, so modality is claimed only after `deiconify()` +
+  `wait_visibility()`.
+- CTk re-applies its own titlebar styling roughly 200ms after construction,
+  which clobbers an icon set immediately — so `_apply_icon` runs from an
+  `after(250, ...)`, wrapped in a bare `except` since a missing `llama.ico`
+  must never take a dialog down with it.
+- `<Return>` confirms (first button); `<Escape>` and the titlebar close box
+  both resolve to `None`.
+
+`_center_on(app)` positions the dialog over the main window (horizontally
+centered, one third of the way down). `show()` blocks via
+`self.master.wait_window(self)` and returns `.result`.
+
+Two module-level helpers wrap it: `show_message(app, title, message)` for a
+single-OK notice, and `ask_yes_no(app, title, message)` which returns `True`
+**only** on an explicit `"Yes"` — every other outcome, including Escape and
+the close box, counts as No, so a dismissed confirmation can never destroy
+work. Used for: no input file, no save location (both from
+`_validate_settings` in Muxing/Encoding), the close confirmation in
+`LlamaGUI.on_close`, and `QueueTab.clear_all`.
+
+### `components/dropdown.py`
+
+Defines **`ThemedDropdown(ctk.CTkOptionMenu)`**, which every dropdown in the
+app uses — Theme and Appearance Mode on Settings, Profile and Level on
+Encoding. Don't add a bare `CTkOptionMenu`.
+
+It subclasses `CTkOptionMenu` for its button appearance but reassigns
+`self._open_dropdown_menu = self._toggle`, redirecting the click away from
+Tk's native popup to a custom in-window panel. Two reasons the native popup
+can't be used:
+1. It closes on almost any pointer event. This panel **stays open until an
+   explicit dismissal** — a click on the button again, or anywhere outside
+   the panel (`_on_global_click`, a `<Button-1>` binding added on the
+   toplevel with `add="+"` while open and removed by its funcid on close).
+   Moving the pointer off it does nothing.
+2. It can't report row hover. `on_hover` fires per row, which is what the
+   Settings tab's theme picker needs to live-preview a palette; the native
+   popup is modal on Windows and repaints nothing behind it, so a preview
+   there would be invisible.
+
+`command` is deliberately **not** passed to the base class — the native
+value-picking path never runs, so `_select` calls `set(value)` and then
+invokes the caller's callback itself.
+
+`self.panel` is a bordered, rounded `CTkFrame` holding one transparent
+`CTkButton` per value (exposed as `self.rows` for per-row styling). It is
+parented to the **toplevel**, not to the dropdown's own master, so it can
+float over anything beneath it — Tk's `place(in_=...)` accepts any target
+that is a descendant of the placed widget's parent, and the root is an
+ancestor of everything. The cost is that it isn't destroyed along with the
+tab that owns the dropdown, hence the `destroy()` override, which matters
+because a live theme switch rebuilds every tab.
+
+`open()` compares the panel's `reqheight` against the room below the button
+and **flips the panel upward when it doesn't fit**, placing with
+`anchor="sw"` at the button's top-left so the panel's bottom edge lands there
+and it grows upward. The window is fixed and fairly short, and Profile/Level
+sit two rows from its bottom edge, where a downward panel is clipped by the
+window with its last entries unreachable.
+
+### `components/toast.py`
+
+Defines the drop-down notifications, reached through `LlamaGUI.notify()`.
+
+**Class `Toast(tkinter.Toplevel)`** — a borderless notification that slides
+down from above the current tab frame's top-right corner, holds ~2.2s, then
+fades out and destroys itself. Clicking it runs `on_click` (in practice: jump
+to the Queue tab) and dismisses it immediately.
+
+It is a **separate window, not a frame inside the main one**, and that is
+what makes its rounded corners real. Tk has no per-pixel transparency for an
+in-window widget: a rounded `CTkFrame` must paint *something* in the four
+corner nooks outside its shape, and any flat colour chosen is only invisible
+where it happens to match — so as a child widget it showed grey corner
+squares wherever a toast overlapped a queue row or a thumbnail. A Toplevel
+can do better on Windows: `overrideredirect(True)` plus
+`-transparentcolor _TRANSPARENT_KEY` punches every pixel of that key colour
+clean out of the window. `-topmost` is also set, without which the main
+window rises above the toast the moment the user clicks anything — including
+the very button that posted it.
+
+- `_draw_body(color)` paints the rounded rectangle onto a raw
+  `tkinter.Canvas` — **not** a `CTkFrame`. A colour key only punches pixels
+  matching it *exactly*, and CTk anti-aliases its rounded corners against
+  `bg_color`; those blend pixels match neither fill nor key and survive as a
+  magenta fringe. Tk's canvas primitives don't anti-alias, so the shape is
+  built by hand (two overlapping rectangles forming a plus, plus a
+  quarter-circle pieslice in each corner) leaving every pixel exactly the
+  fill or exactly the key. The trade is slightly stair-stepped corners.
+- `_label_font()` returns the family and size CTk's own labels render at.
+  `ThemeManager.theme["CTkFont"]` stores a *positive* size but CTk applies it
+  as a **negative** Tk size (pixels, not points), so this negates it —
+  passing the positive value straight to a canvas renders noticeably larger
+  than every other label in the app.
+- `start(x, rest_y)` / `_slide` animate the window's screen position with an
+  ease-out; `move_to`/`reposition` snap it without animating.
+- `_fade(step, total, interval)` sets `-alpha` on the whole window. Real
+  alpha, replacing an earlier colour-interpolation fade that had to blend
+  toward an assumed backdrop (wrong for the same reason the corners were) and
+  cost a full CTk redraw per step. Both layered attributes apply together.
+- `retire()` cuts straight to a fast fade, skipping any remaining hold, and
+  sets `is_retiring` so the toast stops claiming a stack slot immediately
+  while staying visible for the length of that fade.
+- `dismiss()` cancels every pending `after()` id and destroys the window; it
+  is safe to call twice.
+
+**Class `ToastManager`** — owns the live toasts for a window, keeps them from
+overlapping, and bounds how much animation work can be in flight.
+
+`show(message, on_click=None)` anchors a new toast to the current tab frame's
+top-right corner in **screen** coordinates (`winfo_rootx/rooty`, since a
+toast is its own window). At most `_MAX_VISIBLE` (3) toasts hold a slot; a
+further arrival `retire()`s the oldest first. That cap is a performance fix,
+not a cosmetic one: every toast runs its own `after()` chain, so an uncapped
+stack turned button-mashing into dozens of concurrent timer chains competing
+with the UI thread. Measured as event-loop latency (how late a 10ms heartbeat
+actually fires) under 60 rapid notifications: **p90 79.7ms uncapped vs 6.1ms
+capped**, against a 6.0ms idle baseline.
+
+`forget()` (called by a toast as it dies) triggers `_relayout()`, which
+re-seats surviving slot-holders so a dismissed toast doesn't leave a hole —
+survivors *snap* rather than animating, since one more timer chain per
+survivor is exactly the cost being avoided. Retiring toasts are skipped;
+they stay put while they fade rather than making everything below them jump.
+
+Because a toast is a separate window it doesn't follow the main one, so the
+manager binds the app's `<Configure>` (re-anchor when the window is dragged)
+and `<Unmap>` (clear on minimize — they're topmost and would otherwise be
+left floating over the desktop). Both handlers check `event.widget is app`,
+since a toplevel binding also receives its descendants' events. `clear()`
+drops every live toast and is also called by `LlamaGUI.apply_theme`.
+
 ### `components/drop_box.py`
 
 Defines `DropBox(ctk.CTkFrame)`, a self-contained drag-and-drop / browse
@@ -398,9 +616,11 @@ Defines `Sidebar(ctk.CTkFrame)` — the persistent left-hand navigation panel.
 
 `__init__(self, master, app)`: Builds a fixed-width (`180`), unrounded
 frame colored with the active theme's primary color
-(`get_active_theme()["primary"]` — see `core/theme.py`). From top to
-bottom:
-1. `title_label` — bold "LlamaMXD" text in black.
+(`get_active_theme()["primary"]` — see `core/theme.py`). The palette is
+grabbed once as `theme` at the top so `title_label` and `footer_label` can
+use `theme["primary_text"]` (the adaptive black/white label color for that
+primary). From top to bottom:
+1. `title_label` — bold "LlamaMXD" text in `theme["primary_text"]`.
 2. `image_label` — the llama logo (`llama.png`, loaded via `PIL.Image.open`
    and wrapped as a 140×140 `CTkImage`).
 3. Four navigation buttons (`btn_tab1`–`btn_tab4`, labeled Muxing /
@@ -413,8 +633,9 @@ bottom:
    the moment it's packed*, so packing the spacer first would starve
    anything packed after it of space regardless of its own `side`.
    `footer_label` (copyright/version text, `"{year} Yezan Smadi
-   v0.5.0-alpha.1"`) is packed first so it claims the literal bottom edge;
-   `btn_settings` packs second, landing just above it.
+   v0.5.0-alpha.2"`, in `theme["primary_text"]`) is packed first so it
+   claims the literal bottom edge; `btn_settings` packs second, landing
+   just above it.
 5. `self.spacer` — a transparent, `fill="both", expand=True` frame packed
    *last*, consuming whatever vertical space is left between the nav button
    group above and the Settings button/footer below, visually separating
@@ -520,10 +741,11 @@ whatever space is left:
   row (`CTkEntry` + "Browse" button wired to `select_save_location`), and
   an `action_frame` with two evenly-split (`grid_columnconfigure(...,
   weight=1, uniform="action")`) buttons: `"Queue Task"` (the active theme's
-  *secondary* color, white text, `add_to_queue`) and `"Mux"` (the active
-  theme's *primary* color, black text, `mux_now`) — both read their colors
-  from `core.theme.get_active_theme()` at construction time rather than
-  hardcoding them (see `core/theme.py`).
+  *secondary* color + `secondary_text`, `add_to_queue`) and `"Mux"` (the
+  active theme's *primary* color + `primary_text`, `mux_now`) — fill, hover,
+  *and* label color all read from `core.theme.get_active_theme()` at
+  construction time rather than hardcoding them (see `core/theme.py`;
+  `*_text` is the adaptive black/white label color for that background).
 - `top_container` is packed *after*, `fill="both", expand=True`, absorbing
   all leftover vertical space. It holds a hidden-until-populated `label`
   (filename header) and `img_label` (thumbnail, double-click to reselect a
@@ -569,17 +791,22 @@ whatever space is left:
   previously-captured dict back into the UI (used if a queued task were
   ever re-opened for editing, though the "double-click to re-edit" feature
   this exists for was later removed from `QueueTab` — see below).
-- `_validate_settings(settings)`: returns `False` (and prints a message) if
-  `input_file` or `output_path` is empty; `True` otherwise.
+- `_validate_settings(settings)`: returns `False` if `input_file` or
+  `output_path` is empty, raising a modal `show_message` dialog (see
+  `components/dialogs.py`) naming the first thing missing — "No File
+  Selected" or "No Save Location". These used to be bare `print` calls, i.e.
+  invisible to the user.
 - `mux_now()`: gathers settings, validates them, builds a description
   string (`"{filename} · Direct Mux"`), and — if the Queue tab exists —
   calls `queue_tab.add_task(..., source_tab="Muxing")` immediately followed
   by `queue_tab.start_task(task_id)`, i.e. queues *and* starts it right
-  away. Falls back to printing a message if the Queue tab is somehow
-  unavailable.
+  away, then posts a "Muxing job has begun." toast via `app.notify`. Falls
+  back to printing a message if the Queue tab is somehow unavailable.
 - `add_to_queue()`: same settings-gathering/validation, but only queues the
   task (does not start it), with a description built from the clip's
-  start/duration instead (`"{filename} · {duration}s from {start}s"`).
+  start/duration instead (`"{filename} · {duration}s from {start}s"`), and
+  posts a "Job added to queue." toast. Clicking either toast jumps to the
+  Queue tab.
 
 ### `tabs/encoding_tab.py`
 
@@ -595,16 +822,19 @@ two-column control area and several extra encode-specific fields.
   location row beneath it, maximizing the DropBox's vertical room above).
 - **Left column**: the same Retain-Length checkbox + time spinners as
   Muxing, plus — new here — a Profile/Level codec-options row:
-  `profile_menu` (`CTkOptionMenu`, values `High/Main/Main 10/Baseline`) and
-  `level_menu` (values `4.0/4.1/5.0/5.1`).
-- **Right column**: two label-left `CTkSwitch` rows —
-  "Hardware Acceleration (GPU)" (`self.switch`) and "HDRtoSDR"
-  (`self.hdr_switch`) — each built with `text=""` and `width=42` so a
-  separate label can sit to its *left* instead of `CTkSwitch`'s default
+  `profile_menu` (a `ThemedDropdown`, values `High/Main/Main 10/Baseline`)
+  and `level_menu` (values `4.0/4.1/5.0/5.1`). Both sit two rows from the
+  window's bottom edge, which is why `ThemedDropdown` flips its panel upward
+  when there's no room below — see `components/dropdown.py`.
+- **Right column**: a label-left "HDRtoSDR" `CTkSwitch` row
+  (`self.hdr_switch`), built with `text=""` and `width=42` so a separate
+  label can sit to its *left* instead of `CTkSwitch`'s default
   label-on-the-right layout (a code comment explains `CTkSwitch`'s internal
   grid always reserves a weighted text column even with empty text, hence
-  the explicit narrow width); each label is bound to toggle its switch on
-  click. Beneath both switches sits a CRF ("Quality") slider
+  the explicit narrow width); the label is bound to toggle the switch on
+  click. A "Hardware Acceleration (GPU)" switch used to sit here too but is
+  now a global preference on the Settings tab, read as `self.app.gpu_enabled`
+  in `_gather_settings`. Beneath the switch sits a CRF ("Quality") slider
   (`crf_slider`, range 40→0 — deliberately reversed so low values read as
   low quality on the left and "Placebo" quality on the right — default 23),
   whose live value is mirrored into `crf_label`'s text via
@@ -619,8 +849,16 @@ Encoding. `load_settings` restores all of them, including re-running
 in sync.
 
 `encode_now()` / `add_to_queue()` mirror Muxing's `mux_now()`/
-`add_to_queue()` exactly, but pass `source_tab="Encoding"` and build
-descriptions with `"Direct Encode"` instead of `"Direct Mux"`.
+`add_to_queue()` exactly — same dialogs on invalid settings, same toasts on
+success — but pass `source_tab="Encoding"`, build descriptions with
+`"Direct Encode"` instead of `"Direct Mux"`, and say "Encoding job has
+begun."
+
+`_autofill_output_path()` (present on both tabs, called from
+`LlamaGUI.update_global_file`) suggests
+`"<default folder>/<input basename>_encoded.mp4"` in the output field, but
+only while the user hasn't set their own path — `self._auto_output` holds the
+last value auto-filled, and is set to `None` once the user picks via Browse.
 
 ### `tabs/queue_tab.py`
 
@@ -638,8 +876,14 @@ and fixed here; this section summarizes what the file currently contains.
   everywhere without needing to touch any other code.
 - `_QUEUED_STYLE` / `_GREY_STYLE`: two style dicts (`bg`, `text`,
   `remove_text`, `remove_hover`) describing how a row looks while queued
-  (solid theme primary color, black text) versus running/done (grey,
-  default theme text color).
+  (solid theme primary color, with `text`/`remove_text` set to the theme's
+  adaptive `primary_text`) versus running/done (grey, default theme text
+  color). `refresh_theme()` rewrites the `_QUEUED_STYLE` color keys in place
+  on a live theme switch.
+- `_STOP_RED` / `_STOP_RED_HOVER` / `_STOP_TEXT`: the Stop Queue button's
+  permanently-red fill/hover (never theme-driven), plus `_STOP_TEXT =
+  readable_text_on(_STOP_RED)` — the label still picks black/white for
+  contrast against that fixed red the same way themed colors do.
 - `_THUMB_SIZE = (60, 40)`: the small per-row thumbnail size.
 - `_PROGRESS_STEPS = 15`, `_PROGRESS_INTERVAL_MS = 100`: the simulated
   per-task animation runs 15 ticks at 100ms each (1.5s total).
@@ -668,11 +912,12 @@ and fixed here; this section summarizes what the file currently contains.
    `expand` — so it stays at its configured height regardless of content,
    letting Encode's longer field list scroll instead of growing the popup).
 4. `self.controls_frame` — bottom row with `"Clear Completed"` (the active
-   theme's secondary color, left-aligned), and, packed right-to-left,
-   `"Start Queue"`/`"Pause Queue"` (the active theme's primary color,
-   toggles via `_set_running`) and `"Stop Queue"` (red — the one
-   deliberate, theme-independent departure from the brand palette, chosen
-   to read as destructive; see `core/theme.py`).
+   theme's secondary color + `secondary_text` label, left-aligned), and,
+   packed right-to-left, `"Start Queue"`/`"Pause Queue"` (the active theme's
+   primary color + `primary_text` label, toggles via `_set_running`) and
+   `"Stop Queue"` (the fixed `_STOP_RED` — the one deliberate,
+   theme-independent fill departure from the brand palette, chosen to read
+   as destructive; its label still goes through `readable_text_on`).
    Also binds `<Unmap>` (tab switched away from) to `_on_hide`.
 
 **`add_task(description, settings=None, status="Queued", source_tab=
@@ -681,21 +926,32 @@ Each row (a `CTkFrame`, `corner_radius=8`) contains:
 - `description_label` — the task's filename/description text, `anchor="w"`,
   packed with `fill="x", expand=True` so it claims all space between the
   thumbnail and the status label.
-- `progress_canvas` / `progress_text_item` — a single raw `tkinter.Canvas`
-  (not a `CTkLabel`, and not a separate fill widget plus a text widget)
-  whose own `bg` *is* the active theme's primary color (read once into the
-  module-level `_THEME` at import time — see below), holding one
-  black-on-primary copy of the description text drawn once via
-  `create_text`. Growing/shrinking this one canvas's pixel width each tick
-  (`_update_progress_canvas`) simultaneously grows the visible fill *and*
-  clips the black text at exactly the same edge, since they're the same
-  widget — see `CLAUDE.md`'s "Pixel-accurate progress-text clip" section
-  for the three earlier
-  approaches that were tried and rejected before landing on this (a single
-  width-clipped `CTkLabel`, one individually-recolored `CTkLabel` per
-  character, and a two-widget fill-plus-canvas version that needed careful
-  synchronization to avoid an intermittent 1px seam) and exactly why each
-  one fell short.
+- `base_canvas` / `base_text_item` and `progress_canvas` /
+  `progress_text_item` — **two** stacked raw `tkinter.Canvas`es (not
+  `CTkLabel`s) that between them render the whole description area while a
+  row is running. `base_canvas` spans the entire description region painted
+  in the row's grey; `progress_canvas` is the same drawing clipped to
+  `fill_width` and painted in the theme's primary. Each holds its own
+  `create_text` copy of the description — the base one in CTk's normal label
+  color, the fill one in the theme's adaptive `primary_text`.
+
+  Two canvases rather than one because the fill edge has to be able to cut a
+  glyph in half, so the text either side of it must come from the *same*
+  renderer at the *same* coordinates. An earlier version had one canvas
+  painting over `description_label`, which put the seam between a
+  canvas-rendered glyph half and a `CTkLabel`-rendered one — and measuring
+  them against each other showed the canvas copy landing exactly **1px right
+  and 1px down** of the label's (identical text width, so the font matched;
+  only the origin differed). Every glyph the edge crossed visibly sheared.
+  Covering the label entirely with `base_canvas` means the seam is only ever
+  between two canvases, which cannot disagree. `description_label` still owns
+  the row's layout and still renders the text itself while the row is
+  `Queued` or `Done`, when both canvases are hidden.
+
+  See `CLAUDE.md`'s "Per-row progress visualization" for the earlier
+  approaches tried and rejected (a single width-clipped `CTkLabel`, one
+  individually-recolored `CTkLabel` per character, and a two-widget
+  fill-plus-canvas version with an intermittent 1px seam).
 - `thumb_label` — a 60×40 `CTkLabel`, filled in by `_load_thumbnail` if the
   task's settings include an `input_file` (reuses
   `core.utilities.extract_video_thumbnail`).
@@ -704,12 +960,12 @@ Each row (a `CTkFrame`, `corner_radius=8`) contains:
 - `remove_btn` — a transparent "✕" `CTkButton` calling `remove_task`.
 
 These are deliberately **constructed** in the order `description_label`,
-then `progress_canvas`, then `thumb_label` — Tk's default widget stacking
-order is construction order (later = higher), so this ordering alone gives
-`progress_canvas` exactly the z-position it needs (above `description_
-label`, so its own paint can override what's underneath; below
-`thumb_label`, so the thumbnail is never covered) with no explicit
-`.lift()`/`.lower()` calls. **Packing** (the actual visual left-to-right
+`base_canvas`, `progress_canvas`, `thumb_label` — Tk's default widget
+stacking order is construction order (later = higher), so this ordering alone
+gives every widget the z-position it needs (both canvases above
+`description_label` so they can override what's underneath; the fill above
+the grey base; `thumb_label` above all of it so the thumbnail is never
+covered) with no explicit `.lift()`/`.lower()` calls. **Packing** (the actual visual left-to-right
 layout: thumbnail, then description, then status, then remove button)
 happens afterward and independently, in whatever order produces the
 correct layout.
@@ -728,8 +984,9 @@ fails.
 **`_apply_row_style(task_id)`**: reads the row's current status text and
 applies either `_QUEUED_STYLE` (solid theme primary color) or `_GREY_STYLE`
 (grey), and
-hides `progress_canvas` outright whenever the status is `"Queued"` or
-`"Done"` — any other status is treated as "mid-run", and its geometry is
+hides **both** canvases outright whenever the status is `"Queued"` or
+`"Done"` — which hands the description back to `description_label`'s own
+rendering. Any other status is treated as "mid-run", and their geometry is
 left alone for `_animate_progress` to own.
 
 **`refresh_theme()`**: the counterpart to `LlamaGUI.apply_theme`'s live
@@ -737,11 +994,13 @@ theme switch — called on this tab specifically *instead of* destroying and
 rebuilding it (see `core/app.py`), so `self._rows` (the task list),
 `self._is_running`, and any in-flight animation survive completely
 untouched. Reassigns the module-level `_THEME` to a fresh
-`get_active_theme()`, updates `_QUEUED_STYLE["bg"]`/`["remove_hover"]` in
-place, then explicitly `.configure()`s `progress_bar`, `clear_btn`, and
-`start_all_btn` with the new colors, and for every existing row,
-`.configure()`s `progress_canvas`'s `bg` and re-runs `_apply_row_style` (now
-picking up the updated `_QUEUED_STYLE`). This works without any of the
+`get_active_theme()`, updates `_QUEUED_STYLE`'s `bg`/`remove_hover`/`text`/
+`remove_text` in place, then explicitly `.configure()`s `progress_bar`,
+`clear_btn`, `clear_all_btn`, and `start_all_btn` with the new fill/hover
+*and* adaptive label colors, and for every existing row, `.configure()`s both
+canvases' `bg`, `.itemconfigure()`s each text item's `fill`, and re-runs
+`_apply_row_style` (now picking up the updated `_QUEUED_STYLE`).
+This works without any of the
 CTk-default-styled-widget machinery `apply_theme` needs elsewhere, because
 every one of this tab's themed elements was already explicitly colored to
 begin with — there was never a CTk-default accent color here that needed a
@@ -767,10 +1026,22 @@ it.
 if it was showing 100% when the tab was switched away from, so returning
 later (or starting a fresh batch) doesn't show a stale "done" bar.
 
-**`remove_task(task_id)` / `clear_completed()`**: `remove_task` pops the
-row from `self._rows` and destroys its frame, re-showing the empty-state
-label if nothing's left. `clear_completed` calls `remove_task` for every
-row currently showing `"Done"`.
+**`remove_task(task_id)` / `clear_completed()` / `clear_all()`**:
+`remove_task` pops the row from `self._rows` and destroys its frame,
+re-showing the empty-state label if nothing's left. `clear_completed` calls
+`remove_task` for every row currently showing `"Done"`. `clear_all` empties
+the queue outright: it confirms first via `ask_yes_no` **only when something
+unfinished would be thrown away** (an all-`Done` or already-empty queue
+clears with no prompt), then calls `stop_queue()` *before* removing rows so
+no pending animation tick can fire against a row that no longer exists. Its
+button sits to the right of Clear Completed at the bottom-left.
+
+**`is_running()` / `pending_task_count()`**: small read-only accessors used
+from outside the tab. `pending_task_count` counts every row not yet `"Done"`
+— in-flight *and* still queued, i.e. everything that would be lost — and is
+read by both `LlamaGUI.on_close` and `clear_all` to decide whether to
+confirm. `is_running` reports whether processing is active; `on_close` uses
+it to know whether to resume the queue after a declined close prompt.
 
 **Queue playback controls**:
 - `_set_running(is_running)`: flips `start_all_btn` between "Start Queue"/
@@ -793,22 +1064,47 @@ row currently showing `"Done"`.
   real ffmpeg call will eventually go), and kicks off
   `_animate_progress(task_id, 0, rest)`.
 
-**`_update_progress_canvas(row, fill_width, row_height)`**: the core of the
-pixel-accurate fill/text-contrast effect. If `fill_width <= 0`, hides
-`progress_canvas` entirely (`place_forget`) and returns. Otherwise resizes
-`progress_canvas` to exactly `fill_width` pixels wide by `row_height` tall,
-repositions its text item to `description_label`'s current `(x, y)`, and
-places the canvas at the row's own origin `(0, 0)`. `fill_width` is a
-single number computed once by the caller (`_animate_progress`) and used
-directly here for both the visible fill width and the text-clip edge —
-there is no second, independently-computed width anywhere for it to
-disagree with. Because a raw `tkinter.Canvas` genuinely clips whatever it
-draws to its own configured dimensions (unlike `CTkLabel`, which was
-confirmed by testing to silently ignore a `width` smaller than its natural
-text size and always render unclipped), this reveals exactly the
-black-on-primary-color portion of the text that the fill has swept under,
-with a hard pixel-perfect edge that cannot drift out of sync with the
-fill's own edge.
+**`_flatten_color(color)` / `_grey_row_text()` / `_row_backdrop_bg(row)`**:
+small colour helpers. A raw `tkinter.Canvas` can only take a single Tk
+colour, never a CTk `(light, dark)` pair, so `_flatten_color` picks the half
+matching the current appearance mode. `_grey_row_text` returns the label
+colour a running row's text uses, so `base_canvas` reproduces
+`description_label` exactly. `_row_backdrop_bg` returns the colour visible
+*behind* a row — CTk already resolves this for every frame as its `bg_color`
+(what it paints outside the rounded rectangle it draws in `fg_color`), so the
+helper just reads it back.
+
+That backdrop is what both canvases use as their Tk `bg`, and it matters: a
+canvas is a hard rectangle sitting on the row's left end, and the only pixels
+the fill shapes leave unpainted are the two ~8px corner nooks outside the
+rounded left corners. Painting those the *row's* grey (as an earlier version
+did) filled the row's own corner cutouts with a solid block, so a running row
+read as a square grey box with a rounded fill floating inside it.
+
+**`_paint_row_canvas(canvas, text_item, w, h, color, backdrop, text_xy)`**:
+draws one canvas — a `w`×`h` block of `color` with its two **left** corners
+rounded (radius `_ROW_CORNER`, echoing the row) and a square right edge, with
+`text_item` raised on top at `text_xy`. The right edge stays square because
+on the fill canvas it is mid-row and moving; a rounded end there reads as a
+floating blob. The shape is a body rectangle plus a left edge-strip and two
+quarter-circle `create_arc` pieslices — *not* one `create_polygon` with
+`smooth=True`, whose spline bowed the straight top/bottom/right edges into
+visible curves.
+
+**`_paint_progress(row, fill_width, max_fill_width, row_height)`**: repaints
+a running row by calling `_paint_row_canvas` twice — `base_canvas` at
+`max_fill_width` in the row's grey, then `progress_canvas` at `fill_width` in
+the theme's primary, both drawing their text at the *identical* local
+coordinate so the fill edge can cut a glyph in half and the halves still line
+up. The fill canvas stays hidden until `fill_width` reaches the corner
+radius, so it never flashes a partial square corner on the way in.
+`fill_width` is a single number computed once by the caller and used directly
+for both the visible fill width and the text-clip edge — there is no second,
+independently-computed width for it to disagree with. Because a raw
+`tkinter.Canvas` genuinely clips whatever it draws to its configured
+dimensions (unlike `CTkLabel`, confirmed by testing to silently ignore a
+`width` smaller than its natural text size and always render unclipped), the
+clip edge is hard and pixel-exact.
 
 **`_animate_progress(task_id, step, rest)`**: the simulated per-task
 progress loop, and the intended seam for a real ffmpeg/yt-dlp backend
@@ -823,8 +1119,8 @@ later. Each tick:
    snapshot of the row's pre-style color; letting the fill grow underneath
    either widget used to show as a solid grey box cut into the fill, since
    their own stale background would occlude it.
-3. Computes `fill_width = round(fraction * max_fill_width)` and passes it
-   straight to `_update_progress_canvas`.
+3. Computes `fill_width = round(fraction * max_fill_width)` and passes it,
+   along with `max_fill_width`, straight to `_paint_progress`.
 4. If this was the final step, calls `_finish_task`; otherwise reschedules
    itself via `self.after(_PROGRESS_INTERVAL_MS, ...)`, storing the job id
    in `self._animation_job` so pause/stop can cancel it.
@@ -844,54 +1140,62 @@ ffmpeg/yt-dlp support.
 ### `tabs/settings_tab.py`
 
 Defines `SettingsTab` — a left-aligned settings form with a bold "Settings"
-header, three option rows (each a bold `("Arial", 11, "bold")` label above
-its control), and a Save button:
+header, four option rows (each a bold `("Arial", 11, "bold")` label above its
+control), and a Save button:
 
-- **Theme** — a `CTkOptionMenu` (`theme_menu`) listing the three keys of
-  `core.theme.THEMES` (`"Lemon"`, `"Cupid"`, `"Lilac"` — see
-  `core/theme.py`), initialized from `load_settings()["theme"]` rather than
-  a hardcoded default. Its `command` callback, `_on_theme_change`, doesn't
-  apply anything itself — the actual switch only happens on Save (see
-  below) — it just calls `_update_theme_swatches`, which updates two small
-  fixed-size (`24×24`, `corner_radius=4`) `CTkFrame` color swatches
-  (`theme_primary_swatch`/`theme_secondary_swatch`, `pack_propagate(False)`
-  so their size doesn't get squeezed by the absence of content) to preview
-  the selected theme's actual colors, since the dropdown text alone
-  ("Cupid") doesn't convey what pink/red actually look like. A small grey
-  caption label underneath says the change applies immediately once Save
-  is clicked, with no restart needed.
-- **Appearance Mode** — a `CTkOptionMenu` (`appearance_menu`, values
-  `"System"/"Light"/"Dark"`, initialized from `load_settings()
-  ["appearance_mode"]`) whose `command` callback, `_on_appearance_change`,
-  calls `ctk.set_appearance_mode(value.lower())` immediately — this takes
-  effect the instant it's picked, before Save is even pressed.
+- **Theme** — a `ThemedDropdown` (`theme_menu`) listing every key of
+  `core.theme.THEMES`, initialized from `load_settings()["theme"]` rather
+  than a hardcoded default. Beside it sit two 26×26 `CTkFrame` colour
+  swatches (`theme_primary_swatch`/`theme_secondary_swatch`, each
+  `pack_propagate(False)` so their size isn't squeezed by having no content)
+  and a name label, driven by `_show_theme_preview` — the dropdown text alone
+  ("Cupid") doesn't convey what pink/red actually look like. That method is
+  wired to the dropdown's `on_hover`, so simply *hovering* a row previews
+  that palette without committing it; the panel's `<Unmap>` resets the
+  preview back to the committed selection. Picking a row fires
+  `_on_theme_change`, which applies the theme **live across the whole app
+  immediately** — no Save needed.
+- **Appearance Mode** — a `ThemedDropdown` (`appearance_menu`, values
+  `"System"/"Light"/"Dark"`, initialized from
+  `load_settings()["appearance_mode"]`) whose `command`,
+  `_on_appearance_change`, calls `ctk.set_appearance_mode(value.lower())`
+  immediately and persists.
 - **Default Save Location** — a `CTkEntry` (pre-filled from
   `self.app.default_save_location` if already set, otherwise showing the
   placeholder "No default location set...") plus a "Browse" button.
-  `_browse_save_location` opens `filedialog.askdirectory()` (a folder
-  picker, not a file picker — this is a starting directory, not a specific
-  output file) and, if the user picks one, writes it to both the entry and
-  `self.app.default_save_location` immediately (live within the session,
-  same as appearance mode).
-- **Save button** (`save_btn`, styled with the active theme's primary
-  color) — `_on_save` persists all three settings to `settings.json` via
-  `core.theme.save_settings()` (appearance mode and save location already
-  took effect live in-session, but still need to be written to disk to
-  survive an actual restart later). It compares the selected theme against
-  `load_settings()["theme"]` (the *previous* persisted value) taken
-  *before* saving: if it changed, it calls `self.app.apply_theme
-  (new_theme)` (see `core/app.py`) to apply the new theme live across the
-  whole app right away, then returns immediately without touching `self`
-  again — `apply_theme` destroys and rebuilds this very tab as part of that
-  call, among others. If the theme didn't change, it just updates
-  `save_status_label` to `"Settings saved."` in place.
+  `_browse_save_location` opens `filedialog.askdirectory()` — a folder
+  picker, not a file picker, since this is a starting directory rather than a
+  specific output file — and writes the result to both the entry and
+  `self.app.default_save_location` immediately. A hand-typed path counts too:
+  the entry's `<FocusOut>` pushes it into app state via
+  `_sync_state_from_widgets`.
+- **Hardware Acceleration (GPU)** — a `CTkSwitch` (`gpu_switch`), moved here
+  off the Encoding tab so it's a single global preference every Encode task
+  inherits. `_on_gpu_toggle` updates `self.app.gpu_enabled` and persists;
+  `EncodingTab._gather_settings` reads that app-level value rather than any
+  control of its own.
 
-`app.default_save_location` is a piece of shared app state (see
-`core/app.py` below) read from `core.theme.load_settings()` at startup and
-read by both `MuxingTab.select_save_location` and `EncodingTab.
-select_save_location` as the save dialog's starting directory whenever no
-input file is loaded yet (previously both hardcoded this fallback to
-`""`).
+**Persistence is automatic.** `_settings_snapshot(theme=None)` renders the
+current state of every control as a `settings.json`-shaped dict;
+`_sync_state_from_widgets` pushes the entry/switch values into shared app
+state so a live theme rebuild (which reconstructs this tab) doesn't lose
+them; and `_autosave` — bound to `<Unmap>`, so it fires on tab switch and on
+minimize — writes the lot to disk. `on_leave` (called by `LlamaGUI.show_tab`
+just before this tab is switched away from) closes both dropdown panels and
+then runs the same autosave, giving the tab-switch case a deterministic flush
+rather than relying on event ordering.
+
+The **Save button** (`save_btn`, styled with the active theme's primary
+colour + adaptive `primary_text` label) is therefore largely redundant, kept
+for reassurance: `_on_save` syncs and persists, and only falls back to
+`self.app.apply_theme(...)` if the theme somehow hadn't already live-applied
+— in which case it returns immediately without touching `self` again, since
+`apply_theme` destroys and rebuilds this very tab.
+
+`app.default_save_location` is shared app state (see `core/app.py`) read from
+`core.theme.load_settings()` at startup, and used by both
+`MuxingTab.select_save_location` and `EncodingTab.select_save_location` as
+the save dialog's starting directory whenever no input file is loaded yet.
 
 ### `tabs/ytdlp_tab.py`
 
@@ -915,3 +1219,16 @@ on every run — they carry no source of their own and aren't described
 above. `.venv/`/`venv/` (virtual environment directories) are similarly
 excluded and, per `CLAUDE.md`, not actually used in this project's normal
 workflow (dependencies are installed into the system interpreter instead).
+
+`settings.json` (repo root) is the per-user preference file — written
+automatically whenever the Settings tab is left or a control changed, holding
+`theme`, `appearance_mode`, `default_save_location`, and `gpu_enabled`. Read via `core.theme.load_settings()`, written via
+`save_settings()`; a missing or corrupt file falls back to defaults
+(`Lemon` / `System` / `""`), so a fresh checkout with no file behaves
+normally.
+
+`_generated_themes/` (repo root) holds one `<theme>.json` per palette,
+generated by `core.theme._ctk_theme_path()` — customtkinter's bundled
+`blue.json` with every accent color swapped for that theme's secondary. They
+are regenerated (unconditionally, it's cheap) whenever a theme is applied,
+so deleting the directory is harmless.
