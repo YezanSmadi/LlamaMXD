@@ -3,14 +3,19 @@ import customtkinter as ctk
 from tkinter import filedialog
 from components.dialogs import show_message
 from components.drop_box import DropBox
+from components.dropdown import ThemedDropdown
+from components.thumbnail_carousel import ThumbnailCarousel
 from components.time_spinner import TimeSpinner
 from core.theme import get_active_theme
+
+# Container formats offered by the Output Format dropdown — the leading dot is
+# kept so the value drops straight onto a filename stem.
+_OUTPUT_FORMATS = [".mp4", ".mkv", ".mov", ".webm"]
 
 class MuxingTab(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master=master)
         self.app = app
-        self._raw_pil_image = None  # Cache original loaded PIL image for resizing
         theme = get_active_theme()
 
         # --- Bottom Section: Video Length Option ---
@@ -51,6 +56,28 @@ class MuxingTab(ctk.CTkFrame):
 
         self.toggle_time_spinners()  # Reflect the checkbox's default checked state
 
+        # Output container format — feeds the extension of the suggested save
+        # path (and the save dialog's default) via _on_format_change /
+        # _autofill_output_path, and rides along in _gather_settings as
+        # "output_format".
+        # pady=(6, 4): matches the effective spacing around Encoding's
+        # codec-options row — 6 above, and 4 below to sit level with the 8px
+        # total gap Encoding gets from its `main_options_row` bottom pad plus
+        # `save_frame`'s top pad (Muxing has no `main_options_row`).
+        self.format_frame = ctk.CTkFrame(master=self.controls_frame, fg_color="transparent")
+        self.format_frame.pack(anchor="w", pady=(6, 4))
+
+        self.format_label = ctk.CTkLabel(master=self.format_frame, text="Output Format:", font=("Arial", 11, "bold"))
+        self.format_label.pack(anchor="w", pady=(0, 1))
+
+        self.format_menu = ThemedDropdown(
+            master=self.format_frame,
+            values=_OUTPUT_FORMATS,
+            width=110,
+            command=self._on_format_change,
+        )
+        self.format_menu.pack(anchor="w")
+
         # Save Location Section
         self.save_frame = ctk.CTkFrame(master=self.controls_frame, fg_color="transparent")
         self.save_frame.pack(fill="x", pady=4)
@@ -62,7 +89,7 @@ class MuxingTab(ctk.CTkFrame):
         self.save_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
         # Pre-fill with the default save folder and keep refining it to
-        # "<folder>/<input name>_muxed.mp4" as files are picked, until the
+        # "<folder>/<input name>_muxed<format>" as files are picked, until the
         # user overrides it themselves (tracked via self._auto_output).
         self._auto_output = ""
         if self.app.default_save_location:
@@ -107,25 +134,30 @@ class MuxingTab(ctk.CTkFrame):
         self.top_container = ctk.CTkFrame(master=self, fg_color="transparent")
         self.top_container.pack(side="top", fill="both", expand=True, padx=10, pady=(5, 5))
 
-        # Selected File Text Header + Thumbnail — left unpacked until a file
-        # is actually selected, so the DropBox gets their space while empty.
+        # Selected File Text Header — left unpacked until a file is actually
+        # selected, so the DropBox gets its space while empty. _reveal_preview()
+        # packs it (and the carousel) in on the first thumbnail set.
         self.label = ctk.CTkLabel(master=self.top_container, text="", font=ctk.CTkFont(size=11))
-
-        self.img_label = ctk.CTkLabel(master=self.top_container, text="")
-        self.img_label.configure(cursor="hand2")
-        self.img_label.bind("<Double-Button-1>", lambda e: self.select_input_file())
         self.label.bind("<Double-Button-1>", lambda e: self.select_input_file())
+
+        # Multi-frame preview carousel — owns the thumbnail label, its resize
+        # math, and the fade-in prev/next chevrons. Double-clicking it (like
+        # the old single thumbnail label) reselects the input file.
+        self.carousel = ThumbnailCarousel(
+            master=self.top_container,
+            on_reselect=self.select_input_file,
+            on_populated=self._reveal_preview,
+            on_index=self.app.sync_preview_index,   # keep both tabs on the same frame
+        )
 
         # DropBox fills all available space in top_container while it's the
         # only thing packed there.
         self.drop_box = DropBox(master=self.top_container, on_file_selected=self.app.update_global_file, height=380)
         self.drop_box.pack(fill="both", expand=True)
 
-        # Register controls with main app
-        self.app.register_tab_ui(self.label, self.img_label, on_thumbnail=self.display_image)
-
-        # Bind resize listener for image thumbnail scaling
-        self.top_container.bind("<Configure>", self._on_resize)
+        # Register controls with main app — the carousel's set_frames is the
+        # thumbnail-broadcast target.
+        self.app.register_tab_ui(self.label, self.carousel, on_thumbnail=self.carousel.set_frames)
 
     def select_input_file(self):
         """Allows user to pick a video file via file dialog."""
@@ -136,24 +168,21 @@ class MuxingTab(ctk.CTkFrame):
         if file_path:
             self.app.update_global_file(file_path)
 
-    def display_image(self, pil_image):
-        """Called when a file is selected to display its thumbnail."""
-        self._raw_pil_image = pil_image
-
+    def _reveal_preview(self):
+        """First thumbnail set has arrived: swap the DropBox out for the
+        filename header + preview carousel. (The non-thumbnail half of the
+        old display_image.)"""
         if not self.label.winfo_ismapped():
             self.label.pack(pady=(0, 0))
-        if not self.img_label.winfo_ismapped():
-            self.img_label.pack(pady=(2, 2), expand=True)
-
-        # Hide initial dropbox now that a file/thumbnail is shown
         self.drop_box.pack_forget()
-        self._resize_thumbnail()
+        if not self.carousel.winfo_ismapped():
+            self.carousel.pack(pady=(2, 2), fill="both", expand=True)
 
     def _autofill_output_path(self):
-        """Suggests '<default folder>/<input basename>_muxed.mp4' in the
-        output field — but only while the user hasn't set their own path
-        (self._auto_output holds the last value we filled; None once the
-        user picks via Browse)."""
+        """Suggests '<default folder>/<input basename>_muxed<format>' in the
+        output field (format = the current format_menu value) — but only while
+        the user hasn't set their own path (self._auto_output holds the last
+        value we filled; None once the user picks via Browse)."""
         current = self.save_entry.get().strip()
         if current and current != self._auto_output:
             return
@@ -162,42 +191,26 @@ class MuxingTab(ctk.CTkFrame):
             return
         base = os.path.splitext(os.path.basename(input_file.replace("\\", "/")))[0]
         suggested = os.path.normpath(
-            os.path.join(self.app.default_save_location or "", f"{base}_muxed.mp4")
+            os.path.join(self.app.default_save_location or "", f"{base}_muxed{self.format_menu.get()}")
         )
         self.save_entry.delete(0, "end")
         self.save_entry.insert(0, suggested)
         self._auto_output = suggested
 
-    def _on_resize(self, event):
-        """Dynamic resize handler for the video thumbnail."""
-        if self._raw_pil_image is not None:
-            self._resize_thumbnail()
-
-    def _resize_thumbnail(self):
-        if self._raw_pil_image is None:
+    def _on_format_change(self, _value=None):
+        """Swaps the output path's extension to the newly-picked format. Only
+        touches a path that already has an extension to replace — before a file
+        is picked the entry holds just a folder, which _autofill_output_path
+        completes with the right extension once there's an input."""
+        current = self.save_entry.get().strip()
+        root, ext = os.path.splitext(current)
+        if not ext:
             return
-
-        container_w = max(100, self.top_container.winfo_width() - 20)
-        label_h = self.label.winfo_reqheight()
-        container_h = max(100, self.top_container.winfo_height() - label_h - 20)
-
-        img_w, img_h = self._raw_pil_image.size
-        if img_w == 0 or img_h == 0:
-            return
-
-        scale_w = container_w / img_w
-        scale_h = container_h / img_h
-        scale = min(scale_w, scale_h)
-
-        new_w = max(1, int(img_w * scale))
-        new_h = max(1, int(img_h * scale))
-
-        ctk_img = ctk.CTkImage(
-            light_image=self._raw_pil_image,
-            dark_image=self._raw_pil_image,
-            size=(new_w, new_h)
-        )
-        self.img_label.configure(image=ctk_img)
+        updated = root + self.format_menu.get()
+        self.save_entry.delete(0, "end")
+        self.save_entry.insert(0, updated)
+        if self._auto_output is not None:
+            self._auto_output = updated
 
     def toggle_time_spinners(self):
         is_checked = self.checkbox.get() == 1
@@ -214,14 +227,16 @@ class MuxingTab(ctk.CTkFrame):
         """Lets the user pick a full output FILE path (not just a folder)."""
         input_file = self.app.current_file_path
 
+        fmt = self.format_menu.get()  # e.g. ".mkv" — already dotted
+
         if input_file:
             input_name = input_file.split("/")[-1]
             base_name = input_name.rsplit(".", 1)[0] if "." in input_name else input_name
             initial_dir = "/".join(input_file.replace("\\", "/").split("/")[:-1])
-            default_name = f"{base_name}_muxed.mp4"
+            default_name = f"{base_name}_muxed{fmt}"
         else:
             initial_dir = self.app.default_save_location
-            default_name = "output.mp4"
+            default_name = f"output{fmt}"
 
         # Pre-fill the dialog's starting folder from whatever's already typed, if valid
         existing = self.save_entry.get().strip()
@@ -234,7 +249,7 @@ class MuxingTab(ctk.CTkFrame):
             title="Select Output File",
             initialdir=initial_dir,
             initialfile=default_name,
-            defaultextension=".mp4",
+            defaultextension=fmt,
             filetypes=[
                 ("MP4 Video", "*.mp4"),
                 ("MKV Video", "*.mkv"),
@@ -251,6 +266,7 @@ class MuxingTab(ctk.CTkFrame):
         return {
             "input_file": self.app.current_file_path,
             "output_path": self.save_entry.get(),
+            "output_format": self.format_menu.get(),
             "start_secs": self.start_time_spinner.get_total_seconds(),
             "duration_secs": self.duration_time_spinner.get_total_seconds(),
             "retain_length": bool(self.checkbox.get()),
@@ -264,6 +280,8 @@ class MuxingTab(ctk.CTkFrame):
         input_file = settings.get("input_file")
         if input_file:
             self.app.update_global_file(input_file)
+
+        self.format_menu.set(settings.get("output_format", _OUTPUT_FORMATS[0]))
 
         self.save_entry.delete(0, "end")
         self.save_entry.insert(0, settings.get("output_path", ""))
@@ -326,6 +344,6 @@ class MuxingTab(ctk.CTkFrame):
         queue_tab = self.app.tabs.get("Queue")
         if queue_tab:
             queue_tab.add_task(description, settings=settings, status="Queued", source_tab="Muxing")
-            self.app.notify("Job added to queue.")
+            self.app.notify("Muxing job added to queue.")
         else:
             print(f"Queue tab unavailable — would have queued: {settings}")

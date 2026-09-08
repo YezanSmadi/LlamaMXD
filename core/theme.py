@@ -53,6 +53,15 @@ THEMES = {
 }
 
 
+# The "destructive / halting" red — the Stop Queue button's fill, and the
+# Strip Video checkbox on the Encoding tab. A permanent, theme-independent
+# exception to the primary/secondary scheme (see CLAUDE.md): it never changes
+# with the theme, so anything that needs "this is destructive" red reads it
+# from here rather than the active palette.
+STOP_RED = "#E5484D"
+STOP_RED_HOVER = "#C93C40"
+
+
 def _darken(hex_color, factor=0.87):
     """Returns a slightly-darker shade of hex_color for hover states —
     the same ~0.87 factor already implicit in the brand yellow's existing

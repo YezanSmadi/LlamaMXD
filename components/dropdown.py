@@ -1,14 +1,24 @@
+import tkinter as tk
+
 import customtkinter as ctk
 
 _ROW_HEIGHT = 28
 _PANEL_CORNER = 6
 _PANEL_GAP = 3  # vertical gap between the button and the panel below it
 
+# Open/close animation: the popup window unrolls (its height grows from ~0 to
+# full while the panel inside stays full-size and is clipped) and fades in
+# together. Close runs the same in reverse, shorter, then withdraws.
+_ANIM_OPEN_STEPS = 9
+_ANIM_CLOSE_STEPS = 6
+_ANIM_INTERVAL_MS = 12
+_ANIM_MIN_ALPHA = 0.25   # popup starts this visible, not fully transparent
+
 
 class ThemedDropdown(ctk.CTkOptionMenu):
-    """A `CTkOptionMenu` whose popup is a custom in-window panel instead of
-    Tk's native menu — every dropdown in the app uses this so they all look
-    and behave identically.
+    """A `CTkOptionMenu` whose popup is a custom panel instead of Tk's native
+    menu — every dropdown in the app uses this so they all look and behave
+    identically.
 
     Two things the native popup can't do, which is why this exists:
 
@@ -21,11 +31,22 @@ class ThemedDropdown(ctk.CTkOptionMenu):
        Windows and repaints nothing behind it, so a hover preview is invisible
        there.
 
-    The panel is parented to the **toplevel**, not to this widget's own master,
-    so it can float over whatever is beneath it (Tk's `place(in_=...)` allows
-    any target that's a descendant of the placed widget's parent, and the root
-    is an ancestor of everything). That does mean it isn't destroyed along with
-    the tab that owns the dropdown, hence the `destroy()` override below."""
+    **The panel is a borderless `Toplevel` of its own** (`self._popup`),
+    withdrawn until `open()`. It used to be a `CTkFrame` `place()`d over the
+    main window, which meant a dropdown near the window's short bottom edge
+    (Encoding's Encoder/Format/Profile/Level row, Muxing's Output Format) had
+    its lower entries clipped by the window. A separate window can extend past
+    that edge instead. The trade-off is a window that isn't torn down with the
+    tab that owns the dropdown — hence the `destroy()` override — and doesn't
+    move with the main window, so `open()` also drops the panel on any main-
+    window `<Configure>` / `<Unmap>`.
+
+    **Open/close is animated** (`_anim`): the popup unrolls — its window height
+    grows from ~0 to full while `self.panel` sits at full size, placed at
+    `(0, 0)` and clipped by the shorter window — and its `-alpha` fades in at
+    the same time (ease-out). Close is the same reversed, fewer steps, then
+    `withdraw()`. One `after` job (`self._anim_job`), cancelled by every
+    `open`/`close`/`destroy` so spam-clicking can't leave it stuck."""
 
     def __init__(self, master, values, command=None, on_hover=None, **kwargs):
         # `command` is deliberately NOT handed to the base class: its own
@@ -36,13 +57,30 @@ class ThemedDropdown(ctk.CTkOptionMenu):
         self._user_command = command
         self._on_hover = on_hover
         self._is_open = False
-        self._global_click_bind = None
+        self._global_binds = []  # (sequence, funcid) pairs on the main toplevel
+        self._anim_job = None
+        self._geo = None         # (w, h, x, y) of the fully-open popup
         self.rows = {}  # value -> row CTkButton, exposed for per-row styling
 
+        # Borderless popup window holding the panel. Withdraw first thing so it
+        # never flashes onscreen at its default position.
+        self._popup = tk.Toplevel(self)
+        self._popup.withdraw()
+        self._popup.overrideredirect(True)
+        try:
+            self._popup.transient(self.winfo_toplevel())
+        except tk.TclError:
+            pass
+
+        # place() (not pack) at full width + natural height so that when the
+        # window is shorter than the panel — every animation frame — the panel
+        # is *clipped*, not compressed. relwidth (relative) is fine here; it's
+        # the absolute width=/height= on place() that CTk rejects (see CLAUDE.md).
         self.panel = ctk.CTkFrame(
-            master=self.winfo_toplevel(), corner_radius=_PANEL_CORNER,
+            master=self._popup, corner_radius=_PANEL_CORNER,
             border_width=1, border_color=("gray70", "gray30"),
         )
+        self.panel.place(x=0, y=0, relwidth=1.0)
         for value in self._values:
             row = ctk.CTkButton(
                 master=self.panel,
@@ -72,53 +110,138 @@ class ThemedDropdown(ctk.CTkOptionMenu):
             self.open()
 
     def open(self):
-        """Drops the panel beneath the button, matching its width — or flips it
-        above when there isn't room below. The window is a fixed, fairly short
-        size and some of these controls sit near its bottom edge (Profile and
-        Level are two rows from it), where a downward panel would simply be
-        clipped by the window with its last entries unreachable."""
+        """Shows the popup straight below the button, matching its width, and
+        unrolls it open.
+
+        Always downward, never shifted or flipped (both were tried and removed
+        on request); entries past the main window's bottom edge overflow it
+        because the popup is a window of its own."""
         if self._is_open or not self.winfo_exists():
             return
         self._is_open = True
+        self._cancel_anim()
+
+        w = self.winfo_width()
+        x = self.winfo_rootx()
+        y = self.winfo_rooty() + self.winfo_height() + _PANEL_GAP
+        # Size to full width (still transparent + withdrawn) so the rows lay
+        # out at their final width before we measure the panel's height.
+        self._popup.geometry(f"{w}x400+{x}+{y}")
+        try:
+            self._popup.attributes("-alpha", 0.0)
+        except tk.TclError:
+            pass
+        self._popup.deiconify()
+        self._popup.update_idletasks()
+        h = self.panel.winfo_reqheight()
+        if h <= 1:  # not laid out yet — fall back to a computed estimate
+            h = len(self._values) * (_ROW_HEIGHT + 2) + 4
+        self._geo = (w, h, x, y)
+
+        # Match the popup's own bg to the panel's fill so the CTkFrame's
+        # rounded-corner nooks don't show a mismatched square (the recurring
+        # "no per-pixel transparency" gotcha — see CLAUDE.md).
+        try:
+            self._popup.configure(bg=self.panel._apply_appearance_mode(self.panel._fg_color))
+        except Exception:
+            pass
+        self._popup.lift()
+        self._popup.attributes("-topmost", True)
 
         root = self.winfo_toplevel()
-        self.panel.update_idletasks()  # once per open, on a user click — not a hot path
-        panel_height = self.panel.winfo_reqheight()
-        button_bottom = self.winfo_rooty() - root.winfo_rooty() + self.winfo_height()
-        room_below = root.winfo_height() - button_bottom - _PANEL_GAP
+        # add="+" so other toplevel bindings survive; funcids let close()
+        # remove exactly these again.
+        self._global_binds = [
+            ("<Button-1>", root.bind("<Button-1>", self._on_global_click, add="+")),
+            ("<Configure>", root.bind("<Configure>", self._on_root_change, add="+")),
+            ("<Unmap>", root.bind("<Unmap>", self._on_root_change, add="+")),
+        ]
 
-        if panel_height <= room_below:
-            self.panel.place(in_=self, relx=0, rely=1.0, relwidth=1.0, y=_PANEL_GAP, anchor="nw")
-        else:
-            # anchor="sw" at the button's top-left puts the panel's BOTTOM edge
-            # there, so it grows upward from the button instead of downward.
-            self.panel.place(in_=self, relx=0, rely=0, relwidth=1.0, y=-_PANEL_GAP, anchor="sw")
-        self.panel.lift()
-        # add="+" so we don't clobber other toplevel bindings; the funcid lets
-        # us remove exactly this one again on close.
-        self._global_click_bind = self.winfo_toplevel().bind(
-            "<Button-1>", self._on_global_click, add="+"
-        )
+        self._anim(1, opening=True)
 
-    def close(self):
-        """Hides the panel and stops listening for outside clicks."""
+    def close(self, animate=True):
+        """Rolls the popup shut and hides it, and stops listening for outside
+        clicks / window moves. `animate=False` (used by `destroy`) skips
+        straight to hidden."""
         if not self._is_open:
             return
         self._is_open = False
-        if self._global_click_bind is not None:
+        self._cancel_anim()
+
+        root = self.winfo_toplevel()
+        for sequence, funcid in self._global_binds:
             try:
-                self.winfo_toplevel().unbind("<Button-1>", self._global_click_bind)
+                root.unbind(sequence, funcid)
             except Exception:
                 pass
-            self._global_click_bind = None
-        if self.panel.winfo_exists():
-            self.panel.place_forget()
+        self._global_binds = []
+
+        if not self._popup.winfo_exists():
+            return
+        if animate and self._geo is not None:
+            self._anim(1, opening=False)
+        else:
+            self._popup.withdraw()
+            try:
+                self._popup.attributes("-alpha", 1.0)
+            except tk.TclError:
+                pass
+
+    def _anim(self, step, opening):
+        """One tick of the unroll (opening) or roll-up (closing). Grows/shrinks
+        the popup window's height with ease-out and moves `-alpha` in step;
+        the last closing tick withdraws the window."""
+        if not self._popup.winfo_exists() or self._geo is None:
+            return
+        w, h, x, y = self._geo
+        steps = _ANIM_OPEN_STEPS if opening else _ANIM_CLOSE_STEPS
+        t = step / steps
+        frac = 1 - (1 - t) ** 3 if opening else (1 - t) ** 2   # 0→1 open, 1→0 close
+        gh = max(1, round(h * frac))
+        self._popup.geometry(f"{w}x{gh}+{x}+{y}")
+        try:
+            self._popup.attributes("-alpha", round(_ANIM_MIN_ALPHA + (1 - _ANIM_MIN_ALPHA) * frac, 3))
+        except tk.TclError:
+            pass
+
+        if step < steps:
+            self._anim_job = self.after(_ANIM_INTERVAL_MS, lambda: self._anim(step + 1, opening))
+            return
+
+        self._anim_job = None
+        if opening:
+            self._popup.geometry(f"{w}x{h}+{x}+{y}")
+            try:
+                self._popup.attributes("-alpha", 1.0)
+            except tk.TclError:
+                pass
+        else:
+            self._popup.withdraw()
+            try:
+                self._popup.attributes("-alpha", 1.0)
+            except tk.TclError:
+                pass
+
+    def _cancel_anim(self):
+        if self._anim_job is not None:
+            try:
+                self.after_cancel(self._anim_job)
+            except Exception:
+                pass
+            self._anim_job = None
+
+    def _on_root_change(self, event):
+        """The main window moved or was minimized — the popup doesn't follow
+        it, so drop it. A toplevel binding also receives its descendants'
+        `<Configure>` events, hence the widget check."""
+        if event.widget is self.winfo_toplevel():
+            self.close(animate=False)
 
     def _on_global_click(self, event):
-        """Closes on any click outside both the panel and the button itself. A
-        click on the button is left alone so `_toggle` owns that case (both
-        handlers fire for it, and closing here first would let the toggle
-        immediately reopen)."""
+        """Closes on any click outside both the panel and the button itself.
+        Clicks inside the popup are a separate window and never reach this, so
+        they can't close it; a click on the button is left for `_toggle`
+        (closing here first would let the toggle immediately reopen)."""
         if not self._is_open:
             return
         for widget in (self.panel, self):
@@ -138,11 +261,11 @@ class ThemedDropdown(ctk.CTkOptionMenu):
             self._user_command(value)
 
     def destroy(self):
-        """Takes the panel down too. It lives on the toplevel rather than under
-        this widget's master, so destroying the owning tab would otherwise
-        orphan it — which matters because a live theme switch rebuilds every
-        tab (see LlamaGUI.apply_theme)."""
-        self.close()
-        if self.panel.winfo_exists():
-            self.panel.destroy()
+        """Takes the popup window down too — it's a `Toplevel` of its own, not
+        a child of the owning tab, so a live theme switch's tab rebuild (see
+        LlamaGUI.apply_theme) would otherwise orphan it."""
+        self._cancel_anim()
+        self.close(animate=False)
+        if self._popup.winfo_exists():
+            self._popup.destroy()
         super().destroy()

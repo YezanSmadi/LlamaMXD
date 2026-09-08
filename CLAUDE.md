@@ -52,7 +52,10 @@ Window sizing: `scaled_w, scaled_h = width*0.35, height*0.375` of the screen,
 fixed and non-resizable (`resizable(False, False)`). The 0.375 height was
 tuned specifically so the Encoding tab's content (controls + DropBox minimum)
 fits without the packer being forced to compress the DropBox below its
-configured size — see "DropBox / expand+fill gotchas" below before changing it.
+configured size — see the **Tabs** section (the bottom-up `controls_frame` /
+`top_container` pack pattern) and the `pack()` cavity-order gotcha in **Known
+issues** before changing it. Adding a control row to Muxing or Encoding eats
+into the same budget.
 
 The OS close button is bound (`WM_DELETE_WINDOW` → `on_close`) to
 `self.destroy()` then `sys.exit(0)`, a hard full-process exit rather than
@@ -62,7 +65,7 @@ letting the Python process linger after the window goes away.
 
 A flat strip of the theme's `primary` (`self.tab_indicator`, a plain
 `CTkFrame`) that pokes out from behind the sidebar into the gutter beside
-whichever sidebar button is active, with a narrower 8px `secondary` band
+whichever sidebar button is active, with a narrower 12px `secondary` band
 (`self.tab_indicator_line`) crossing it through the vertical middle. Both are
 positioned with `.place()` (independent of the grid) and `.lift()`ed, running
 from the active button's right edge (`button_x + button_w`) to the tab
@@ -84,10 +87,11 @@ button's rounded edge has reached its full bounding width, so the two still
 meet flush with no gap — verified by sampling the pixels across the junction.
 
 **Two more anti-seam measures, both required.** The band's height must stay
-**even** (`line_h = 8`), and both pipes pin `bg_color` to `primary` instead of
-letting it default. CTk floors a drawn shape's width/height to the nearest
-even number, so at the band's original height of 9 it painted 8 rows and left
-the 9th showing the widget's own raw canvas — which, at the default
+**even** (`line_h = 12` currently — any even value is fine), and both pipes
+pin `bg_color` to `primary` instead of letting it default. CTk floors a drawn
+shape's width/height to the nearest even number, so at the band's original
+height of 9 it painted 8 rows and left the 9th showing the widget's own raw
+canvas — which, at the default
 `bg_color` (a stale snapshot of the dark root window), rendered as a 1px dark
 line under the pipe that read as a drop shadow. A vertical pixel scan showed
 exactly that: 8 rows of `secondary`, then one row of `(36,36,36)`, then the
@@ -129,16 +133,49 @@ Any DropBox (drop or double-click or Browse) calls `app.update_global_file(path)
 That method is the *only* place the selected file changes. It:
 
 1. Strips tkdnd's `{}` wrapping from the path.
-2. Extracts a thumbnail via `core.utilities.extract_video_thumbnail` (cv2 first frame → PIL).
-3. Walks `tab_ui_registry` updating every registered label + thumbnail widget.
-4. Calls `hide_drop_text()` on every tab that has a `drop_box`.
+2. Walks `tab_ui_registry` updating every registered filename label.
+3. Calls `hide_drop_text()` on every tab that has a `drop_box`.
+4. Calls `_autofill_output_path()` on every tab that exposes one (Muxing and
+   Encoding), so the suggested `<name>_muxed<fmt>` / `<name>_encoded<fmt>`
+   output path refreshes for the new input.
+5. Kicks off preview-thumbnail resolution via `_load_thumbnails(path)` (below).
 
-Tabs opt into this by calling `app.register_tab_ui(label, img_label, on_thumbnail=...)`
-in their `__init__`. If `on_thumbnail` is omitted, a default handler renders a
-fixed 350x200 `CTkImage`; Muxing and Encoding both pass their own so they can
-cache the raw PIL image and rescale on `<Configure>` (see `display_image`/
-`_resize_thumbnail` in either tab — identical logic in both, see "Muxing and
-Encoding duplicate a lot of code" below).
+**Thumbnails are ten frames, decoded off the Tk thread, cached on the app.**
+`core.utilities.extract_video_thumbnails(path, count=10)` grabs ten frames
+evenly spaced across the video's *interior* (fractions 1/11 … 10/11 of the
+frame count — skips a black first frame / end-credits last frame), returning
+a list 1–10 long (shorter for a very short clip, `[]` if nothing decodes).
+
+Ten frame-seeks are too slow to run synchronously on the Tk loop, so
+`_load_thumbnails`:
+- **Cache hit** — `path == self._thumb_frames_path` and frames already
+  decoded — broadcasts `self._thumb_frames` immediately. This is what makes a
+  live theme rebuild (which re-calls `update_global_file` via
+  `load_settings`) and every plain tab switch cost nothing.
+- **Miss** — bumps `self._thumb_token`, starts a daemon thread
+  (`_decode_worker`) that puts `(token, path, frames)` on `self._thumb_queue`.
+  A single main-thread poller (`_drain_thumbnails`, self-re-arming every 80ms
+  while `_thumb_pending > 0`) delivers results. **The worker never touches a
+  widget or calls `after()`** — Tkinter isn't thread-safe; the queue is the
+  only channel back. `_deliver_thumbnails` drops a result whose token is
+  stale (user picked another file mid-decode) or empty, else caches + calls
+  `_broadcast_thumbnails`.
+
+Tabs opt into this by calling `app.register_tab_ui(label, img_widget,
+on_thumbnail=...)` in their `__init__`. **`on_thumbnail` receives the whole
+frame *list*** (not a single image). If omitted, a default handler renders
+`frames[0]` at a fixed 350x200. Muxing and Encoding both pass
+`self.carousel.set_frames` — see **ThumbnailCarousel** under Components.
+
+**The scrub position is shared across tabs.** `self._preview_index` on the
+app is the frame index both carousels show. A carousel reports every scrub
+through its `on_index` callback → `app.sync_preview_index(i)`, which mirrors
+it onto every other registered carousel via `carousel.sync_index(i)` (an
+instant jump, no slide, no `on_index` re-fire — so it can't loop).
+`_preview_index` resets to 0 only when the input file *actually* changes
+(checked in `update_global_file`), so it survives a live theme rebuild:
+`_broadcast_thumbnails` re-applies it with a `sync_index` after each
+`on_thumbnail`, since `set_frames` resets every freshly-built carousel to 0.
 
 **When adding a tab that should show the selected file, call `register_tab_ui`.**
 `YtDlpTab` deliberately does not (the call is commented out at
@@ -183,7 +220,9 @@ progress-fill text sweep. Current outcomes: black text on every primary
 except `Noir` (white); white on every secondary except `Lemon`'s `#3B8ED0`
 (black — brighter blue than the dark-red/green/teal secondaries). The
 `Stop Queue` button's fixed red gets the same treatment against its
-constant `#E5484D` (`_STOP_TEXT` in `queue_tab.py`, resolves to black).
+constant `STOP_RED` `#E5484D` (`core/theme.py`; `_STOP_TEXT` in
+`queue_tab.py` resolves to black). The Encoding tab's `Strip Video`
+checkbox reuses the same `STOP_RED`.
 
 CTk's own default-styled widgets (sidebar nav buttons, checkboxes,
 switches) still carry CTk's stock near-white label color from the generated
@@ -236,8 +275,9 @@ widget that needs to pick it up. Specifically:
   its task list (`self._rows`) and any in-flight animation. Instead it gets
   `QueueTab.refresh_theme()`, which re-reads `get_active_theme()` into the
   module-level `_THEME` (also updating `_QUEUED_STYLE` in place) and calls
-  `.configure()` directly on `progress_bar`, `clear_btn`, `start_all_btn`,
-  and every existing row's `progress_canvas`/style — recoloring in place
+  `.configure()` directly on `progress_bar`, `clear_btn`, `clear_all_btn`,
+  `start_all_btn`, and every existing row's `base_canvas`/`progress_canvas`/
+  style — recoloring in place
   without touching any task data. This works because Queue never used
   CTk-default-styled widgets in the first place (see Conventions) — every
   one of its themed elements was already explicitly colored, so there was
@@ -253,9 +293,10 @@ the correct theme without needing `apply_theme`'s rebuild machinery at all
 
 **Persistence**: `load_settings()`/`save_settings()` read/write a small
 `settings.json` at the repo root (gitignored — a local preference file, not
-shared repo state), holding `theme`, `appearance_mode`, and
-`default_save_location`; missing keys or a missing/corrupt file fall back
-to defaults (`Lemon` / `"System"` / `""`) rather than raising.
+shared repo state), holding `theme`, `appearance_mode`, `default_save_location`,
+and `gpu_enabled`; missing keys or a missing/corrupt file fall back to
+defaults (`Lemon` / `"System"` / `default_output_dir()` — i.e.
+`~/Videos/LlamaMXD Export` — / `True`) rather than raising.
 
 ### Tabs
 
@@ -268,15 +309,53 @@ to defaults (`Lemon` / `"System"` / `""`) rather than raising.
   `expand=True` absorbs whatever's left). Both have `_gather_settings()` →
   plain dict, `load_settings(dict)` → restore UI, `_validate_settings()`,
   a `Queue Task` button, and a yellow "do it now" button (`Encode`/`Mux`)
-  that queues *and* immediately starts the task. Encoding additionally has
-  Profile/Level dropdowns, GPU/HDR switches, and a CRF slider (all Encoding-
-  only fields); Muxing has just the Retain Video Length checkbox + time
-  spinners. Keep `_gather_settings`/`load_settings` in sync when adding a
-  control to either tab.
+  that queues *and* immediately starts the task. Both also have an **Output
+  Format** `ThemedDropdown` (`format_menu`, values `.mp4/.mkv/.mov/.webm`,
+  default `.mp4`) — its value is the `output_format` settings key, and
+  `_on_format_change` swaps the suggested output path's extension to match
+  (only when the path already has one to replace; before a file is picked
+  the entry holds just a folder and `_autofill_output_path` supplies the
+  extension). `select_save_location`'s default filename and
+  `defaultextension` follow it too. On Encoding it's the second of the four
+  dropdowns in the codec-options row (`Encoder` / `Format` / `Profile` /
+  `Level` — `Encoder` leads, `Format` follows since it's the one that
+  renames the file); on Muxing it's its own row, whose `pady` is hand-set to
+  `(6, 4)` so the gap around it matches Encoding's (which comes for free
+  there from `main_options_row`'s bottom pad — Muxing has no such wrapper
+  row). The four Encoding dropdowns' widths are hand-tuned tight
+  (122/74/92/64) so the row fits `left_col` without crowding the CRF slider
+  in `right_col`.
+  Encoding additionally has: the **Encoder** dropdown (`encoder_menu`, values
+  `H.264 (x264)` / `H.265 (x265)` / `MPEG-4` / `MPEG-2` — display strings
+  only, no ffmpeg mapping yet, `encoder` settings key); Profile/Level
+  dropdowns; a CRF slider; an HDR-to-SDR toggle that's an **`AnimatedSwitch`**
+  (slides instead of snapping — see Components); and a **Strip Video**
+  checkbox (`strip_video_check`) in the red `STOP_RED` (the Stop Queue
+  colour), which `_on_strip_video_toggle` uses to blanket-`state="disabled"`
+  every option control at once — a plain binary disable, so a control that's
+  already disabled (spinners under Retain Video Length) just stays as it
+  looks, and unticking restores each control to the state it *should* be in
+  (spinners back under `toggle_time_spinners`). All Encoding-only fields — GPU
+  acceleration used to be a switch here too but is now the global Settings
+  preference `app.gpu_enabled`, which `EncodingTab._gather_settings` reads
+  directly; Muxing has just the Retain Video Length checkbox + time spinners.
+  Keep `_gather_settings`/`load_settings` in sync when adding a control to
+  either tab.
+  Both show the selected file as a **`ThumbnailCarousel`** (see Components) in
+  their `top_container`, in place of the old single `img_label` +
+  `display_image`/`_resize_thumbnail`. The tab keeps only a thin
+  `_reveal_preview()` (packs the filename header + carousel in, `pack_forget`s
+  the DropBox) that the carousel fires via its `on_populated` callback on the
+  first frame set; double-clicking the carousel reselects the input file
+  (`on_reselect`). The carousel also takes `on_index` — it fires
+  `app.sync_preview_index(i)` on every scrub so the **other tab's carousel
+  mirrors the same frame** (see the file-selection broadcast section); the
+  receiving `carousel.sync_index()` jumps with no slide and doesn't re-fire
+  `on_index`, so there's no loop.
 - **Queue** (`tabs/queue_tab.py`) — the most complex tab; see its own section
   below.
 - **Settings** (`tabs/settings_tab.py`) — a left-aligned settings form with
-  three options plus a Save button, each option a bold label above its
+  four options plus a Save button, each option a bold label above its
   control: **Theme** (a `ThemedDropdown` over `core.theme.THEMES`, using its
   `on_hover` hook to live-preview a palette without committing it — see
   "Theming" above for the full palette/persistence/live-rebuild design —
@@ -289,11 +368,19 @@ to defaults (`Lemon` / `"System"` / `""`) rather than raising.
   **Default Save Location** (`CTkEntry` + "Browse" button opening
   `filedialog.askdirectory()`, updating `app.default_save_location`
   immediately so it's live within the session even before Save is
-  pressed). The **Save** button (`_on_save`) persists all three to
-  `settings.json`, and — only if the theme actually changed — calls
-  `self.app.apply_theme(new_theme)` to apply it live (see "Theming"), which
-  rebuilds this tab too: `_on_save` returns immediately after that call
-  rather than touching `self` again. `app.default_save_location` (read from
+  pressed — a hand-typed path is pushed to app state on `<FocusOut>`); and
+  **Hardware Acceleration (GPU)** (a `CTkSwitch`, `gpu_switch`, moved here off
+  the Encoding tab so it's one global preference — `_on_gpu_toggle` writes
+  `app.gpu_enabled` and persists immediately, and `EncodingTab._gather_
+  settings` reads that app value rather than a control of its own). The
+  **Save** button (`_on_save`) persists everything to
+  `settings.json` and then posts a **"Settings saved." toast** via
+  `app.notify(..., go_to_queue=False)` — this replaced an inline
+  `save_status_label` under the button, which is gone. The one exception: if
+  the theme actually changed it calls `self.app.apply_theme(new_theme)` to
+  apply it live (see "Theming") and returns immediately without posting
+  anything — `apply_theme` rebuilds this tab (clearing live toasts) and is
+  its own feedback, and nothing below the call may touch `self`. `app.default_save_location` (read from
   `settings.json` in `LlamaGUI.__init__`, alongside `current_file_path`) is
   read by both `MuxingTab.select_save_location` and
   `EncodingTab.select_save_location` as the starting directory for their
@@ -421,14 +508,41 @@ packed with `fill="x"` and *no* `expand`, which matters — `expand=True` here
 would let it stretch to whatever space is available instead of staying
 capped, defeating the fixed-height point) holds the field rows, so a Mux
 task's short field list fits without scrolling while an Encode task's longer
-one (GPU/HDR/CRF/Profile/Level, absent from Mux) scrolls inside the same
-box. `_DETAIL_FIELDS` drives which settings keys get shown and how
+one (Encoder/GPU/HDR/Strip Video/CRF/Profile/Level, absent from Mux) scrolls
+inside the same box. `_DETAIL_FIELDS` drives which settings keys get shown and how
 (`None`/`"time"`/`"bool"` formatting); a key simply absent from a task's
 settings dict is skipped, which is how Mux tasks naturally omit the
 encoding-only fields. Popup is packed with `before=self.controls_frame` so
 it always lands directly above the bottom buttons regardless of call order.
 Single-click (not double-click — that binding was deliberately removed, see
 below) shows it; the popup's own "✕" just calls `self.detail_frame.pack_forget`.
+
+**The single-click binding is on `base_canvas` and `progress_canvas` too**,
+not just `row`/`thumb_label`/`description_label`/`status_label`. While a job
+runs those two canvases sit *on top of* `description_label`, so without their
+own bindings a click on the description text of a running row hit dead space —
+the popup would only open from the thumbnail end or from `status_label`
+onward. `remove_btn` stays unbound (its own click must not also open details).
+
+**The task list's scrollbar auto-hides into a fixed gutter.**
+`CTkScrollableFrame` grids its scrollbar into its own column and nothing
+else, so the bar turning on steals ~18px from the rows — and because the
+canvas re-fits only on its next `<Configure>`, the bar spends a beat drawn
+*over* the rows before they reflow narrower (a visible flicker, then a
+click-triggered truncation). `_autohide_scrollbar_in_gutter(self.list_frame)`
+(module function, once in `__init__`) fixes both halves:
+- `_parent_frame`'s column 1 gets a permanent `minsize` (`_SCROLLBAR_GUTTER`
+  = 18) so the gutter is always reserved whether the bar sits in it or not —
+  the row area's width never changes. `list_frame`'s own right pad is trimmed
+  `20 → 3` to match, so that gutter comes out of the window margin, not the
+  rows (rows stay exactly as wide as they were with no bar).
+- the inner canvas's `yscrollcommand` is routed through a relay that still
+  forwards every update to the real `CTkScrollbar.set` but `grid()`/
+  `grid_remove()`s the bar as the content crosses the overflow line.
+
+Touches `_parent_frame` / `_scrollbar` / `_parent_canvas` — CTk exposes no
+public hook. Only `list_frame` gets this; `detail_scroll` is fixed-height and
+deliberately scrolls.
 
 **Overall progress bar** (`self.progress_bar`, top of the tab, replaced an
 earlier plain "Encoding Queue" header label): tracks `done / total` across
@@ -461,14 +575,16 @@ fire against a row that no longer exists.
 ### Dropdowns
 
 **Every dropdown in the app is a `ThemedDropdown`** (`components/dropdown.py`)
-— Theme and Appearance Mode on Settings, Profile and Level on Encoding. It
+— Theme and Appearance Mode on Settings, Encoder / Format / Profile / Level
+on Encoding (Encoder leads; Format follows it — the one that renames the
+file), Output Format on Muxing. It
 subclasses `CTkOptionMenu` but redirects `_open_dropdown_menu` to a custom
-in-window panel, because the native popup can't do two things this app needs:
+panel, because the native popup can't do two things this app needs:
 
 1. **Stay open until an explicit dismissal.** A click on the button again, or
    anywhere outside the panel (`_on_global_click`, a `<Button-1>` binding
-   added on the toplevel with `add="+"` while open and removed by funcid on
-   close). Moving the pointer off it does nothing — an earlier `<Leave>` +
+   added on the main toplevel with `add="+"` while open and removed by funcid
+   on close). Moving the pointer off it does nothing — an earlier `<Leave>` +
    pointer-position close was removed on request.
 2. **Report row hover** (`on_hover`), which the theme picker needs for its
    live palette preview. The native popup is modal on Windows and repaints
@@ -478,21 +594,40 @@ in-window panel, because the native popup can't do two things this app needs:
 value-picking path never runs, so `_select` invokes the caller's callback
 itself.
 
-**The panel is parented to the toplevel**, not to the dropdown's own master,
-so it can float over anything beneath it (Tk's `place(in_=...)` accepts any
-target that's a descendant of the placed widget's parent, and the root is an
-ancestor of everything). The cost of that is it *isn't* destroyed along with
-the tab that owns the dropdown — hence the `destroy()` override, which
-matters because a live theme switch rebuilds every tab.
+**The panel lives in its own borderless `Toplevel` (`self._popup`)**,
+withdrawn until `open()`. It used to be a `CTkFrame` `place()`d over the main
+window — but the window is fixed and short, so a dropdown near its bottom
+edge (Encoding's Encoder/Format/Profile/Level row, Muxing's Output Format)
+had its lower entries clipped by the window edge. A separate window can
+overflow that edge instead (verified — `Baseline` now hangs *below* the app
+window). Consequences: (a) the popup isn't torn down with the tab that owns
+the dropdown, hence the `destroy()` override — matters on a live theme
+rebuild; (b) it doesn't move with the main window, so `open()` also drops it
+on any main-window `<Configure>` / `<Unmap>` (`_on_root_change`, guarded on
+`event.widget is` the toplevel since a toplevel binding also sees children's
+configures); (c) `open()` pins the popup's own `bg` to the panel's fill so
+the `CTkFrame`'s rounded-corner nooks don't show a mismatched square.
 
-**It flips upward when there's no room below.** The window is a fixed, fairly
-short size and Profile/Level sit two rows from its bottom edge, where a
-downward panel is clipped by the window with its last entries unreachable
-(Baseline was simply invisible). `open()` compares the panel's `reqheight`
-against the room below the button and places with `anchor="sw"` at the
-button's top-left instead — which puts the panel's *bottom* edge there so it
-grows upward. Verified for all four dropdowns: every panel lands fully inside
-the window.
+**It always opens straight downward, never shifted.** By request — there used
+to be an upward-flip-when-cramped branch here (`anchor="sw"`, grow up), then
+a stay-on-screen `y`-clamp; both removed. `open()` positions the popup window
+at the button's bottom edge (`winfo_rooty() + winfo_height() + _PANEL_GAP`,
+screen coords) at the button's width. Because the popup is its own window
+(above), entries past the app window's bottom edge overflow it rather than
+being clipped.
+
+**Open and close are animated (`_anim`).** The popup *unrolls*: `self.panel`
+sits at full size, `place()`d at `(0, 0)` and clipped by a popup window whose
+height animates from ~0 to full (ease-out), with `-alpha` fading
+`_ANIM_MIN_ALPHA`→1 in step. Close is the reverse, fewer steps
+(`_ANIM_CLOSE_STEPS` vs `_ANIM_OPEN_STEPS`, both × `_ANIM_INTERVAL_MS`),
+ending in `withdraw()`. `self.panel` uses `place(relwidth=1.0)` — *not* pack
+— specifically so the shorter-than-panel window frames **clip** it instead of
+compressing the rows (relative `relwidth` is fine on `.place()`; it's
+absolute `width=`/`height=` that CTk rejects there). One `after` job
+(`self._anim_job`), cancelled by every `open`/`close`/`destroy`. `destroy`
+and `_on_root_change` pass `animate=False` to `close()` for a synchronous
+hide.
 
 ### User feedback: dialogs and toasts
 
@@ -576,39 +711,52 @@ Three consequences worth knowing:
 
 **At most `_MAX_VISIBLE` (3) toasts hold a slot, and that cap is a
 performance fix, not just a cosmetic one.** Every toast runs its own
-`after()` chain, and each fade step is a `configure(fg_color=...)` that
-forces CTk to redraw the widget's rounded rectangle — so an uncapped stack
-turned button-mashing into dozens of concurrent timer chains competing with
-the UI thread. Measured as event-loop latency (how late a 10ms heartbeat
-actually fires) under 60 rapid notifications: **p90 79.7ms uncapped vs 6.1ms
-capped**, against a 6.0ms idle baseline. A further arrival calls `retire()`
-on the oldest slot-holder, which skips any remaining hold and cuts to a fast
-fade; retiring toasts stop claiming a slot immediately (`is_retiring`) but
-stay put while they fade rather than making everything below them jump.
-`forget()` triggers `_relayout()` so a dismissed toast doesn't leave a hole —
-survivors *snap* to their new slot rather than animating, since one more
-timer chain per survivor is exactly the cost being avoided. Two smaller cuts
-in the same spirit: the toast is `lift()`ed once at the start rather than on
-every slide step (restacking costs far more than the `place()` that moves
-it), and `show()` only forces an `update_idletasks()` layout pass when the
-tab frame genuinely hasn't been laid out yet.
+`after()` chain (slide, hold, fade) — so an uncapped stack turned
+button-mashing into dozens of concurrent timer chains competing with the UI
+thread, which showed up as tab switches lagging. When this was investigated
+(against an earlier CTk-redraw-per-step fade, since replaced by the `-alpha`
+one), event-loop latency under 60 rapid notifications measured **p90 79.7ms
+uncapped vs 6.1ms capped** against a 6.0ms idle baseline; the current alpha
+fade is lighter per step but the cap on concurrent chains is what keeps it
+bounded. A further arrival calls `retire()` on the oldest slot-holder, which
+skips any remaining hold and cuts to a fast fade; retiring toasts stop
+claiming a slot immediately (`is_retiring`) but stay put while they fade
+rather than making everything below them jump. `forget()` triggers
+`_relayout()` so a dismissed toast doesn't leave a hole — survivors *snap*
+to their new slot rather than animating, since one more timer chain per
+survivor is exactly the cost being avoided. `show()` also only forces an
+`update_idletasks()` layout pass when the tab frame genuinely hasn't been
+laid out yet.
 
-**The fade is color interpolation, not alpha.** Tk has no per-widget
-transparency (only a whole `Toplevel` takes `-alpha`), and CTk's
-`fg_color="transparent"` is a frozen one-time snapshot rather than real
-see-through (see Known Issues). So `_fade` walks the toast's `fg_color` and
-`text_color` toward the backdrop color over 20 steps. The blend goes through
-`winfo_rgb()` so it accepts Tk color names (`gray17`, what the tab backdrop
-resolves to) as readily as the theme's hex. The toast also pins `bg_color` to
-the backdrop for the same even-flooring reason the tab indicator does.
+`_fade` steps `-alpha` on the whole window from 1 toward 0 (no widget redraw
+at all); the toast still pins its canvas `bg` to `_TRANSPARENT_KEY` and the
+window's `-transparentcolor` to match, so the rounded corners stay punched
+out for the life of the fade.
 
-Current toasts: "Job added to queue." (Queue Task on either tab) and
-"Encoding/Muxing job has begun." (the direct Encode/Mux buttons).
+Current toasts: "Encoding/Muxing job added to queue." (Queue Task on either
+tab), "Encoding/Muxing job has begun." (the direct Encode/Mux buttons), and
+"Settings saved." (Settings tab's Save button — `go_to_queue=False`, so
+clicking it does nothing; it replaced an inline status label under the
+button). The Save button's other path — an actual theme change — posts no
+toast, since `apply_theme` rebuilds the tab (and clears live toasts) and is
+its own visible feedback.
 
 ### Components
 
 - **ThemedDropdown** (`components/dropdown.py`) — see "Dropdowns" above. Every
   dropdown in the app uses it; don't add a bare `CTkOptionMenu`.
+- **AnimatedSwitch** (`components/animated_switch.py`) — a `CTkSwitch`
+  subclass whose knob *slides* between off/on instead of snapping. Keeps a
+  float `_anim_value` (0..1) alongside CTk's boolean `_check_state`, eases it
+  on every `set()` (the common path for `toggle`/`select`/`deselect`/a bound
+  variable), and feeds it to the draw engine's `slider_value` (which already
+  takes a float) — so nothing about colours, the disabled look, hover or the
+  label is reimplemented. Overrides `_draw` to re-apply the fractional knob
+  position after CTk's own redraws (resize / appearance / colour changes
+  re-snap it to 0/1). Reaches into `_draw_engine` / `_draw` — private CTk
+  API, same as ThemedDropdown; customtkinter is version-pinned. Currently
+  only the Encoding tab's HDR-to-SDR toggle uses it (Settings' GPU switch is
+  still a stock `CTkSwitch`).
 - **MessageDialog** (`components/dialogs.py`) and **Toast / ToastManager**
   (`components/toast.py`) — see "User feedback: dialogs and toasts" above.
 - **DropBox** (`components/drop_box.py`) — self-packing (`self.pack()` in
@@ -617,6 +765,112 @@ Current toasts: "Job added to queue." (Queue Task on either tab) and
   (default 280; Muxing/Encoding both pass 380). Drop/double-click are bound
   on the frame, its content frame, and the label, since tkdnd doesn't
   propagate to children.
+- **ThumbnailCarousel** (`components/thumbnail_carousel.py`) — shows one of up
+  to ten preview frames at a time (Muxing + Encoding). Owns the thumbnail
+  `CTkLabel`, the fit-to-widget resize math (from the old
+  `_resize_thumbnail`), and the prev/next navigation. `set_frames(list)` is
+  the `on_thumbnail` broadcast target; `on_populated` fires once so the tab
+  can reveal it; `on_reselect` is the double-click handler.
+
+  **Two layers, kept separate — the chevrons/dots are their own layer, not
+  baked into any frame.** `_base_scaled` is the *pure* fitted video frame;
+  `_overlay` is a standalone RGBA layer (transparent except the chevrons +
+  dots for the current index), rebuilt only on an index / size / theme
+  change (`_build_overlay`). `_push(base)` composites overlay-onto-frame *at
+  paint time* — `Image.alpha_composite`, with the overlay's alpha scaled by
+  `_arrow_alpha` for the hover fade. They can't be real Tk widgets — Tk has
+  no per-pixel transparency for an in-window widget (same root cause as the
+  toast's corners, the tab indicator's nooks, the queue fill's backdrop), so
+  an overlaid `CTkButton` would be opaque with un-colour-matchable corner
+  nooks over the video — but keeping them as an image *layer* gets the same
+  result without dirtying the frames.
+
+  **The slide moves the picture, not the buttons** (`_animate_slide` /
+  `_slide_step`): a window crops across a `[current | next]` strip of
+  *pure* frames (`_SLIDE_STEPS` ticks, ease-out); `_push` drops the *same
+  fixed* `_overlay` on every tick, so the image content scrolls under
+  stationary chevrons (one set — the destination's — not two sliding past
+  each other). The fade and the slide **share one job channel**
+  (`_cancel_anim` covers both `_fade_job` and `_anim_job`), so they can't
+  fight over the label. Every slide starts from `_displayed_base` (the pure
+  frame literally on screen right now), so an interrupting step — a
+  spam-click — chains straight on from the current partial instead of
+  restarting.
+
+  **The prev/next control is a disc in the theme's `primary` colour** with a
+  chevron in `readable_text_on(primary)` (black or white — the same call the
+  themed buttons use). Near-solid (`alpha 230`) rather than a translucent
+  scrim, so it reads the same over a bright frame region as a dark one — an
+  earlier translucent version vanished against matching pixels. Both colours
+  are resolved once in `__init__`; a live theme switch rebuilds the carousel
+  with its tab, so there's nothing to re-read in place. **The disc is sized
+  from each frame's own dimensions** (`min(w,h)*0.12`, capped at `w*0.16` /
+  `h*0.42`) and sits flush against the frame edge (`margin + disc_r` in from
+  it) — a fixed fractional inset clipped the disc on letterboxed / narrow
+  (2.40:1) frames. The chevron itself is drawn with an **optical-centre
+  nudge** (`0.13` of its half-width toward the point in `_draw_chevron`): its
+  two arm-ends outweigh the single tip, so a geometrically centred V reads as
+  shifted toward its opening. The nudge is cosmetic only — `_disc_centers` /
+  the click hit-test still use the true centre.
+
+  **The whole overlay is antialiased by supersampling.** PIL's `ellipse` /
+  `line` have no AA of their own, so `_build_overlay` draws at `_OVERLAY_SS`
+  (4x) — `_OVERLAY_SS_ANIM` (2x) for the per-tick rebuilds mid-slide, where
+  the softer in-between frame is invisible in motion — and box-filters down.
+  The downscale runs in **premultiplied-alpha space** (`.convert("RGBa")`
+  before `.resize()`, back to `"RGBA"` after): without it LANCZOS blends the
+  transparent border's black RGB into the edge pixels as a grey fringe (same
+  family of bug as the toast's magenta corner fringe). `_rescale(overlay=
+  False)` from `_step` skips the ~12ms full-SS build since the slide's first
+  tick rebuilds it anyway; `_slide_step`'s final tick and `_cancel_anim` both
+  restore a full-SS overlay so a settled preview is never left soft.
+
+  **Dot indicators are a three-size row that moves and resizes.** The centre
+  `_DOT_CLUSTER` (3) dots are large and **screen-stationary** (always at
+  `w/2-gap`, `w/2`, `w/2+gap` — `_dot_geometry` pins the cluster midpoint to
+  centre); beyond them `_DOT_LOOK` (2) dots per side taper medium-then-small,
+  and only frames that exist get a dot, so the row is 7 wide in the interior
+  (`s m L L L m s`), 5 at the ends (`L L L m s`, mirrored), growing/shrinking
+  between. The current-frame highlight *rides the cluster edge it's heading
+  for* — right large slot when advancing, left when going back
+  (`_resolve_dot_start`) — and a step only scrolls the whole row once the
+  highlight is already at that edge; until then the surrounding dots hold
+  still and just the highlight hops slot to slot, so a direction change walks
+  the highlight back across the middle slot before anything scrolls. A
+  multi-step jump snaps straight to the target edge. `_dot_start` (frame in
+  the leftmost large slot) is the state; `_dot_anim` = `(prev_start,
+  prev_index)` holds the from-state while the row re-flows. The re-flow is
+  part of `_overlay`: `_slide_step` rebuilds the overlay each tick with the
+  dots interpolated (`_draw_dots(anim, t)` — entering dots grow from `r=0`,
+  leaving ones shrink to it, the white highlight cross-fades old→new dot) on
+  the **same eased clock as the picture slide**, so both settle together.
+  `_cancel_anim` settles the row if a slide is cut short. Dots stay
+  white/translucent (theme-independent — white reads on any frame).
+
+  Navigation **clamps at both ends** (only the chevron that leads somewhere
+  is drawn — none at index 0's left, none at the last index's right).
+
+  **Clicks all go through `_handle_press`, and every click of a spam-burst
+  steps.** Tk delivers `<Button-1>` for the first press of a burst and *only*
+  `<Double-Button-1>` for every press after it (never `<Button-1>` again once
+  `<Double>` is bound) — so both are bound to `_handle_press`, with a
+  `repeat` flag. A press on a chevron disc steps, `repeat` or not. Hit-test:
+  `_event_image_xy` converts the event to image-local coords — **in screen
+  coords (`x_root`/`y_root`) on purpose**, because `CTkLabel.bind()` binds
+  *both* the inner `tk.Label` (sized to the image, centred) and the inner
+  canvas (fills the frame), and they report `event.x`/`.y` in different
+  origins, so a widget-relative formula is right for only one of them and
+  half the disc went dead. `_hit_disc_at` then boxes the point against
+  `_disc_centers` (the whole disc, shared with the drawing).
+
+  **Reselect (`on_reselect`) needs a `repeat` press in the frame's central
+  area whose predecessor was also central.** `_in_chevron_band` excludes the
+  left/right edge strip a disc lives in — so spam-clicking a chevron *past
+  the last preview* (its disc now gone) is still just harmless edge clicks,
+  not a double-click that pops the file dialog. A deliberate double-click on
+  the middle of the frame still reselects. The first render is deferred
+  `after(50)` because CTk geometry is unreliable until the widget's first
+  map pass.
 - **TimeSpinner** (`components/time_spinner.py`) — the most intricate widget.
   A HH:MM:SS field with a fake block cursor: internal state is a 6-char digit
   list, and `cursor_pos` indexes directly into it (0-5) — the single source of
@@ -659,11 +913,13 @@ plumbing. Keep it off the Tk main thread — a blocking `subprocess.run` there
 will freeze the UI.
 
 Encoding settings dict shape (`_gather_settings`):
-`input_file, output_path, start_secs, duration_secs, gpu_enabled, hdr_to_sdr,
-retain_length, crf, profile, level`. Muxing's is the same minus the five
-encoding-only keys (`gpu_enabled, hdr_to_sdr, crf, profile, level`) — the
-Queue tab's details popup relies on those keys being *absent* (not just
-falsy) to correctly hide them for Mux tasks.
+`input_file, output_path, encoder, output_format, start_secs, duration_secs,
+gpu_enabled, hdr_to_sdr, retain_length, strip_video, crf, profile, level`.
+Muxing's is the same minus the seven encoding-only keys (`encoder,
+gpu_enabled, hdr_to_sdr, strip_video, crf, profile, level`) — `output_format`
+is shared, present on both. The Queue tab's details popup (`_DETAIL_FIELDS`)
+relies on the encoding-only keys being *absent* (not just falsy) to correctly
+hide them for Mux tasks.
 
 ## Conventions
 
@@ -674,10 +930,11 @@ falsy) to correctly hide them for Mux tasks.
   primary or secondary color is **not** a hardcoded literal — it comes from
   `theme["primary_text"]` / `theme["secondary_text"]`, which
   `readable_text_on()` resolves to black or white per-color for contrast
-  (see "Theming" above). The Stop Queue button is the one deliberate
-  fill-color departure — red (`#E5484D`, hover `#C93C40`) to read as
-  destructive/halting rather than a primary action, and that red **never**
-  changes with the theme (its label still goes through `readable_text_on`).
+  (see "Theming" above). The one deliberate fill-color departure is a
+  destructive/halting red — `STOP_RED` (`#E5484D`, hover `STOP_RED_HOVER`
+  `#C93C40`) in `core/theme.py`, used by the `Stop Queue` button and the
+  Encoding tab's `Strip Video` checkbox. It **never** changes with the theme
+  (labels/checkmarks on it still go through `readable_text_on`).
 - Widgets are stored as `self.` attributes even when not obviously reused.
 - Comments are used generously as section markers (`# --- Bottom Section ---`) and
   to explain *why* a layout choice was made, especially for Tk/CTk gotchas that
@@ -700,13 +957,16 @@ falsy) to correctly hide them for Mux tasks.
   corners (canvas `bg` is the row's backdrop, not its grey); and glyph
   shearing at the fill edge (the seam is now between two canvases instead
   of a canvas and a `CTkLabel`). See the Queue tab section for each.
-- **Muxing and Encoding duplicate a lot of code** — `display_image`,
-  `_on_resize`, `_resize_thumbnail`, `select_input_file`,
-  `toggle_time_spinners`, and most of `select_save_location` are near-verbatim
-  copies between the two tabs. This was done deliberately per explicit
-  instruction ("do the same thing to the muxing tab") rather than refactored
-  into a shared base, but if a third tab needs the same pattern, that's the
-  point to actually extract it rather than copy a third time.
+- **Muxing and Encoding duplicate a lot of code** — `select_input_file`,
+  `toggle_time_spinners`, `_autofill_output_path`, `_on_format_change`, the
+  `_OUTPUT_FORMATS` list, `_reveal_preview`, and most of
+  `select_save_location` are near-verbatim copies between the two tabs. This
+  was done deliberately per explicit instruction ("do the same thing to the
+  muxing tab") rather than refactored into a shared base, but if a third tab
+  needs the same pattern, that's the point to actually extract it rather than
+  copy a third time. (The thumbnail half — `display_image` / `_on_resize` /
+  `_resize_thumbnail` / `_raw_pil_image` — *was* extracted, into
+  `ThumbnailCarousel`, when the multi-frame preview landed.)
 - **`fg_color="transparent"` on a CTk widget is not real per-pixel
   transparency.** `CTkBaseClass._detect_color_of_master()` resolves it
   exactly once, at widget-creation time, to a static snapshot of the
@@ -773,6 +1033,16 @@ falsy) to correctly hide them for Mux tasks.
   `.configure()` (raises `ValueError` otherwise). Hit twice in this codebase
   (the tab indicator, and the queue's dark-text overlay): always
   `widget.configure(width=..., height=...)` then `widget.place(x=..., y=...)`.
+- **`CTkLabel.bind()` binds two inner widgets, and they disagree on event
+  coordinates.** It forwards the binding to *both* its inner `tk.Label` (on
+  top, sized to the content, centred in the frame) and its inner `CTkCanvas`
+  (behind, fills the frame). A click on the label's image goes to the inner
+  label → `event.x`/`.y` are content-local; a click on the surrounding
+  padding goes to the canvas → `event.x`/`.y` are frame-local. One handler
+  bound via `CTkLabel.bind` sees both, with no marker saying which. The
+  `ThumbnailCarousel` chevron hit-test was half-dead until it switched to
+  `event.x_root`/`y_root` (screen coords, unambiguous) against the widget's
+  own `winfo_rootx()` — see its `_event_image_xy`.
 - **CTk widget geometry is unreliable until the widget has actually been
   mapped onscreen once** — `winfo_width()`/`winfo_height()`/`winfo_y()` can
   return stale 1px placeholders even after `update_idletasks()`, and even
@@ -789,3 +1059,12 @@ falsy) to correctly hide them for Mux tasks.
 - The window is `resizable(False, False)`, yet EncodingTab/MuxingTab have
   `<Configure>` thumbnail rescale handlers — they only fire on layout
   changes, not user resizing (they do still fire once at initial layout).
+- **PIL's `ImageDraw` primitives (`ellipse`, `line`, …) don't antialias** —
+  edges come out hard-stepped. Supersample: draw onto an `ss`x-larger image,
+  then `.resize((w, h), Image.LANCZOS)`. If the layer has transparency,
+  downscale in **premultiplied-alpha space** — `img.convert("RGBa")` before
+  the resize, `.convert("RGBA")` after — or LANCZOS mixes the transparent
+  pixels' (0,0,0,0) RGB into the visible edge as a grey/dark fringe (the same
+  root cause as the toast's magenta corner fringe in Known Issues). The
+  `ThumbnailCarousel` overlay (chevron discs + dot row) does exactly this;
+  see its section.

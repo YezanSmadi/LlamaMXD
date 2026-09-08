@@ -159,11 +159,6 @@ class SettingsTab(ctk.CTkFrame):
         )
         self.save_btn.pack(anchor="w", pady=(4, 4))
 
-        self.save_status_label = ctk.CTkLabel(
-            master=self.options_frame, text="", font=("Arial", 10), text_color="gray60"
-        )
-        self.save_status_label.pack(anchor="w")
-
         # Minimizing / unmapping auto-persists too (on_leave, called by
         # LlamaGUI.show_tab, handles the tab-switch case deterministically).
         self.bind("<Unmap>", self._autosave)
@@ -257,6 +252,8 @@ class SettingsTab(ctk.CTkFrame):
         self._sync_state_from_widgets()
         save_settings(self._settings_snapshot())
         if theme_changed:
+            # apply_theme rebuilds this tab (and clears toasts on the way), so
+            # the rebuild itself is the feedback — nothing to post here.
             self.app.apply_theme(new_theme)
             return
-        self.save_status_label.configure(text="Settings saved.")
+        self.app.notify("Settings saved.", go_to_queue=False)
