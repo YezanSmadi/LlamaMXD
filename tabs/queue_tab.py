@@ -4,13 +4,14 @@ import customtkinter as ctk
 
 from components.dialogs import ask_yes_no
 from core.utilities import extract_video_thumbnail
-from core.theme import get_active_theme, readable_text_on
+from core.theme import get_active_theme, readable_text_on, STOP_RED, STOP_RED_HOVER
 
 # The Stop Queue button's red is a permanent, theme-independent exception
-# (see CLAUDE.md), but its label still picks a legible color against that
-# fixed red the same adaptive way every themed color does.
-_STOP_RED = "#E5484D"
-_STOP_RED_HOVER = "#C93C40"
+# (see CLAUDE.md, and STOP_RED in core/theme.py — shared with the Encoding
+# tab's Strip Video checkbox). Its label still picks a legible color against
+# that fixed red the same adaptive way every themed color does.
+_STOP_RED = STOP_RED
+_STOP_RED_HOVER = STOP_RED_HOVER
 _STOP_TEXT = readable_text_on(_STOP_RED)
 
 # Read once at import time, and reassigned by refresh_theme() on a live
@@ -39,9 +40,12 @@ _DETAIL_SCROLL_HEIGHT = 140  # fixed so Encode/Mux popups match height; Encode's
 _DETAIL_FIELDS = [
     ("input_file", "Input File", None),
     ("output_path", "Output Path", None),
+    ("encoder", "Encoder", None),
+    ("output_format", "Format", None),
     ("start_secs", "Start Time", "time"),
     ("duration_secs", "Clip Duration", "time"),
     ("retain_length", "Retain Length", "bool"),
+    ("strip_video", "Strip Video", "bool"),
     ("gpu_enabled", "GPU Acceleration", "bool"),
     ("hdr_to_sdr", "HDR to SDR", "bool"),
     ("crf", "Quality (CRF)", None),
@@ -55,6 +59,41 @@ def _format_seconds(total_seconds):
     hrs, rem = divmod(total_seconds, 3600)
     mins, secs = divmod(rem, 60)
     return f"{hrs:02d}:{mins:02d}:{secs:02d}"
+
+
+_SCROLLBAR_GUTTER = 18  # px held at the list's right edge for the auto-hiding bar
+
+
+def _autohide_scrollbar_in_gutter(scroll_frame):
+    """Show a CTkScrollableFrame's vertical scrollbar only while its content
+    overflows — with the row area never changing width.
+
+    CTk grids the scrollbar into its own column and touches nothing else, so
+    the bar turning on steals ~18px from the rows; worse, the canvas re-fits
+    only on its next `<Configure>`, so the bar spends a beat drawn *over* the
+    rows before they reflow narrower (exactly the flicker the queue showed).
+    Two parts fix it: (1) give that column a permanent `minsize` so the
+    gutter is always there whether the bar sits in it or not — the caller
+    trims its own right padding to match, so the gutter comes out of the
+    window margin, not the rows; (2) route the canvas's `yscrollcommand`
+    through a relay that `grid()`/`grid_remove()`s the bar as the content
+    crosses the overflow line, still forwarding every update to the real
+    `CTkScrollbar.set` so scrolling itself is untouched. Reaches for
+    `_parent_frame` / `_scrollbar` / `_parent_canvas` — CTk exposes no hook."""
+    bar = scroll_frame._scrollbar
+    canvas = scroll_frame._parent_canvas
+    scroll_frame._parent_frame.grid_columnconfigure(1, minsize=_SCROLLBAR_GUTTER)
+
+    def relay(start, end):
+        bar.set(start, end)
+        overflowing = not (float(start) <= 0.0 and float(end) >= 1.0)
+        if overflowing == relay.shown:
+            return
+        relay.shown = overflowing
+        (bar.grid if overflowing else bar.grid_remove)()
+
+    relay.shown = True  # CTk grids the bar in by default
+    canvas.configure(yscrollcommand=relay)
 
 
 class QueueTab(ctk.CTkFrame):
@@ -84,7 +123,12 @@ class QueueTab(ctk.CTkFrame):
 
         # Scrollable list of queued tasks
         self.list_frame = ctk.CTkScrollableFrame(master=self, fg_color="transparent")
-        self.list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+        # Right pad trimmed from 20 to 3: _autohide_scrollbar_in_gutter reserves
+        # a fixed ~18px column at the list's right edge for the scrollbar, and
+        # that gutter should come out of the window margin, not the row width —
+        # so the rows stay put whether or not the bar is showing.
+        self.list_frame.pack(fill="both", expand=True, padx=(20, 3), pady=(0, 10))
+        _autohide_scrollbar_in_gutter(self.list_frame)
 
         # Empty-state placeholder
         self.empty_label = ctk.CTkLabel(
@@ -249,8 +293,13 @@ class QueueTab(ctk.CTkFrame):
         )
         remove_btn.pack(side="right", padx=10)
 
-        # Single click shows job details (bound on everything but remove_btn).
-        for widget in (row, thumb_label, description_label, status_label):
+        # Single click shows job details — bound on every part of the row
+        # except remove_btn. The two progress canvases are in the list because
+        # while a job runs they sit on top of description_label and would
+        # otherwise swallow every click that lands on the description text,
+        # leaving only the thumbnail and status-label ends of the row live.
+        for widget in (row, thumb_label, description_label, status_label,
+                       base_canvas, progress_canvas):
             widget.bind("<Button-1>", lambda e, tid=task_id: self._show_details(tid))
 
         self._rows[task_id] = {

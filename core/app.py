@@ -1,10 +1,12 @@
 import os
+import queue
 import sys
+import threading
 import customtkinter as ctk
 from tkinterdnd2 import TkinterDnD
 from PIL import Image
 
-from core.utilities import extract_video_thumbnail
+from core.utilities import extract_video_thumbnails
 from core.theme import get_active_theme, load_settings, apply_ctk_theme
 from components.dialogs import ask_yes_no
 from components.sidebar import Sidebar
@@ -49,6 +51,23 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         # Encoding tab into Settings) — every queued Encode task reads it.
         self.gpu_enabled = bool(_settings["gpu_enabled"])
         self.tab_ui_registry = []
+        # Preview thumbnails for the currently-selected file. Decoded once
+        # (on a background thread — see _load_thumbnails) and cached here so
+        # tab switches and live theme rebuilds never re-decode. _thumb_token
+        # rises on every request so a slow decode of a file the user has
+        # since replaced can be dropped on arrival.
+        self._thumb_frames = []
+        self._thumb_frames_path = None
+        self._thumb_token = 0
+        # Which preview frame the carousels are scrubbed to — shared across
+        # tabs (Muxing/Encoding both mirror it) and preserved across a live
+        # theme rebuild. Reset to 0 only when the input file actually changes.
+        self._preview_index = 0
+        # Decode threads hand their results back through this queue rather than
+        # touching a widget or calling after() directly — Tkinter is not
+        # thread-safe. _drain_thumbnails polls it on the main thread.
+        self._thumb_queue = queue.Queue()
+        self._thumb_pending = 0
         self._tab_indicator_job = None
         self._current_tab_name = "Muxing"
         # In-window drop-down notifications ("job added to queue" etc). Built
@@ -116,9 +135,14 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         self.show_tab("Muxing")
 
     def register_tab_ui(self, label_widget, img_widget, on_thumbnail=None):
-        """Registers a tab's UI controls for batch cross-tab updates."""
+        """Registers a tab's UI controls for batch cross-tab updates.
+        `on_thumbnail` receives the full list of preview frames (PIL Images);
+        the default handler just renders the first at a fixed size."""
         if on_thumbnail is None:
-            def on_thumbnail(pil_img, _img_widget=img_widget):
+            def on_thumbnail(frames, _img_widget=img_widget):
+                if not frames:
+                    return
+                pil_img = frames[0]
                 ctk_img = ctk.CTkImage(
                     light_image=pil_img, dark_image=pil_img, size=(350, 200)
                 )
@@ -129,19 +153,23 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         )
 
     def update_global_file(self, file_path):
-        """Central method triggered by drop box imports."""
+        """Central method triggered by drop box imports. Updates the shared
+        path and every tab's text/output field synchronously, then resolves
+        the preview thumbnails (cached, or decoded off-thread)."""
         clean_path = file_path.strip("{}").strip()
         if not clean_path:
             return
 
+        # A genuinely new file starts the carousels back at frame 0; the same
+        # path again (e.g. re-broadcast during a theme rebuild) keeps the
+        # scrub position the user was on.
+        if clean_path != self.current_file_path:
+            self._preview_index = 0
         self.current_file_path = clean_path
-        raw_thumbnail = extract_video_thumbnail(self.current_file_path)
 
         for ui in self.tab_ui_registry:
             if ui["label"]:
                 ui["label"].configure(text=f"Selected File:\n{self.current_file_path}")
-            if raw_thumbnail is not None:
-                ui["on_thumbnail"](raw_thumbnail)
 
         for tab in self.tabs.values():
             if hasattr(tab, "drop_box"):
@@ -151,6 +179,84 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
             autofill = getattr(tab, "_autofill_output_path", None)
             if callable(autofill):
                 autofill()
+
+        self._load_thumbnails(clean_path)
+
+    def _load_thumbnails(self, path):
+        """Broadcasts this file's preview frames to every registered tab.
+
+        Cache hit (same path already decoded) → broadcast immediately, so a
+        tab switch or a live theme rebuild costs nothing. Miss → decode ten
+        interior frames on a daemon thread (ten frame-seeks would visibly
+        stall the Tk loop) and broadcast when they land, unless the user has
+        picked a different file in the meantime (stale _thumb_token)."""
+        self._thumb_token += 1
+        token = self._thumb_token
+
+        if path == self._thumb_frames_path and self._thumb_frames:
+            self._broadcast_thumbnails(self._thumb_frames)
+            return
+
+        self._thumb_pending += 1
+        threading.Thread(
+            target=self._decode_worker, args=(token, path), daemon=True
+        ).start()
+        if self._thumb_pending == 1:
+            self.after(80, self._drain_thumbnails)
+
+    def _decode_worker(self, token, path):
+        """Off-thread frame decode. Must not touch a widget or call after() —
+        results go back via the queue only."""
+        frames = extract_video_thumbnails(path, count=10)
+        self._thumb_queue.put((token, path, frames))
+
+    def _drain_thumbnails(self):
+        """Main-thread poll: delivers any finished decode results, then
+        re-arms itself while decode threads are still outstanding."""
+        while True:
+            try:
+                token, path, frames = self._thumb_queue.get_nowait()
+            except queue.Empty:
+                break
+            self._thumb_pending = max(0, self._thumb_pending - 1)
+            self._deliver_thumbnails(token, path, frames)
+        if self._thumb_pending > 0:
+            self.after(80, self._drain_thumbnails)
+
+    def _deliver_thumbnails(self, token, path, frames):
+        """Drops stale (user moved on) or empty (undecodable) results;
+        otherwise caches and broadcasts."""
+        if token != self._thumb_token or not self.winfo_exists():
+            return
+        if not frames:
+            return
+        self._thumb_frames = frames
+        self._thumb_frames_path = path
+        self._broadcast_thumbnails(frames)
+
+    def _broadcast_thumbnails(self, frames):
+        """Hands the frame list to every registered tab's thumbnail handler,
+        then re-points each carousel at the shared scrub index (0 for a fresh
+        file; whatever the user was on if this is a theme-rebuild re-broadcast
+        — set_frames resets each new carousel to 0)."""
+        for ui in self.tab_ui_registry:
+            ui["on_thumbnail"](frames)
+            sync = getattr(ui["img"], "sync_index", None)
+            if callable(sync):
+                sync(self._preview_index)
+
+    def sync_preview_index(self, index):
+        """A carousel was scrubbed to `index`; mirror it onto every other
+        carousel so the selected preview frame is shared across tabs. Called
+        by the carousels via their `on_index` callback; `sync_index` on the
+        receiving carousels does not fire `on_index` back, so this can't loop."""
+        if index == self._preview_index:
+            return
+        self._preview_index = index
+        for ui in self.tab_ui_registry:
+            sync = getattr(ui["img"], "sync_index", None)
+            if callable(sync):
+                sync(index)
 
     def show_tab(self, name):
         # Give the tab being left a chance to flush state (Settings uses this
@@ -224,7 +330,7 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         # odd height paints one row short and exposes a strip of the widget's
         # own canvas along the bottom edge (this was a visible dark line under
         # the pipe at height 9 — see the bg_color note where these are built).
-        line_h = 8
+        line_h = 12
         line_y = button_y + button_h // 2 - line_h // 2
         self.tab_indicator_line.configure(width=strip_w, height=line_h)
         self.tab_indicator_line.place(x=strip_left, y=line_y)
