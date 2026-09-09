@@ -1,7 +1,62 @@
+import json
+import os
+import subprocess
+
 import customtkinter as ctk
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import cv2
 from PIL import Image
+
+from core import formats
+
+# Windows-only flag that keeps ffprobe from flashing a console window over
+# the GUI. Absent on other platforms, hence the getattr default.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def probe_media(path):
+    """Best-effort ffprobe of `path`, as
+    `{"container": ".mp4", "video": "H.264 (x264)", "audio": "AAC"}`.
+
+    This is what makes `Source` mean something concrete: it lets the tabs
+    default the output container to the input's own, show what a copied
+    stream actually is in the Overview rundown, and — on Muxing, which never
+    re-encodes — work out which containers the file can legally be remuxed
+    into (`formats.containers_for`).
+
+    Entirely optional. Any missing key comes back None, and every failure
+    path (no ffmpeg on PATH, unreadable file, odd JSON, a slow probe)
+    returns a dict of Nones rather than raising, because nothing here is
+    required for the UI to function — it only ever *improves* defaults.
+
+    Runs a subprocess, so callers must keep it off the Tk thread (LlamaGUI
+    does it on the same decode worker as the thumbnails)."""
+    unknown = {"container": None, "video": None, "audio": None}
+    if not path or not os.path.exists(path):
+        return unknown
+    try:
+        completed = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries",
+             "stream=codec_type,codec_name", "-of", "json", path],
+            capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
+        )
+        streams = json.loads(completed.stdout or "{}").get("streams", [])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return unknown
+
+    info = dict(unknown)
+    extension = os.path.splitext(path)[1].lower()
+    if extension in formats.containers():
+        info["container"] = extension
+    # First stream of each kind wins — the app models exactly one video and
+    # one audio stream, so a multi-track source is described by its first.
+    for stream in streams:
+        kind, name = stream.get("codec_type"), stream.get("codec_name")
+        if kind == "video" and info["video"] is None:
+            info["video"] = formats.FFPROBE_VIDEO.get(name)
+        elif kind == "audio" and info["audio"] is None:
+            info["audio"] = formats.FFPROBE_AUDIO.get(name)
+    return info
 
 
 def extract_video_thumbnails(video_path, count=10):

@@ -3,7 +3,7 @@
 A Windows desktop GUI for video muxing/encoding, built with CustomTkinter. Wraps
 (eventually) ffmpeg and yt-dlp behind a tabbed interface. Repo:
 `https://github.com/YezanSmadi/LlamaMXD`. Public domain (Unlicense). Currently
-v0.5.0-alpha.2 (see `components/sidebar.py`'s footer).
+v0.5.0-alpha.3 (see `components/sidebar.py`'s footer).
 
 ## Running
 
@@ -25,7 +25,9 @@ globally in practice: `customtkinter` 6.0, `tkinterdnd2` 0.6.2, `opencv-python`
 ```
 main.py              entry point: sets appearance mode, constructs LlamaGUI, mainloop
 core/app.py          LlamaGUI — the root window, owns shared state, tab routing, active-tab indicator
-core/utilities.py    stateless helpers (currently just thumbnail extraction)
+core/formats.py      container/codec compatibility + the option cascade (pure data, no Tk)
+core/presets.py      named codec/quality recipes, persisted to presets.json
+core/utilities.py    stateless helpers (thumbnail extraction, ffprobe media probe)
 components/          reusable widgets, tab-agnostic
 tabs/                one CTkFrame subclass per tab
 ```
@@ -181,6 +183,21 @@ instant jump, no slide, no `on_index` re-fire — so it can't loop).
 `YtDlpTab` deliberately does not (the call is commented out at
 `tabs/ytdlp_tab.py:23`).
 
+**The same worker also probes the file** (`core.utilities.probe_media`, a
+best-effort `ffprobe`), because `Source` needs to mean something concrete:
+the result (`app.media_info` — container, video codec, audio codec) is what
+lets the tabs default the output container to the input's own, name a copied
+stream in the Overview rundown, and — on Muxing, which never re-encodes —
+work out which containers the file can legally be remuxed into. The queue
+carries **tagged messages** (`("info", …)` then `("frames", …)`) rather than
+bare tuples, so the ~50ms probe can land and settle the defaults long before
+the ten frame-seeks finish; `"frames"` is always last and is what clears the
+pending count. Delivery is broadcast by `_broadcast_media_info` to any tab
+exposing `on_media_info`. Every field may be None and every failure path
+(no ffmpeg on PATH, unreadable file) returns Nones rather than raising —
+nothing here is required for the UI to work, it only ever *improves*
+defaults.
+
 ### Theming (`core/theme.py`)
 
 The app's brand colors are **not** hardcoded per-widget, and switching
@@ -291,12 +308,58 @@ widget that needs to pick it up. Specifically:
 the correct theme without needing `apply_theme`'s rebuild machinery at all
 — that path only exists for the *live* in-session switch.
 
+**Presets** (`core/presets.py`) are a separate, gitignored `presets.json`
+at the repo root, shaped `{tab: {name: settings}}`. A preset is a **recipe,
+not a job**: `PRESET_KEYS` limits it to the container and the codec/quality
+choices, and deliberately excludes the trim, the input/output paths, and
+(on Muxing) the track picks — so loading "YouTube 1080p" can never quietly
+re-trim a clip or repoint its output. Scoped per tab, since Muxing and
+Encoding no longer share a settings shape at all. Every read is best-effort;
+a missing or corrupt file yields an empty set rather than raising.
+
 **Persistence**: `load_settings()`/`save_settings()` read/write a small
 `settings.json` at the repo root (gitignored — a local preference file, not
 shared repo state), holding `theme`, `appearance_mode`, `default_save_location`,
 and `gpu_enabled`; missing keys or a missing/corrupt file fall back to
 defaults (`Lemon` / `"System"` / `default_output_dir()` — i.e.
 `~/Videos/LlamaMXD Export` — / `True`) rather than raising.
+
+### Option compatibility (`core/formats.py`)
+
+Pure data + lookups, no Tk. **The option tree has exactly one root: the
+output container.** It decides which video and audio codecs are legal; the
+chosen video codec then decides which profiles and levels exist and what
+kind of quality control applies. Nothing flows the other way. That
+one-directional rule is what makes an illegal combination
+*unrepresentable* — you never need a dialog telling someone their codec
+doesn't fit their container, because the list never offered it.
+
+`_CONTAINERS` is the compatibility matrix. It exists because of WebM, which
+shares **no** video codec with mp4/mov: before this table, picking `.webm`
+left every entry in the encoder list illegal (H.264/H.265/MPEG-4/MPEG-2 are
+all unusable there), so the format was silently broken. WebM now offers
+VP8/VP9/AV1 + Opus/Vorbis and nothing else.
+
+`_ENCODER_SPECS` carries each codec's profiles, levels and rate-control
+spec. Two things it deliberately does *not* do: share profile names between
+codecs (`Main 10` is H.265's, `High`/`Baseline` are H.264's), or assume CRF
+is universal — MPEG-4/MPEG-2 take a **qscale on 1-31** rather than a CRF on
+0-51, and VP8/VP9/AV1 use 0-63. `quality_for()` returns the kind, range,
+default and slider end-labels together so the UI can re-range the slider
+rather than showing one codec's numbers under another's name. An empty
+`profiles`/`levels` list means the codec genuinely has none, and the UI
+disables that dropdown rather than borrowing H.264's values.
+
+`SOURCE` (`"Source"`) is a first-class value in every codec list, meaning
+"whatever the input already has" — i.e. stream-copy. It's the default
+everywhere, so an untouched form is a straight passthrough, and it's what
+disables everything that would require re-encoding.
+
+`containers_for(video, audio)` is **the Muxing inversion** — given the
+codecs a source actually holds, which containers can it be remuxed into
+without re-encoding. A `None` codec means "unknown, or no such stream" and
+constrains nothing, so an unprobed file still offers everything rather than
+being narrowed on a guess.
 
 ### Tabs
 
@@ -309,49 +372,152 @@ defaults (`Lemon` / `"System"` / `default_output_dir()` — i.e.
   `expand=True` absorbs whatever's left). Both have `_gather_settings()` →
   plain dict, `load_settings(dict)` → restore UI, `_validate_settings()`,
   a `Queue Task` button, and a yellow "do it now" button (`Encode`/`Mux`)
-  that queues *and* immediately starts the task. Both also have an **Output
-  Format** `ThemedDropdown` (`format_menu`, values `.mp4/.mkv/.mov/.webm`,
-  default `.mp4`) — its value is the `output_format` settings key, and
-  `_on_format_change` swaps the suggested output path's extension to match
-  (only when the path already has one to replace; before a file is picked
-  the entry holds just a folder and `_autofill_output_path` supplies the
-  extension). `select_save_location`'s default filename and
-  `defaultextension` follow it too. On Encoding it's the second of the four
-  dropdowns in the codec-options row (`Encoder` / `Format` / `Profile` /
-  `Level` — `Encoder` leads, `Format` follows since it's the one that
-  renames the file); on Muxing it's its own row, whose `pady` is hand-set to
-  `(6, 4)` so the gap around it matches Encoding's (which comes for free
-  there from `main_options_row`'s bottom pad — Muxing has no such wrapper
-  row). The four Encoding dropdowns' widths are hand-tuned tight
-  (122/74/92/64) so the row fits `left_col` without crowding the CRF slider
-  in `right_col`.
-  Encoding additionally has: the **Encoder** dropdown (`encoder_menu`, values
-  `H.264 (x264)` / `H.265 (x265)` / `MPEG-4` / `MPEG-2` — display strings
-  only, no ffmpeg mapping yet, `encoder` settings key); Profile/Level
-  dropdowns; a CRF slider; an HDR-to-SDR toggle that's an **`AnimatedSwitch`**
-  (slides instead of snapping — see Components); and a **Strip Video**
+  that queues *and* immediately starts the task.
+
+  **The two tabs are not variations on each other — Muxing never
+  re-encodes.** Muxing is container change + stream selection, everything
+  `-c copy`; it has no codec controls at all. "Copy video, re-encode audio"
+  is therefore *not* a Muxing job — it's an Encoding job with the video
+  codec left on `Source`. Encoding is the superset. That split is what stops
+  the two tabs from collapsing into one fuzzy thing.
+
+  Both have an **Output Format** `ThemedDropdown` (`format_menu`, values
+  from `formats.containers()`) on their **Overview** sub-tab — its value is
+  the `output_format` settings key, and `_on_format_change` swaps the
+  suggested output path's extension to match (only when the path already has
+  one to replace; before a file is picked the entry holds just a folder and
+  `_autofill_output_path` supplies the extension). `select_save_location`'s
+  default filename and `defaultextension` follow it too. It lives on
+  Overview because it is **the root of the whole option tree** (see
+  `core/formats.py`): it filters *both* codec lists, so the panel that owns
+  it has to be reachable from either side.
+  Encoding's **Video** sub-tab has the `Encoder` / `Profile` / `Level` codec
+  row, a quality slider, an HDR-to-SDR toggle that's an **`AnimatedSwitch`**
+  (slides instead of snapping — see Components), and a **Strip Video**
   checkbox (`strip_video_check`) in the red `STOP_RED` (the Stop Queue
-  colour), which `_on_strip_video_toggle` uses to blanket-`state="disabled"`
-  every option control at once — a plain binary disable, so a control that's
-  already disabled (spinners under Retain Video Length) just stays as it
-  looks, and unticking restores each control to the state it *should* be in
-  (spinners back under `toggle_time_spinners`). All Encoding-only fields — GPU
-  acceleration used to be a switch here too but is now the global Settings
-  preference `app.gpu_enabled`, which `EncodingTab._gather_settings` reads
-  directly; Muxing has just the Retain Video Length checkbox + time spinners.
-  Keep `_gather_settings`/`load_settings` in sync when adding a control to
-  either tab.
+  colour). GPU acceleration used to be a switch here too but is now the
+  global Settings preference `app.gpu_enabled`, which
+  `EncodingTab._gather_settings` reads directly. Keep
+  `_gather_settings`/`load_settings` in sync when adding a control to either
+  tab.
   Both show the selected file as a **`ThumbnailCarousel`** (see Components) in
   their `top_container`, in place of the old single `img_label` +
   `display_image`/`_resize_thumbnail`. The tab keeps only a thin
-  `_reveal_preview()` (packs the filename header + carousel in, `pack_forget`s
-  the DropBox) that the carousel fires via its `on_populated` callback on the
-  first frame set; double-clicking the carousel reselects the input file
+  `_reveal_preview()` (packs the carousel in, `pack_forget`s the DropBox)
+  that the carousel fires via its `on_populated` callback on the first frame
+  set; double-clicking the carousel reselects the input file
   (`on_reselect`). The carousel also takes `on_index` — it fires
   `app.sync_preview_index(i)` on every scrub so the **other tab's carousel
   mirrors the same frame** (see the file-selection broadcast section); the
   receiving `carousel.sync_index()` jumps with no slide and doesn't re-fire
   `on_index`, so there's no loop.
+
+  **Overview / Video / Audio sub-tabs.** Both tabs' `top_container` opens
+  with a persistent `header_row`: a **`SubTabBar`** (`components/sub_tab_bar.py`
+  — see Components) top-left, then the `Selected File:` label filling the
+  rest (single-line, set by `app.update_global_file`). The `SubTabBar`'s
+  `command` is `_show_subtab`.
+
+  `controls_frame` has **one two-column `options_row`**. Each sub-tab owns
+  *both* columns — `left_col` (`anchor="s"`) takes that panel's dropdown
+  rows, `right_col` (`anchor="s"`, `fill="x"`) its checkbox/slider stack.
+  `_build_overview_panel(left_parent, right_parent)`,
+  `_build_video_panel(...)` and `_build_audio_panel(...)` each return a
+  `(left, right)` frame pair, built once and returned unpacked;
+  `_show_subtab(name)` `pack_forget`s all six and packs the chosen pair.
+  `_gather_settings` reads **every** field regardless of which sub-tab is
+  showing — all six frames' widgets stay alive — so switching never loses
+  input.
+
+  `options_row` is **height-pinned** by `_pin_options_height()`, which packs
+  each pair in turn, measures `winfo_reqheight()`, and locks the row to the
+  tallest with `pack_propagate(False)`. The three panels legitimately differ
+  in height, so without this the DropBox / preview above would resize on
+  every sub-tab switch. The slack lands as padding *below the preview*
+  rather than as a gap sandwiched between control groups, which is what made
+  an earlier version of this look broken.
+
+  - **Overview** — the globals: `Output Format` + the preset row
+    (`Preset` dropdown + `Save` + `Delete`) on one line, the **single global
+    trim** (`Start Time` / `Clip Duration` `TimeSpinner`s) below it, and the
+    export rundown (**`SummaryPanel`**) on the right. There is exactly one
+    trim and it is global; stripping a stream just means the trimmed output
+    lacks that stream. **There is no `Retain Video Length` checkbox any
+    more** — `Duration 00:00:00` already means "to the end of the file", so
+    it was a second way to say the same thing, and an ambiguous one whenever
+    the two disagreed.
+  - **Encoding / Video** — `encoder_menu` / `profile_menu` / `level_menu`
+    (left) + `strip_video_check` / `hdr_switch` / quality slider (right).
+    Profile, Level and the quality control's *kind and range* are all
+    derived from the encoder, not hardcoded.
+  - **Encoding / Audio** — `audio_codec_menu` / `audio_bitrate_menu` /
+    `audio_channels_menu` / `audio_samplerate_menu` on one row + a red
+    `strip_audio_check`. Settings keys `audio_codec`, `audio_bitrate`,
+    `audio_channels`, `audio_sample_rate`, `strip_audio`.
+  - **Muxing / Video** and **Muxing / Audio** — a track picker
+    (`video_track_menu` / `audio_track_menu`, values `Auto` / `Track 1-3`)
+    plus a **`Browse…`** button that pulls a stream in from a *second file*
+    (`_browse_external`); the chosen path is kept in
+    `_video_ext_file`/`_audio_ext_file` and shows in the dropdown as
+    `External: <name>`. Each panel's right column is its Strip checkbox.
+    Settings keys `video_track`, `video_track_file`, `audio_track`,
+    `audio_track_file`, `strip_video`, `strip_audio`.
+
+  The sub-tab selection resets to `Overview` on a live theme rebuild (the
+  tab is destroyed and reconstructed); the field *values* survive via the
+  `_gather_settings` → `load_settings` snapshot `apply_theme` already does.
+  The `_DETAIL_FIELDS` list in `queue_tab.py` has rows for every key —
+  skipped when absent, so a Mux task's popup naturally omits the
+  Encode-only fields and vice-versa.
+
+#### `_sync_controls` — the single constraint pass
+
+**Every derived UI state in both tabs is decided in one function.** Each
+control's `command` just calls `_sync_controls()`, which reads the whole
+form and rewrites every dependent widget's option list, selection and
+enabled-state *from scratch*. It's idempotent, so call order stops
+mattering.
+
+This replaced a pile of pairwise handlers (`_on_strip_video_toggle`,
+`_on_strip_audio_toggle`, `_on_format_change`, `toggle_time_spinners`) that
+each clobbered the others' work — `toggle_time_spinners` needed an
+early-return guard purely to stop Strip Video fighting it. With N
+interacting controls, pairwise handlers need N² of them and there is no one
+place to read the ruleset. **Don't add a new pairwise handler; add a rule to
+`_sync_controls`.**
+
+The rules it applies, in dependency order:
+
+1. **Stream presence.** Ticking one Strip checkbox `state="disabled"`s the
+   other, so "both streams removed" (an empty file) is unreachable rather
+   than something a validation dialog has to catch. Because that rule spans
+   two panels, it also calls `SubTabBar.set_marked(...)` to put a `⊘` on the
+   other tab's button — otherwise removing a stream would silently change
+   state on a panel the user can't see.
+2. **Container → codec lists** (Encoding), via `formats.video_codecs_for` /
+   `audio_codecs_for`. **Muxing inverts this**: nothing is re-encoded, so
+   the *source's* codecs decide which containers are reachable
+   (`formats.containers_for`) — an H.264 file simply isn't offered `.webm`.
+3. **Video codec → profile / level / rate-control.** `'4.0'` means different
+   things to H.264 and H.265, VP8 has no profiles at all, and the MPEG-era
+   encoders take a **qscale (1-31), not CRF** — so the Profile/Level lists
+   *and the quality slider's kind, range, default and end labels* all come
+   from `formats.quality_for` (see `_apply_quality`).
+4. **Audio codec → bitrate relevance.** Lossless and copied streams have no
+   bitrate to set, so the dropdown empties and disables.
+5. **Enabled state for everything a removed or copied stream makes
+   meaningless** — a `Source` (copy) video codec disables HDR and quality,
+   since neither is possible without re-encoding.
+6. **The rundown**, which is the only cross-panel view.
+
+`_retarget(menu, values, what)` is how a derived dropdown gets a new list:
+it calls `ThemedDropdown.set_values`, and when the current pick has become
+illegal and had to snap, **posts a toast saying so** ("Encoder switched to
+VP9 — .webm can't carry H.265 (x265)"). Silently swapping a codec out from
+under the user is exactly what makes an options screen feel haunted. The
+`self._ready` flag mutes those toasts while a settings dict is being written
+into the form (theme rebuild, preset load), where a snap isn't the user
+changing anything.
 - **Queue** (`tabs/queue_tab.py`) — the most complex tab; see its own section
   below.
 - **Settings** (`tabs/settings_tab.py`) — a left-aligned settings form with
@@ -575,9 +741,11 @@ fire against a row that no longer exists.
 ### Dropdowns
 
 **Every dropdown in the app is a `ThemedDropdown`** (`components/dropdown.py`)
-— Theme and Appearance Mode on Settings, Encoder / Format / Profile / Level
-on Encoding (Encoder leads; Format follows it — the one that renames the
-file), Output Format on Muxing. It
+— Theme and Appearance Mode on Settings; Output Format and Preset on both
+tabs' Overview panel; Encoder / Profile / Level and the four audio dropdowns
+on Encoding; the track pickers on Muxing. Most of those are **derived** —
+their option lists are rewritten by `_sync_controls` via `set_values`, not
+fixed at construction. It
 subclasses `CTkOptionMenu` but redirects `_open_dropdown_menu` to a custom
 panel, because the native popup can't do two things this app needs:
 
@@ -745,6 +913,33 @@ its own visible feedback.
 
 - **ThemedDropdown** (`components/dropdown.py`) — see "Dropdowns" above. Every
   dropdown in the app uses it; don't add a bare `CTkOptionMenu`.
+  **`set_values(values)`** replaces the option list and rebuilds the popup's
+  rows, which is what makes the derived Encoding/Muxing menus possible (the
+  container decides which codecs exist, the encoder decides which
+  profiles/levels do). It **no-ops when the list is unchanged** — the common
+  case on a `_sync_controls` pass — because rebuilding row buttons every
+  keystroke would flicker and churn widgets pointlessly. An empty list
+  renders a single `—` placeholder, paired with `state="disabled"` for an
+  option the current codec simply doesn't have. It never fires `command`;
+  the caller owns any value change it causes.
+- **SubTabBar** (`components/sub_tab_bar.py`) — a compact row of
+  mutually-exclusive tab buttons (Muxing/Encoding's `Overview` / `Video` /
+  `Audio` switch). Active button = theme `primary`, inactive = `secondary`,
+  each with the adaptive `*_text` colour; `command(name)` fires on a change
+  only. `set_marked(name, bool)` puts a `⊘` on a button — that's what keeps
+  the cross-panel Strip rule honest, since removing a stream otherwise
+  changes state on a panel the user can't currently see. Nothing to refresh
+  on a live theme switch — the owning tab is rebuilt whole so this is
+  reconstructed and re-reads `get_active_theme()`.
+- **SummaryPanel** (`components/summary_panel.py`) — the Overview sub-tab's
+  export rundown, a compact `label  value` list. It's structural, not
+  decorative: the Video and Audio panels each hide the other's state and
+  several rules span them, so this is the one place every cross-panel
+  consequence is visible at once (a removed stream shows `— removed —` in
+  `STOP_RED`). Rows are built once from `labels` and only ever
+  *reconfigured* by `set_values` — `_sync_controls` refreshes it on every
+  control change, and widget churn at that rate flickers. Text is kept terse
+  because it shares its row with the controls and has ~260px to work with.
 - **AnimatedSwitch** (`components/animated_switch.py`) — a `CTkSwitch`
   subclass whose knob *slides* between off/on instead of snapping. Keeps a
   float `_anim_value` (0..1) alongside CTk's boolean `_check_state`, eases it
@@ -887,7 +1082,7 @@ its own visible feedback.
 - **Sidebar** (`components/sidebar.py`) — title, logo, then the four main
   nav buttons (Muxing/Encoding/Queue/YT-DLP), then a spacer
   (`fill="both", expand=True`) that pushes Settings + the footer
-  (`{year} Yezan Smadi · v0.5.0-alpha.2`) down to the sidebar's bottom edge.
+  (`{year} Yezan Smadi · v0.5.0-alpha.3`) down to the sidebar's bottom edge.
   **Pack call order matters here and is easy to get backwards**: Settings and
   the footer are `side="bottom"` but are packed *before* the spacer in code,
   not after — Tk carves cavity space in `.pack()` call order regardless of
@@ -913,13 +1108,25 @@ plumbing. Keep it off the Tk main thread — a blocking `subprocess.run` there
 will freeze the UI.
 
 Encoding settings dict shape (`_gather_settings`):
-`input_file, output_path, encoder, output_format, start_secs, duration_secs,
-gpu_enabled, hdr_to_sdr, retain_length, strip_video, crf, profile, level`.
-Muxing's is the same minus the seven encoding-only keys (`encoder,
-gpu_enabled, hdr_to_sdr, strip_video, crf, profile, level`) — `output_format`
-is shared, present on both. The Queue tab's details popup (`_DETAIL_FIELDS`)
-relies on the encoding-only keys being *absent* (not just falsy) to correctly
-hide them for Mux tasks.
+`input_file, output_path, output_format, start_secs, duration_secs,
+encoder, profile, level, quality, gpu_enabled, hdr_to_sdr, strip_video,
+audio_codec, audio_bitrate, audio_channels, audio_sample_rate, strip_audio`.
+
+Muxing's shape — **no codec keys at all**, since it never re-encodes:
+`input_file, output_path, output_format, start_secs, duration_secs,
+video_track, video_track_file, strip_video, audio_track, audio_track_file,
+strip_audio`.
+
+Shared by both: `input_file`, `output_path`, `output_format`, `start_secs`,
+`duration_secs`, `strip_video`, `strip_audio`. The Queue tab's details popup
+(`_DETAIL_FIELDS`) relies on each tab-specific key being *absent* (not just
+falsy) from the other's dict to hide the rows that don't apply.
+
+Two naming notes: `quality` (not `crf`) because the number is a qscale under
+the MPEG-era encoders, and `retain_length` is **gone** — `duration_secs == 0`
+means "to the end of the file". A derived dropdown showing the `—`
+placeholder reports `""` rather than the dash (`_menu_value`), so a settings
+dict never carries a placeholder around as if it were a real choice.
 
 ## Conventions
 
@@ -958,15 +1165,25 @@ hide them for Mux tasks.
   shearing at the fill edge (the seam is now between two canvases instead
   of a canvas and a `CTkLabel`). See the Queue tab section for each.
 - **Muxing and Encoding duplicate a lot of code** — `select_input_file`,
-  `toggle_time_spinners`, `_autofill_output_path`, `_on_format_change`, the
-  `_OUTPUT_FORMATS` list, `_reveal_preview`, and most of
-  `select_save_location` are near-verbatim copies between the two tabs. This
-  was done deliberately per explicit instruction ("do the same thing to the
-  muxing tab") rather than refactored into a shared base, but if a third tab
-  needs the same pattern, that's the point to actually extract it rather than
-  copy a third time. (The thumbnail half — `display_image` / `_on_resize` /
-  `_resize_thumbnail` / `_raw_pil_image` — *was* extracted, into
-  `ThumbnailCarousel`, when the multi-frame preview landed.)
+  `_autofill_output_path`, `_on_format_change`,
+  `_reveal_preview`, `_show_subtab`, `_pin_options_height`,
+  `_panel_dropdown`, `_set_enabled`, `_set_menu`/`_set_check`, `_hms`, the
+  whole preset block (`_refresh_preset_menu` / `_on_preset_selected` /
+  `_on_preset_save` / `_on_preset_delete`), `on_media_info`, the
+  `options_row` (`left_col`/`right_col`) / `header_row` construction, and
+  most of `select_save_location` are near-verbatim copies between the two
+  tabs. This was done deliberately per explicit instruction ("do the same
+  thing to the muxing tab") rather than refactored into a shared base, but
+  if a third tab needs the same pattern, that's the point to actually
+  extract it rather than copy a third time. (Genuinely shared pieces *have*
+  been extracted as they appeared: the thumbnail half into
+  `ThumbnailCarousel`, the `Overview`/`Video`/`Audio` button strip into
+  `SubTabBar`, the rundown into `SummaryPanel`, the compatibility matrix
+  into `core/formats.py`, and preset storage into `core/presets.py`.)
+  Note `_sync_controls` is *not* on that list — the two tabs' rulesets
+  genuinely differ (Encoding cascades container→codec→profile; Muxing
+  inverts it), so they are two different functions that happen to share a
+  name and a contract.
 - **`fg_color="transparent"` on a CTk widget is not real per-pixel
   transparency.** `CTkBaseClass._detect_color_of_master()` resolves it
   exactly once, at widget-creation time, to a static snapshot of the

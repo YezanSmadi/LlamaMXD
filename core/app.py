@@ -6,7 +6,7 @@ import customtkinter as ctk
 from tkinterdnd2 import TkinterDnD
 from PIL import Image
 
-from core.utilities import extract_video_thumbnails
+from core.utilities import extract_video_thumbnails, probe_media
 from core.theme import get_active_theme, load_settings, apply_ctk_theme
 from components.dialogs import ask_yes_no
 from components.sidebar import Sidebar
@@ -59,6 +59,14 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         self._thumb_frames = []
         self._thumb_frames_path = None
         self._thumb_token = 0
+        # What the selected file actually *is* — container + codecs, from a
+        # best-effort ffprobe on the same worker as the thumbnails. This is
+        # what gives `Source` a concrete meaning: tabs use it to default the
+        # output container, to name a copied stream in the Overview rundown,
+        # and (Muxing) to work out which containers the file can be remuxed
+        # into. Every field may stay None; nothing here is load-bearing.
+        self.media_info = {"container": None, "video": None, "audio": None}
+        self._media_info_path = None
         # Which preview frame the carousels are scrubbed to — shared across
         # tabs (Muxing/Encoding both mirror it) and preserved across a live
         # theme rebuild. Reset to 0 only when the input file actually changes.
@@ -165,11 +173,18 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         # scrub position the user was on.
         if clean_path != self.current_file_path:
             self._preview_index = 0
+            # Drop stale probe results the moment the file changes, so a tab
+            # can never render the previous input's codecs against the new
+            # one while the fresh probe is still in flight.
+            if clean_path != self._media_info_path:
+                self.media_info = {"container": None, "video": None, "audio": None}
         self.current_file_path = clean_path
 
         for ui in self.tab_ui_registry:
             if ui["label"]:
-                ui["label"].configure(text=f"Selected File:\n{self.current_file_path}")
+                # One line — the label sits inline to the right of the
+                # Video/Audio sub-tab switch in each tab's header row.
+                ui["label"].configure(text=f"Selected File:  {self.current_file_path}")
 
         for tab in self.tabs.values():
             if hasattr(tab, "drop_box"):
@@ -193,35 +208,70 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         self._thumb_token += 1
         token = self._thumb_token
 
+        cached_info = path == self._media_info_path
+        if cached_info:
+            self._broadcast_media_info()
         if path == self._thumb_frames_path and self._thumb_frames:
             self._broadcast_thumbnails(self._thumb_frames)
-            return
+            if cached_info:
+                return   # nothing left to fetch for this file
 
         self._thumb_pending += 1
         threading.Thread(
-            target=self._decode_worker, args=(token, path), daemon=True
+            target=self._decode_worker, args=(token, path, cached_info), daemon=True
         ).start()
         if self._thumb_pending == 1:
             self.after(80, self._drain_thumbnails)
 
-    def _decode_worker(self, token, path):
-        """Off-thread frame decode. Must not touch a widget or call after() —
-        results go back via the queue only."""
+    def _decode_worker(self, token, path, skip_probe=False):
+        """Off-thread media probe + frame decode. Must not touch a widget or
+        call after() — results go back via the queue only.
+
+        Sends two tagged messages: the ffprobe result first (it's ~50ms, and
+        the tabs want the container/codecs to settle their defaults as early
+        as possible) and the ten decoded frames after (several seeks, much
+        slower). `"frames"` is always last, so it's the one that clears the
+        pending count."""
+        if not skip_probe:
+            self._thumb_queue.put(("info", token, path, probe_media(path)))
         frames = extract_video_thumbnails(path, count=10)
-        self._thumb_queue.put((token, path, frames))
+        self._thumb_queue.put(("frames", token, path, frames))
 
     def _drain_thumbnails(self):
-        """Main-thread poll: delivers any finished decode results, then
+        """Main-thread poll: delivers any finished worker results, then
         re-arms itself while decode threads are still outstanding."""
         while True:
             try:
-                token, path, frames = self._thumb_queue.get_nowait()
+                kind, token, path, payload = self._thumb_queue.get_nowait()
             except queue.Empty:
                 break
+            if kind == "info":
+                self._deliver_media_info(token, path, payload)
+                continue
+            # "frames" is the worker's last message — clear its pending slot.
             self._thumb_pending = max(0, self._thumb_pending - 1)
-            self._deliver_thumbnails(token, path, frames)
+            self._deliver_thumbnails(token, path, payload)
         if self._thumb_pending > 0:
             self.after(80, self._drain_thumbnails)
+
+    def _deliver_media_info(self, token, path, info):
+        """Caches and broadcasts a probe result, dropping it if the user has
+        already picked a different file (stale token) — same guard as the
+        thumbnails, for the same reason."""
+        if token != self._thumb_token or not self.winfo_exists():
+            return
+        self.media_info = info
+        self._media_info_path = path
+        self._broadcast_media_info()
+
+    def _broadcast_media_info(self):
+        """Hands the probe result to every tab exposing `on_media_info`
+        (Muxing and Encoding), so they can settle their `Source` defaults and
+        refresh the Overview rundown."""
+        for tab in self.tabs.values():
+            handler = getattr(tab, "on_media_info", None)
+            if callable(handler):
+                handler(self.media_info)
 
     def _deliver_thumbnails(self, token, path, frames):
         """Drops stale (user moved on) or empty (undecodable) results;
