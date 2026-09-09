@@ -48,7 +48,13 @@ class DropBox(ctk.CTkFrame):
 
     def browse_file(self):
         selected = filedialog.askopenfilename(
-            title="Select a File", filetypes=[("All Files", "*.*")]
+            title="Select a File",
+            filetypes=[
+                ("Media files",
+                 "*.mp4 *.mkv *.mov *.webm *.avi *.m4v "
+                 "*.mp3 *.m4a *.aac *.flac *.wav *.opus *.ogg *.wma *.aiff"),
+                ("All files", "*.*"),
+            ],
         )
         if selected:
             self.on_file_selected(selected)

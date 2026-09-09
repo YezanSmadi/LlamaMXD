@@ -5,6 +5,7 @@ from tkinter import filedialog
 from components.dialogs import ask_text, ask_yes_no, show_message
 from components.drop_box import DropBox
 from components.dropdown import ThemedDropdown
+from components.marquee_label import MarqueeLabel
 from components.sub_tab_bar import SubTabBar
 from components.summary_panel import SummaryPanel
 from components.thumbnail_carousel import ThumbnailCarousel
@@ -87,7 +88,9 @@ class MuxingTab(ctk.CTkFrame):
 
         self._pin_options_height()
         self._active_subtab = "Overview"
+        self._subtabs_warmed = False
         self._show_subtab("Overview")
+        self.bind("<Map>", self._prewarm_subtabs, add="+")
 
         # Save Location Section
         self.save_frame = ctk.CTkFrame(master=self.controls_frame, fg_color="transparent")
@@ -146,7 +149,10 @@ class MuxingTab(ctk.CTkFrame):
         )
         self.sub_tab_bar.pack(side="left")
 
-        self.label = ctk.CTkLabel(
+        # A marquee: the "Selected File:" line is usually a long path that
+        # doesn't fit beside the sub-tab switch, so it scrolls rather than
+        # being silently cut off.
+        self.label = MarqueeLabel(
             master=self.header_row, text="", font=ctk.CTkFont(size=11), anchor="w"
         )
         self.label.pack(side="left", fill="x", expand=True, padx=(10, 0))
@@ -218,17 +224,29 @@ class MuxingTab(ctk.CTkFrame):
         self.start_frame.pack(side="left", anchor="s")
         self.start_label = ctk.CTkLabel(master=self.start_frame, text="Start Time:", font=("Arial", 11, "bold"))
         self.start_label.pack(anchor="w", pady=(0, 1))
-        self.start_time_spinner = TimeSpinner(master=self.start_frame, initial_seconds=0)
+        self.start_time_spinner = TimeSpinner(
+            master=self.start_frame, initial_seconds=0, command=self._on_trim_change
+        )
         self.start_time_spinner.pack(anchor="w")
 
         self.duration_frame = ctk.CTkFrame(master=self.trim_row, fg_color="transparent")
         self.duration_frame.pack(side="left", anchor="s", padx=(14, 0))
         self.duration_label = ctk.CTkLabel(master=self.duration_frame, text="Clip Duration:", font=("Arial", 11, "bold"))
         self.duration_label.pack(anchor="w", pady=(0, 1))
-        self.duration_time_spinner = TimeSpinner(master=self.duration_frame, initial_seconds=0)
+        self.duration_time_spinner = TimeSpinner(
+            master=self.duration_frame, initial_seconds=0, command=self._on_trim_change
+        )
         self.duration_time_spinner.pack(anchor="w")
 
-        self.summary = SummaryPanel(master=right, labels=["Container", "Video", "Audio", "Trim"])
+        # A/V Sync — align the audio and video start and pass through the
+        # streams' common metadata. Sits to the right of the trim spinners.
+        self.av_sync_check = ctk.CTkCheckBox(
+            master=self.trim_row, text="A/V Sync", font=("Arial", 11, "bold"),
+            command=self._on_control_change,
+        )
+        self.av_sync_check.pack(side="left", anchor="s", padx=(16, 0), pady=(0, 4))
+
+        self.summary = SummaryPanel(master=right, labels=["Video", "Audio", "Trim"])
         self.summary.pack(fill="x", anchor="s")
 
         return left, right
@@ -313,43 +331,79 @@ class MuxingTab(ctk.CTkFrame):
         menu.pack(anchor="w")
         return label, menu
 
-    def _pin_options_height(self):
-        """Locks `options_row` to the tallest sub-tab's natural height so the
-        DropBox / preview above doesn't resize on a sub-tab switch. Measured
-        rather than hardcoded so it can't drift out of step."""
-        tallest = 0
-        for left, right in (
-            (self.overview_left, self.overview_right),
-            (self.video_left, self.video_right),
-            (self.audio_left, self.audio_right),
-        ):
-            left.pack(anchor="w")
-            right.pack(fill="x")
-            self.options_row.update_idletasks()
-            tallest = max(tallest, left.winfo_reqheight(), right.winfo_reqheight())
-            left.pack_forget()
-            right.pack_forget()
-
-        self.options_row.configure(height=max(tallest, 96))
-        self.options_row.pack_propagate(False)
-
-    def _show_subtab(self, name):
-        """Swaps the visible sub-tab. `options_row` is height-pinned, so the
-        shorter panels get slack below the preview rather than resizing it."""
-        self._active_subtab = name
-        for frame in (self.overview_left, self.video_left, self.audio_left):
-            frame.pack_forget()
-        for frame in (self.overview_right, self.video_right, self.audio_right):
-            frame.pack_forget()
-
-        pairs = {
+    def _subtab_pairs(self):
+        """`{name: (left_frame, right_frame)}` for the three sub-tab panels."""
+        return {
             "Overview": (self.overview_left, self.overview_right),
             "Video": (self.video_left, self.video_right),
             "Audio": (self.audio_left, self.audio_right),
         }
-        left, right = pairs.get(name, pairs["Overview"])
-        left.pack(anchor="w")
-        right.pack(fill="x")
+
+    def _pin_options_height(self):
+        """Freezes every sub-tab panel to one box (tallest panel's height,
+        widest left panel's width), floats its content to the bottom, and
+        **stacks all six with `.place()`** so `_show_subtab` is a pure
+        `lift()` — no re-pack, no relayout, no vacated strip of stale pixels
+        above a shorter panel, no sideways shift of the rundown. Measured,
+        not hardcoded."""
+        tallest, widest_left = 0, 0
+        for left, right in self._subtab_pairs().values():
+            left.pack(anchor="w")
+            right.pack(fill="x")
+            self.options_row.update_idletasks()
+            tallest = max(tallest, left.winfo_reqheight(), right.winfo_reqheight())
+            widest_left = max(widest_left, left.winfo_reqwidth())
+            left.pack_forget()
+            right.pack_forget()
+
+        height = max(tallest, 96)
+        self.options_row.configure(height=height)
+        self.options_row.pack_propagate(False)
+        self.left_col.configure(width=widest_left, height=height)
+        self.right_col.configure(height=height)
+
+        for left, right in self._subtab_pairs().values():
+            left.configure(width=widest_left, height=height)
+            right.configure(height=height)
+            for frame in (left, right):
+                frame.pack_propagate(False)
+                kids = frame.pack_slaves()
+                if kids:   # a spacer at the top floats the content to the bottom
+                    ctk.CTkFrame(frame, fg_color="transparent", height=0).pack(
+                        side="top", fill="both", expand=True, before=kids[0]
+                    )
+            left.place(x=0, y=0)
+            right.place(x=0, y=0, relwidth=1.0)
+
+    def _show_subtab(self, name):
+        """Raises the chosen panel pair — a pure `lift()` (all six are
+        pre-placed in one stacked footprint by `_pin_options_height`)."""
+        self._active_subtab = name
+        left, right = self._subtab_pairs().get(name, self._subtab_pairs()["Overview"])
+        left.lift()
+        right.lift()
+
+    def _prewarm_subtabs(self, event=None):
+        """Once the tab is first mapped, cycle every not-yet-shown panel onto
+        the screen briefly (chained through `after` so CTk's deferred `_draw`s
+        land between steps) and settle back on the active one. After this
+        every real switch is an instant `lift()` — without it, a panel that
+        has only ever been stacked behind another is unpainted and its first
+        reveal fills in over several frames (the switch flicker)."""
+        if self._subtabs_warmed:
+            return
+        self._subtabs_warmed = True
+        active = self._active_subtab
+        names = [n for n in self._subtab_pairs() if n != active]
+
+        def step(i):
+            if i < len(names):
+                self._show_subtab(names[i])
+                self.after(40, lambda: step(i + 1))
+            else:
+                self._show_subtab(active)
+
+        step(0)
 
     # ------------------------------------------------------------------ #
     #  External stream inputs
@@ -422,6 +476,9 @@ class MuxingTab(ctk.CTkFrame):
         self.strip_audio_check.configure(state="disabled" if stripping_video else "normal")
         self.sub_tab_bar.set_marked("Video", stripping_video)
         self.sub_tab_bar.set_marked("Audio", stripping_audio)
+        # The preview reflects it too: waveform for a stripped video, mute
+        # badge for stripped audio.
+        self.carousel.set_strip_state(stripping_video, stripping_audio)
 
         # 2. Track lists (+ any browsed-in external entry).
         self.video_track_menu.set_values(self._track_values(self._video_ext_file))
@@ -467,16 +524,19 @@ class MuxingTab(ctk.CTkFrame):
         if label is not None:
             label.configure(text_color=self._label_color if enabled else _DISABLED_LABEL)
 
+    def _on_trim_change(self, *_):
+        """A trim spinner's value changed — refresh just the rundown so the
+        trim line updates as the user types. Guarded on `_ready` so it's
+        inert while the form is still building or a settings dict is being
+        written in (a full sync follows that)."""
+        if getattr(self, "_ready", False):
+            self._refresh_summary()
+
     def _refresh_summary(self):
         """Rebuilds the Overview rundown, including the keyframe caveat that
-        copy-only trimming carries."""
-        container = self.format_menu.get()
+        copy-only trimming carries. (The container isn't listed: the Output
+        Format dropdown right beside it already says it.)"""
         info = self.app.media_info
-        source_container = info.get("container")
-
-        container_text = container
-        if source_container and source_container != container:
-            container_text = f"{container} ← {source_container}"
 
         if self.strip_video_check.get():
             video = ("— removed —", STOP_RED)
@@ -510,7 +570,7 @@ class MuxingTab(ctk.CTkFrame):
         else:
             trim = (f"{_hms(start)} → {_hms(start + duration)} · keyframe", None)
 
-        self.summary.set_values([(container_text, None), video, audio, trim])
+        self.summary.set_values([video, audio, trim])
 
     # ------------------------------------------------------------------ #
     #  Presets
@@ -674,6 +734,7 @@ class MuxingTab(ctk.CTkFrame):
             "output_format": self.format_menu.get(),
             "start_secs": self.start_time_spinner.get_total_seconds(),
             "duration_secs": self.duration_time_spinner.get_total_seconds(),
+            "av_sync": bool(self.av_sync_check.get()),
             "video_track": self.video_track_menu.get(),
             "video_track_file": self._external_for(self.video_track_menu, self._video_ext_file),
             "strip_video": bool(self.strip_video_check.get()),
@@ -702,6 +763,8 @@ class MuxingTab(ctk.CTkFrame):
                 self.start_time_spinner.set(settings["start_secs"])
             if "duration_secs" in settings:
                 self.duration_time_spinner.set(settings["duration_secs"])
+            if "av_sync" in settings:
+                self._set_check(self.av_sync_check, settings["av_sync"])
 
             if "strip_video" in settings:
                 self._set_check(self.strip_video_check, settings["strip_video"])

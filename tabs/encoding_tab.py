@@ -6,6 +6,7 @@ from components.animated_switch import AnimatedSwitch
 from components.dialogs import ask_text, ask_yes_no, show_message
 from components.drop_box import DropBox
 from components.dropdown import ThemedDropdown
+from components.marquee_label import MarqueeLabel
 from components.sub_tab_bar import SubTabBar
 from components.summary_panel import SummaryPanel
 from components.thumbnail_carousel import ThumbnailCarousel
@@ -16,6 +17,18 @@ from core.theme import get_active_theme, readable_text_on, STOP_RED, STOP_RED_HO
 # One consistent "disabled" label colour, so a control that's dimmed by two
 # different rules never compounds into a darker grey than one dimmed by one.
 _DISABLED_LABEL = "gray50"
+# The quality slider's knob + fill when it's disabled — a bare
+# state="disabled" leaves a CTk slider looking active, so the colours are
+# swapped explicitly too.
+_DISABLED_SLIDER = "gray40"
+
+# Range/labels for the quality slider when the encoder has no spec of its own
+# (i.e. `Source`) — the slider stays usable rather than freezing on a stale
+# range from whatever codec was picked before.
+_FALLBACK_QUALITY = {
+    "kind": "crf", "label": "Quality (CRF)", "lo": 0, "hi": 51,
+    "default": 23, "low": "Low", "high": "Placebo",
+}
 
 # What a derived dropdown shows when the current codec has no such option at
 # all (VP8 profiles, VP9 levels). Paired with state="disabled".
@@ -81,7 +94,9 @@ class EncodingTab(ctk.CTkFrame):
 
         self._pin_options_height()
         self._active_subtab = "Overview"
+        self._subtabs_warmed = False
         self._show_subtab("Overview")
+        self.bind("<Map>", self._prewarm_subtabs, add="+")
 
         # 2. Save Location Section
         self.save_frame = ctk.CTkFrame(master=self.controls_frame, fg_color="transparent")
@@ -144,7 +159,10 @@ class EncodingTab(ctk.CTkFrame):
         )
         self.sub_tab_bar.pack(side="left")
 
-        self.label = ctk.CTkLabel(
+        # A marquee: the "Selected File:" line is usually a long path that
+        # doesn't fit beside the sub-tab switch, so it scrolls rather than
+        # being silently cut off.
+        self.label = MarqueeLabel(
             master=self.header_row, text="", font=ctk.CTkFont(size=11), anchor="w"
         )
         self.label.pack(side="left", fill="x", expand=True, padx=(10, 0))
@@ -224,18 +242,30 @@ class EncodingTab(ctk.CTkFrame):
         self.start_frame.pack(side="left")
         self.start_label = ctk.CTkLabel(master=self.start_frame, text="Start Time:", font=("Arial", 12, "bold"))
         self.start_label.pack(anchor="w", pady=(0, 1))
-        self.start_time_spinner = TimeSpinner(master=self.start_frame, initial_seconds=0)
+        self.start_time_spinner = TimeSpinner(
+            master=self.start_frame, initial_seconds=0, command=self._on_trim_change
+        )
         self.start_time_spinner.pack(anchor="w")
 
         self.duration_frame = ctk.CTkFrame(master=self.trim_row, fg_color="transparent")
         self.duration_frame.pack(side="left", padx=(14, 0))
         self.duration_label = ctk.CTkLabel(master=self.duration_frame, text="Clip Duration:", font=("Arial", 12, "bold"))
         self.duration_label.pack(anchor="w", pady=(0, 1))
-        self.duration_time_spinner = TimeSpinner(master=self.duration_frame, initial_seconds=0)
+        self.duration_time_spinner = TimeSpinner(
+            master=self.duration_frame, initial_seconds=0, command=self._on_trim_change
+        )
         self.duration_time_spinner.pack(anchor="w")
 
+        # A/V Sync — align the audio and video start and pass through the
+        # streams' common metadata. Sits to the right of the trim spinners.
+        self.av_sync_check = ctk.CTkCheckBox(
+            master=self.trim_row, text="A/V Sync", font=("Arial", 12, "bold"),
+            command=self._on_control_change,
+        )
+        self.av_sync_check.pack(side="left", anchor="s", padx=(16, 0), pady=(0, 4))
+
         # -- Right: the rundown --
-        self.summary = SummaryPanel(master=right, labels=["Container", "Video", "Audio", "Trim"])
+        self.summary = SummaryPanel(master=right, labels=["Video", "Audio", "Trim"])
         self.summary.pack(fill="x", anchor="s")
 
         return left, right
@@ -384,49 +414,84 @@ class EncodingTab(ctk.CTkFrame):
         menu.pack(anchor="w")
         return label, menu
 
-    def _pin_options_height(self):
-        """Locks `options_row` to the tallest sub-tab's natural height.
-
-        The three panels legitimately differ (Overview stacks two rows, Video
-        stacks Strip/HDR/quality, Audio is a single row), so without this the
-        DropBox / preview above would resize every time the sub-tab changed.
-        Measured once here rather than hardcoded, so the number can't drift
-        out of step with the widgets."""
-        tallest = 0
-        for left, right in (
-            (self.overview_left, self.overview_right),
-            (self.video_left, self.video_right),
-            (self.audio_left, self.audio_right),
-        ):
-            left.pack(anchor="w")
-            right.pack(fill="x")
-            self.options_row.update_idletasks()
-            tallest = max(tallest, left.winfo_reqheight(), right.winfo_reqheight())
-            left.pack_forget()
-            right.pack_forget()
-
-        self.options_row.configure(height=max(tallest, 96))
-        self.options_row.pack_propagate(False)
-
-    def _show_subtab(self, name):
-        """Swaps the visible sub-tab: packs one panel's left row into
-        `left_col` and its right stack into `right_col`, forgetting the
-        others'. `options_row` is height-pinned, so the shorter panels simply
-        get slack below the preview rather than resizing it."""
-        self._active_subtab = name
-        for frame in (self.overview_left, self.video_left, self.audio_left):
-            frame.pack_forget()
-        for frame in (self.overview_right, self.video_right, self.audio_right):
-            frame.pack_forget()
-
-        pairs = {
+    def _subtab_pairs(self):
+        """`{name: (left_frame, right_frame)}` for the three sub-tab panels."""
+        return {
             "Overview": (self.overview_left, self.overview_right),
             "Video": (self.video_left, self.video_right),
             "Audio": (self.audio_left, self.audio_right),
         }
-        left, right = pairs.get(name, pairs["Overview"])
-        left.pack(anchor="w")
-        right.pack(fill="x")
+
+    def _pin_options_height(self):
+        """Freezes every sub-tab panel to one box (tallest panel's height,
+        widest left panel's width), floats its content to the bottom, and
+        **stacks all six with `.place()`** so switching is a pure `lift()`.
+
+        The three panels legitimately differ (Overview stacks two rows, Video
+        stacks Strip/HDR/quality, Audio is a single row). One shared,
+        pre-placed footprint is what makes a switch cost nothing: no re-pack,
+        no relayout, no synchronous `update_idletasks`, and no vacated strip
+        of stale pixels above a shorter panel — `_show_subtab` just raises the
+        pair. Measured, not hardcoded."""
+        tallest, widest_left = 0, 0
+        for left, right in self._subtab_pairs().values():
+            left.pack(anchor="w")
+            right.pack(fill="x")
+            self.options_row.update_idletasks()
+            tallest = max(tallest, left.winfo_reqheight(), right.winfo_reqheight())
+            widest_left = max(widest_left, left.winfo_reqwidth())
+            left.pack_forget()
+            right.pack_forget()
+
+        height = max(tallest, 96)
+        self.options_row.configure(height=height)
+        self.options_row.pack_propagate(False)
+        self.left_col.configure(width=widest_left, height=height)
+        self.right_col.configure(height=height)
+
+        for left, right in self._subtab_pairs().values():
+            left.configure(width=widest_left, height=height)
+            right.configure(height=height)
+            for frame in (left, right):
+                frame.pack_propagate(False)
+                kids = frame.pack_slaves()
+                if kids:   # a spacer at the top floats the content to the bottom
+                    ctk.CTkFrame(frame, fg_color="transparent", height=0).pack(
+                        side="top", fill="both", expand=True, before=kids[0]
+                    )
+            left.place(x=0, y=0)
+            right.place(x=0, y=0, relwidth=1.0)
+
+    def _show_subtab(self, name):
+        """Raises the chosen panel pair. All six are pre-placed in one stacked
+        footprint (`_pin_options_height`), so this is a pure `lift()` —
+        nothing above resizes, shifts, or repaints."""
+        self._active_subtab = name
+        left, right = self._subtab_pairs().get(name, self._subtab_pairs()["Overview"])
+        left.lift()
+        right.lift()
+
+    def _prewarm_subtabs(self, event=None):
+        """Once the tab is first mapped, cycle every panel onto the screen
+        briefly (chained through `after` so CTk's deferred `_draw`s land
+        between steps) and settle back on the active one. After this every
+        real switch is an instant `lift()` — without it, a panel that has only
+        ever been stacked behind another is unpainted, so its first reveal
+        fills in over several frames (the switch flicker)."""
+        if self._subtabs_warmed:
+            return
+        self._subtabs_warmed = True
+        active = self._active_subtab
+        names = [n for n in self._subtab_pairs() if n != active]
+
+        def step(i):
+            if i < len(names):
+                self._show_subtab(names[i])
+                self.after(40, lambda: step(i + 1))
+            else:
+                self._show_subtab(active)
+
+        step(0)
 
     # ------------------------------------------------------------------ #
     #  The single constraint pass
@@ -472,6 +537,9 @@ class EncodingTab(ctk.CTkFrame):
         self.strip_audio_check.configure(state="disabled" if stripping_video else "normal")
         self.sub_tab_bar.set_marked("Video", stripping_video)
         self.sub_tab_bar.set_marked("Audio", stripping_audio)
+        # The preview reflects it too: waveform for a stripped video, mute
+        # badge for stripped audio.
+        self.carousel.set_strip_state(stripping_video, stripping_audio)
 
         # 2. Container -> codecs.
         self._retarget(self.encoder_menu, formats.video_codecs_for(container), "Encoder")
@@ -491,9 +559,11 @@ class EncodingTab(ctk.CTkFrame):
         bitrates = formats.audio_bitrates_for(audio_codec)
         self._retarget(self.audio_bitrate_menu, bitrates)
 
-        # 5. Enabled states. A stripped stream disables its whole panel; a
-        # copied one disables everything that would require re-encoding.
-        copying_video = encoder == formats.SOURCE
+        # 5. Enabled states. A stripped stream disables its whole panel. The
+        # audio codec's copy state still gates channels/sample-rate (those are
+        # genuine re-encode-only knobs), but on the video side HDR->SDR and
+        # the quality slider stay live even on `Source` — deliberately, so the
+        # user can dial them in and let the encoder follow.
         copying_audio = audio_codec == formats.SOURCE
         video_live = not stripping_video
         audio_live = not stripping_audio
@@ -501,11 +571,8 @@ class EncodingTab(ctk.CTkFrame):
         self._set_enabled(self.encoder_menu, self.encoder_label, video_live)
         self._set_enabled(self.profile_menu, self.profile_label, video_live and bool(profiles))
         self._set_enabled(self.level_menu, self.level_label, video_live and bool(levels))
-        self._set_enabled(self.hdr_switch, self.hdr_label, video_live and not copying_video)
-        quality_live = video_live and self._quality_spec is not None
-        self._set_enabled(self.crf_slider, self.crf_label, quality_live)
-        for label in (self.crf_low_label, self.crf_high_label):
-            label.configure(text_color=_DISABLED_LABEL if not quality_live else "gray60")
+        self._set_enabled(self.hdr_switch, self.hdr_label, video_live)
+        self._set_quality_enabled(video_live)
 
         self._set_enabled(self.audio_codec_menu, self.audio_codec_label, audio_live)
         self._set_enabled(self.audio_bitrate_menu, self.audio_bitrate_label,
@@ -542,18 +609,42 @@ class EncodingTab(ctk.CTkFrame):
         if label is not None:
             label.configure(text_color=self._label_color if enabled else _DISABLED_LABEL)
 
+    def _set_quality_enabled(self, enabled):
+        """Enables/disables the *whole* quality slider — knob, fill and all
+        three labels. `state="disabled"` alone leaves a CTk slider looking
+        live, so the knob and progress colours are swapped explicitly."""
+        if enabled:
+            defaults = ctk.ThemeManager.theme["CTkSlider"]
+            self.crf_slider.configure(
+                state="normal",
+                button_color=defaults["button_color"],
+                button_hover_color=defaults["button_hover_color"],
+                progress_color=defaults["progress_color"],
+            )
+        else:
+            self.crf_slider.configure(
+                state="disabled",
+                button_color=_DISABLED_SLIDER,
+                button_hover_color=_DISABLED_SLIDER,
+                progress_color=_DISABLED_SLIDER,
+            )
+        self.crf_label.configure(
+            text_color=self._label_color if enabled else _DISABLED_LABEL
+        )
+        for label in (self.crf_low_label, self.crf_high_label):
+            label.configure(text_color="gray60" if enabled else _DISABLED_LABEL)
+
     def _apply_quality(self):
         """Re-ranges the quality slider for the current encoder.
 
         CRF is not universal — the MPEG-era encoders take a qscale on a
         completely different scale (1-31 vs 0-51/0-63), so the slider's
-        bounds and its label both come from `formats.quality_for`. The
-        current value is kept when it still falls inside the new range, and
-        reset to the codec's own default when it doesn't."""
-        spec = self._quality_spec
-        if spec is None:
-            self.crf_label.configure(text="Quality")
-            return
+        bounds and its label both come from `formats.quality_for`. `Source`
+        has no spec of its own, so it falls back to a plain 0-51 CRF range
+        rather than freezing on the previous codec's. The current value is
+        kept when it still falls inside the new range, and reset to the
+        codec's own default when it doesn't."""
+        spec = self._quality_spec or _FALLBACK_QUALITY
 
         low, high = spec["lo"], spec["hi"]
         value = self.crf_slider.get()
@@ -569,10 +660,7 @@ class EncodingTab(ctk.CTkFrame):
 
     def _update_quality_label(self):
         """Writes the live quality readout into the slider's title."""
-        spec = self._quality_spec
-        if spec is None:
-            self.crf_label.configure(text="Quality")
-            return
+        spec = self._quality_spec or _FALLBACK_QUALITY
         self.crf_label.configure(text=f"{spec['label']}: {int(round(self.crf_slider.get()))}")
 
     def _on_quality_change(self, _value=None):
@@ -581,18 +669,22 @@ class EncodingTab(ctk.CTkFrame):
         self._update_quality_label()
         self._refresh_summary()
 
+    def _on_trim_change(self, *_):
+        """A trim spinner's value changed — refresh just the rundown so the
+        trim line updates as the user types, without a whole constraint pass.
+        Guarded on `_ready` so it's inert while the form is still building or
+        a settings dict is being written in (a full sync follows that)."""
+        if getattr(self, "_ready", False):
+            self._refresh_summary()
+
     def _refresh_summary(self):
-        """Rebuilds the Overview rundown — the one view where the container,
-        both streams and the trim are visible at the same time."""
-        container = self.format_menu.get()
+        """Rebuilds the Overview rundown — the one view where both streams and
+        the trim are visible at the same time. (The container isn't listed:
+        the Output Format dropdown right beside it already says it.)"""
         info = self.app.media_info
-        source_container = info.get("container")
 
         # Text here is kept terse on purpose — the rundown shares its row
         # with the controls, so it has maybe 260px to say everything in.
-        container_text = container
-        if source_container and source_container != container:
-            container_text = f"{container} ← {source_container}"
 
         # Video
         if self.strip_video_check.get():
@@ -639,7 +731,7 @@ class EncodingTab(ctk.CTkFrame):
         else:
             trim = (f"{_hms(start)} → {_hms(start + duration)}", None)
 
-        self.summary.set_values([(container_text, None), video, audio, trim])
+        self.summary.set_values([video, audio, trim])
 
     # ------------------------------------------------------------------ #
     #  Presets
@@ -812,6 +904,7 @@ class EncodingTab(ctk.CTkFrame):
             "output_format": self.format_menu.get(),
             "start_secs": self.start_time_spinner.get_total_seconds(),
             "duration_secs": self.duration_time_spinner.get_total_seconds(),
+            "av_sync": bool(self.av_sync_check.get()),
             "encoder": self.encoder_menu.get(),
             "profile": self._menu_value(self.profile_menu),
             "level": self._menu_value(self.level_menu),
@@ -852,6 +945,8 @@ class EncodingTab(ctk.CTkFrame):
                 self.start_time_spinner.set(settings["start_secs"])
             if "duration_secs" in settings:
                 self.duration_time_spinner.set(settings["duration_secs"])
+            if "av_sync" in settings:
+                self._set_check(self.av_sync_check, settings["av_sync"])
 
             # Strip flags first: they gate whole panels, so settling them
             # before the cascade means the enabled-state pass runs once.

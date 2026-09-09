@@ -2,10 +2,12 @@ import os
 import queue
 import sys
 import threading
+import tkinter as tk
 import customtkinter as ctk
 from tkinterdnd2 import TkinterDnD
 from PIL import Image
 
+from core import formats
 from core.utilities import extract_video_thumbnails, probe_media
 from core.theme import get_active_theme, load_settings, apply_ctk_theme
 from components.dialogs import ask_yes_no
@@ -142,6 +144,42 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         }
         self.show_tab("Muxing")
 
+        # --- Keybinds. Bound on the root once (it outlives the theme rebuild);
+        # the first of a growing set. Left/Right flip the visible tab's preview
+        # carousel, unless a text field has focus (the TimeSpinner / save-path
+        # entries own the arrow keys for cursor movement).
+        self.bind("<Left>", lambda _e: self._nudge_preview(-1))
+        self.bind("<Right>", lambda _e: self._nudge_preview(1))
+        # Space starts / pauses the queue while the Queue tab is showing.
+        self.bind("<space>", lambda _e: self._toggle_queue())
+
+    def _nudge_preview(self, delta):
+        """Steps the current tab's `ThumbnailCarousel` by `delta` frames — the
+        Left/Right arrow-key binding. Ignored while an entry field is focused,
+        and on tabs that have no carousel."""
+        if isinstance(self.focus_get(), tk.Entry):
+            return
+        carousel = getattr(self.tabs.get(self._current_tab_name), "carousel", None)
+        if carousel is not None:
+            carousel.step(delta)
+
+    def _toggle_queue(self):
+        """Space-bar: Start / Pause the queue, but only on the Queue tab and
+        only when the keypress isn't meant for a focused control (a text
+        field, or a button / checkbox that Space already activates)."""
+        if self._current_tab_name != "Queue":
+            return
+        focus = self.focus_get()
+        if isinstance(focus, (tk.Entry, tk.Text)):
+            return
+        widget = focus
+        while widget is not None:
+            if isinstance(widget, (ctk.CTkButton, ctk.CTkCheckBox, ctk.CTkSwitch,
+                                   ctk.CTkSegmentedButton, ctk.CTkOptionMenu)):
+                return
+            widget = getattr(widget, "master", None)
+        self.tabs["Queue"].toggle_queue()
+
     def register_tab_ui(self, label_widget, img_widget, on_thumbnail=None):
         """Registers a tab's UI controls for batch cross-tab updates.
         `on_thumbnail` receives the full list of preview frames (PIL Images);
@@ -263,6 +301,28 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         self.media_info = info
         self._media_info_path = path
         self._broadcast_media_info()
+        # Probe usually lands well before the (failing) frame decode for an
+        # audio-only file — reveal the visualiser now rather than waiting.
+        if self._is_audio_only(path):
+            self._broadcast_audio_only(True)
+
+    def _is_audio_only(self, path):
+        """True when the imported file carries audio but no video — the
+        probe's answer, or the file extension when there was no probe."""
+        info = self.media_info
+        if info.get("video"):
+            return False
+        if info.get("audio"):
+            return True
+        return os.path.splitext(path)[1].lower() in formats.AUDIO_EXTENSIONS
+
+    def _broadcast_audio_only(self, flag):
+        """Tells every registered carousel whether the current input is
+        audio-only, so it shows the Wave Loop visualiser instead of frames."""
+        for ui in self.tab_ui_registry:
+            setter = getattr(ui["img"], "set_audio_only", None)
+            if callable(setter):
+                setter(flag)
 
     def _broadcast_media_info(self):
         """Hands the probe result to every tab exposing `on_media_info`
@@ -274,11 +334,14 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
                 handler(self.media_info)
 
     def _deliver_thumbnails(self, token, path, frames):
-        """Drops stale (user moved on) or empty (undecodable) results;
-        otherwise caches and broadcasts."""
+        """Drops stale (user moved on) results; caches and broadcasts real
+        frames; an empty result means either an undecodable file or an
+        audio-only import — the latter gets the Wave Loop visualiser."""
         if token != self._thumb_token or not self.winfo_exists():
             return
         if not frames:
+            if self._is_audio_only(path):
+                self._broadcast_audio_only(True)
             return
         self._thumb_frames = frames
         self._thumb_frames_path = path
@@ -290,6 +353,9 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         file; whatever the user was on if this is a theme-rebuild re-broadcast
         — set_frames resets each new carousel to 0)."""
         for ui in self.tab_ui_registry:
+            setter = getattr(ui["img"], "set_audio_only", None)
+            if callable(setter):
+                setter(False)   # real frames arrived — this input has video
             ui["on_thumbnail"](frames)
             sync = getattr(ui["img"], "sync_index", None)
             if callable(sync):
@@ -322,6 +388,12 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         for tab in self.tabs.values():
             tab.grid_forget()
         self.tabs[name].grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        # Pull keyboard focus back to the window. A CTk nav button keeps focus
+        # after a click and swallows <space>/<Return>, so without this the
+        # global keybinds (Space → queue start/pause) only started working
+        # once the user clicked somewhere non-focusable inside the tab.
+        if not isinstance(self.focus_get(), tk.Entry):
+            self.focus_set()
         # Deferred: the very first call happens during __init__, before
         # mainloop() has run even once — at that point the sidebar buttons
         # haven't actually been mapped onscreen yet, so winfo_height() on

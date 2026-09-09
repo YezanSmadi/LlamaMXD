@@ -145,6 +145,16 @@ FFPROBE_AUDIO = {
 }
 
 
+# Input file extensions the app treats as audio-only when a probe can't be
+# run (no ffmpeg) or comes back blank. Only used to decide the preview shows
+# the Wave Loop visualiser instead of video thumbnails — nothing downstream
+# keys off it.
+AUDIO_EXTENSIONS = {
+    ".mp3", ".m4a", ".aac", ".flac", ".wav", ".opus", ".ogg", ".oga",
+    ".wma", ".aiff", ".aif", ".alac", ".ac3", ".mka", ".weba",
+}
+
+
 def containers():
     """Every output container the app offers, in menu order."""
     return list(_CONTAINERS)

@@ -1,7 +1,87 @@
+import os
+import time
+import tkinter as tk
+
 import customtkinter as ctk
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageTk
 
 from core.theme import get_active_theme, readable_text_on
+
+# Repo root — the strip-state assets (mute badge, Wave Loop.json) sit beside
+# llama.png.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ASSET_CACHE = {}
+
+
+def _force_white_fills(node):
+    """Walk a Bodymovin JSON tree in place, forcing every static shape-fill
+    colour to opaque white. rlottie has no expression support, so the dots'
+    'Main Dot color' expression is already ignored and only the baked `k`
+    value matters — flattening it to white turns the whole animation into a
+    clean alpha mask the carousel can tint with the primary→secondary
+    gradient (the same trick the old static `audio-waveform.png` used)."""
+    if isinstance(node, dict):
+        if node.get("ty") == "fl":
+            colour = node.get("c")
+            if (isinstance(colour, dict) and isinstance(colour.get("k"), list)
+                    and colour["k"] and not isinstance(colour["k"][0], dict)):
+                colour["k"] = [1, 1, 1, 1]
+        for value in node.values():
+            _force_white_fills(value)
+    elif isinstance(node, list):
+        for value in node:
+            _force_white_fills(value)
+
+
+def _wave_animation():
+    """The `Wave Loop.json` Bodymovin export as an rlottie `LottieAnimation`,
+    loaded once with every dot fill flattened to white (see
+    `_force_white_fills`). `None` if rlottie-python isn't importable or the
+    file won't parse — `_wave_frame_rgb` then falls back to a faint flat wash
+    so the stripped-video state still reads."""
+    if "wave" not in _ASSET_CACHE:
+        _ASSET_CACHE["wave"] = None
+        _ASSET_CACHE["wave_frames"] = 0
+        try:
+            import json
+
+            from rlottie_python import LottieAnimation
+
+            with open(os.path.join(_ROOT, "Wave Loop.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+            _force_white_fills(data)
+            anim = LottieAnimation.from_data(json.dumps(data))
+            _ASSET_CACHE["wave"] = anim
+            _ASSET_CACHE["wave_frames"] = anim.lottie_animation_get_totalframe() or 0
+            _ASSET_CACHE["wave_fps"] = anim.lottie_animation_get_framerate() or 30.0
+        except Exception:
+            pass
+    return _ASSET_CACHE["wave"]
+
+
+def _wave_frame_count():
+    """Total frames in the Wave Loop animation (0 if it failed to load)."""
+    _wave_animation()
+    return _ASSET_CACHE.get("wave_frames", 0)
+
+
+def _wave_source_fps():
+    """The Wave Loop animation's own framerate (~29.97), for wall-clock playback."""
+    _wave_animation()
+    return _ASSET_CACHE.get("wave_fps", 30.0)
+
+
+def _mute_badge():
+    """The `audio-mute.png` badge (RGBA), loaded once — the red speaker-with-X
+    disc shown top-right of the preview while the audio is stripped."""
+    if "mute" not in _ASSET_CACHE:
+        try:
+            _ASSET_CACHE["mute"] = Image.open(
+                os.path.join(_ROOT, "audio-mute.png")
+            ).convert("RGBA")
+        except Exception:
+            _ASSET_CACHE["mute"] = Image.new("RGBA", (8, 8))
+    return _ASSET_CACHE["mute"]
 
 # How many fade ticks between fully-hidden and fully-shown arrows, and how
 # long each tick is. Short and cheap — each tick is a single PIL Image.blend
@@ -47,6 +127,44 @@ _DOT_CLUSTER = 3      # large, screen-stationary centre dots
 _DOT_LOOK = 2         # medium-then-small taper dots each side
 _DOT_ON_RGBA = (255, 255, 255, 235)
 _DOT_OFF_RGBA = (255, 255, 255, 90)
+
+# Stripped-video preview: the Wave Loop dot animation rendered edge to edge and
+# tinted with the primary→secondary gradient. Played by a self-re-arming `after`
+# tick that only runs while the video stream is stripped (a niche state) and
+# stops the moment it isn't.
+#
+# **Painted on a raw `tk.Label` via `ImageTk.PhotoImage`, NOT a `CTkImage`.**
+# `CTkImage` runs a per-widget DPI-scaling pass on every `configure(image=)` —
+# ~150ms for a full-size frame on this 175%-scaled DPI-unaware process, which
+# dropped the animation to ~6fps. A plain `ImageTk.PhotoImage` on a bare
+# `tk.Label` (`_wave_label`, placed over `img_label` while stripped) is ~2ms.
+# The tick is time-based: `_wave_frame_at` maps wall-clock elapsed → a loop
+# frame index at `_WAVE_SPEED`× the comp's own rate, so jitter in the `after`
+# cadence never changes playback speed, and a tick whose index hasn't moved
+# repaints nothing. `_WAVE_INTERVAL_MS` is well under a frame so the loop keeps
+# up (Tcl's `after` adds ~11ms of its own).
+#
+# rlottie scales the 1920×1080 comp to the render *width* (dots stay round at
+# any width), so `_wave_frame_rgb` renders at natural aspect — oversampled
+# `_WAVE_SS`× for crispness on the DPI-scaled display — crops the dot band
+# (`_WAVE_BAND_LO`..`_WAVE_BAND_HI`, comfortably *outside* the true ~0.48–0.89
+# envelope so nothing clips) and scales it to `_WAVE_FILL` of the height,
+# centred with a small margin. Only that step stretches vertically, ~1.3× —
+# gentle, so the dots stay round-ish.
+#
+# **The wave bleeds past the preview box, but not past the tab.** `_wave_label`
+# is a child of the **selected tab's frame** (`_wave_host`), not the carousel,
+# placed by `_wave_geometry` across the full tab-frame width at the carousel's
+# own vertical band — so it fills the DropBox / `top_container` inner padding
+# but stops at the tab frame's edges, and it hides / is destroyed with the tab
+# like any normal child. `_wave_tick` re-places it each tick (cheap; the
+# geometry is stable so it rarely actually moves).
+_WAVE_INTERVAL_MS = 16
+_WAVE_SPEED = 1
+_WAVE_SS = 1
+_WAVE_BAND_LO = 0.42
+_WAVE_BAND_HI = 0.95
+_WAVE_FILL = 0.88
 
 
 class ThumbnailCarousel(ctk.CTkFrame):
@@ -129,6 +247,36 @@ class ThumbnailCarousel(ctk.CTkFrame):
             (0, 0, 0, 255) if readable_text_on(theme["primary"]) == "black"
             else (255, 255, 255, 255)
         )
+        # Endpoints of the stripped-video waveform's gradient — resolved once
+        # (a theme switch rebuilds this widget).
+        self._wave_c0 = self._hex_to_rgb(theme["primary"])
+        self._wave_c1 = self._hex_to_rgb(theme["secondary"])
+
+        # Strip state, pushed in by the tab's `_sync_controls`
+        # (`set_strip_state`). Video stripped → the preview is replaced by the
+        # tinted Wave Loop animation; audio stripped → a mute badge, top-left.
+        self._strip_video = False
+        self._strip_audio = False
+        # Set by `app.set_audio_only` when the imported file has no video
+        # stream — shows the same Wave Loop animation (it's an audio
+        # visualiser) and disables navigation, exactly like `_strip_video`.
+        self._audio_only = False
+        self._badge_scaled = None   # mute badge pre-sized for the current frame
+        self._wave_job = None       # self-re-arming Wave Loop animation tick
+        self._wave_t0 = 0.0         # wall-clock start of the current wave loop
+        self._wave_last_idx = -1    # last Wave Loop frame index actually painted
+        self._wave_grad = None      # ((w, h), gradient RGB, solid bg RGB) cache
+        self._wave_photo = None     # live ImageTk.PhotoImage (keep a ref vs GC)
+        self._wave_label = None     # raw tk.Label the wave paints on (fast path)
+        self._wave_placed = None    # (x, y, w, h) the wave label is currently placed at
+        # The carousel is fg_color="transparent"; resolve what that actually is
+        # now, as an RGB tuple PIL accepts, so the wave frames can be composited
+        # opaque over it (RGB, no alpha — ImageTk is faster, and the wave fills
+        # the frame so nothing shows). CTk may hand back a Tk colour *name*
+        # (e.g. "gray14"), which PIL doesn't parse — go through winfo_rgb.
+        master_color = self._apply_appearance_mode(self._detect_color_of_master())
+        r, g, b = self.winfo_rgb(master_color)
+        self._wave_bg = (r >> 8, g >> 8, b >> 8)
 
         self._frames = []           # raw PIL Images, unscaled
         self._index = 0
@@ -187,6 +335,47 @@ class ThumbnailCarousel(ctk.CTkFrame):
         self._rescale()
         self.after(50, self._rescale)
 
+    def set_strip_state(self, strip_video, strip_audio):
+        """Told by the owning tab's `_sync_controls` which streams are being
+        stripped. Video stripped replaces the whole preview with the tinted
+        Wave Loop animation (navigation is pointless then); audio stripped just
+        adds the mute badge over whatever's shown. No-ops when nothing
+        changed."""
+        if (bool(strip_video), bool(strip_audio)) == (self._strip_video, self._strip_audio):
+            return
+        self._strip_video = bool(strip_video)
+        self._strip_audio = bool(strip_audio)
+        self._cancel_anim()
+        self._arrow_alpha = 0.0
+        if not self._strip_video and not self._audio_only:
+            self._stop_wave()
+        self._rescale()
+
+    def set_audio_only(self, audio_only):
+        """Told by `app.set_audio_only` that the imported file has no video
+        stream. Shows the Wave Loop animation as the preview (same path as a
+        stripped video — it's an audio visualiser) and reveals the carousel
+        the first time, so an audio import isn't left staring at a collapsed
+        DropBox. No-ops when nothing changed."""
+        if bool(audio_only) == self._audio_only:
+            return
+        self._audio_only = bool(audio_only)
+        self._cancel_anim()
+        self._arrow_alpha = 0.0
+        if self._audio_only:
+            self._frames = []          # any stale video frames are irrelevant now
+            self._index = 0
+            if not self._populated:
+                self._populated = True
+                if self._on_populated:
+                    self._on_populated()
+            self._rescale()
+            self.after(50, self._rescale)
+        else:
+            if not self._strip_video:
+                self._stop_wave()
+            self._rescale()
+
     # ------------------------------------------------------------------ #
     #  Rendering
     # ------------------------------------------------------------------ #
@@ -198,10 +387,13 @@ class ThumbnailCarousel(ctk.CTkFrame):
         to the label; `overlay=False` skips the (full-supersample, ~12ms)
         overlay rebuild — both used by `_step`, which shows a slide instead
         and lets `_slide_step` rebuild the overlay per tick."""
-        if not self._frames:
-            return
         w, h = self.winfo_width(), self.winfo_height()
         if w <= 1 or h <= 1:
+            return
+        if self._strip_video or self._audio_only:
+            self._render_stripped(w, h)
+            return
+        if not self._frames:
             return
 
         frame = self._frames[self._index]
@@ -218,6 +410,202 @@ class ThumbnailCarousel(ctk.CTkFrame):
             self._overlay = self._build_overlay(nw, nh)
         if render:
             self._update_image()
+
+    # ------------------------------------------------------------------ #
+    #  Stripped-stream rendering
+    # ------------------------------------------------------------------ #
+    def _wave_gradient(self, w, h):
+        """`(gradient_rgb, solid_bg_rgb)` at `w`×`h`, cached and rebuilt only
+        when the preview size changes — every Wave Loop frame composites its
+        dot coverage from the gradient over the solid background."""
+        if self._wave_grad is None or self._wave_grad[0] != (w, h):
+            row = Image.new("RGB", (w, 1))
+            px = row.load()
+            c0, c1 = self._wave_c0, self._wave_c1
+            for x in range(w):
+                t = x / max(1, w - 1)
+                px[x, 0] = tuple(round(c0[i] + (c1[i] - c0[i]) * t) for i in range(3))
+            bg = Image.new("RGB", (w, h), self._wave_bg)
+            self._wave_grad = ((w, h), row.resize((w, h)), bg)
+        return self._wave_grad[1], self._wave_grad[2]
+
+    def _wave_frame_rgb(self, w, h, idx):
+        """Wave Loop frame `idx` as an **opaque** `w`×`h` RGB image: the dot
+        coverage tinted with the horizontal primary→secondary gradient, over
+        the resolved background colour (the dots read as lit; the gaps as the
+        app's own backdrop). Rendered oversampled at the comp's natural aspect,
+        then the dot-band slice scaled to `_WAVE_FILL` of the height and
+        centred — a gentle vertical stretch, no clipping. Falls back to a faint
+        flat wash if rlottie didn't load."""
+        grad, bg = self._wave_gradient(w, h)
+        anim = _wave_animation()
+        frames = _wave_frame_count()
+        if anim is None or frames <= 0:
+            return Image.blend(bg, grad, 0.12)
+
+        # Oversample (crisper on the DPI-scaled display); rlottie scales the
+        # comp to the render *width*, so this height neither pads nor clips it.
+        rw = max(8, round(w * _WAVE_SS))
+        rh = max(8, round(rw * 1080 / 1920))
+        alpha = anim.render_pillow_frame(
+            frame_num=idx % frames, width=rw, height=rh).getchannel("A")
+
+        y0 = round(_WAVE_BAND_LO * rh)
+        y1 = max(y0 + 1, round(_WAVE_BAND_HI * rh))
+        band_h = max(1, round(h * _WAVE_FILL))
+        band = alpha.crop((0, y0, rw, y1)).resize((w, band_h), Image.LANCZOS)
+
+        mask = Image.new("L", (w, h), 0)
+        mask.paste(band, (0, (h - band_h) // 2))
+        out = Image.composite(grad, bg, mask)
+        if self._strip_audio:
+            badge = self._mute_badge_for(w, h)
+            m = max(4, round(badge.width * 0.28))
+            out.paste(badge, (m, m), badge)
+        return out
+
+    def _mute_badge_for(self, w, h):
+        """The mute badge pre-sized to ~14% of the frame's short side, cached
+        so a running slide doesn't re-resize it every tick."""
+        size = max(18, round(min(w, h) * 0.14))
+        if self._badge_scaled is None or self._badge_scaled.size != (size, size):
+            self._badge_scaled = _mute_badge().resize((size, size), Image.LANCZOS)
+        return self._badge_scaled
+
+    def _with_badge(self, img):
+        """`img` with the mute badge composited into its **top-left** corner.
+        Returns RGBA (keeps any transparency the input carried)."""
+        w, h = img.size
+        badge = self._mute_badge_for(w, h)
+        margin = max(4, round(badge.width * 0.28))
+        out = img.convert("RGBA")
+        out.alpha_composite(badge, (margin, margin))
+        return out
+
+    def _wave_host(self):
+        """The **selected tab's frame** — the last ancestor before the
+        toplevel (tabs are gridded directly in `LlamaGUI`). `_wave_label`
+        parents here, not to the carousel, so it can spill past the DropBox /
+        `top_container` padding, but no further than the tab frame's own edges;
+        and it's torn down / hidden with the tab like any normal child."""
+        w = self
+        top = self.winfo_toplevel()
+        while w.master is not None and w.master is not top:
+            w = w.master
+        return w
+
+    def _wave_label_widget(self):
+        """The raw `tk.Label` the Wave Loop animation paints on, created lazily.
+        A bare `tk.Label` + `ImageTk.PhotoImage` is ~75× faster per frame than
+        `CTkImage` on this DPI-scaled process (see the module comment). Parented
+        to the tab frame (`_wave_host`) so it isn't clipped to the carousel /
+        DropBox box. Carries the same press bindings so a double-click still
+        reselects."""
+        if self._wave_label is None:
+            self._wave_label = tk.Label(self._wave_host(), bd=0,
+                                        highlightthickness=0,
+                                        bg="#%02x%02x%02x" % self._wave_bg)
+            self._wave_label.bind(
+                "<Button-1>", lambda e: self._handle_press(e, repeat=False))
+            self._wave_label.bind(
+                "<Double-Button-1>", lambda e: self._handle_press(e, repeat=True))
+        return self._wave_label
+
+    def _wave_geometry(self):
+        """`(x, y, w, h)` in tab-frame coords for `_wave_label` — the carousel's
+        own vertical band, but the **full width of the tab frame** so the wave
+        fills past the DropBox's ~20px inner margin without leaving the tab.
+        Falls back to the carousel's own box if geometry isn't readable yet."""
+        host = self._wave_host()
+        y = self.winfo_rooty() - host.winfo_rooty()
+        h = self.winfo_height()
+        w = host.winfo_width()
+        if w <= 1 or h <= 1:
+            return (self.winfo_rootx() - host.winfo_rootx(), max(0, y),
+                    self.winfo_width(), max(1, h))
+        return (0, y, w, h)
+
+    def _place_wave_label(self):
+        """Places `_wave_label` at `_wave_geometry`, lifted, re-rendering if the
+        size changed. Returns the (w, h) it should render at."""
+        lbl = self._wave_label_widget()
+        x, y, w, h = self._wave_geometry()
+        if (x, y, w, h) != self._wave_placed:
+            lbl.place(x=x, y=y, width=w, height=h)
+            lbl.lift()
+            if self._wave_placed is None or self._wave_placed[2:] != (w, h):
+                self._rendered_size = (w, h)
+                self._wave_last_idx = -1   # force a repaint at the new size
+            self._wave_placed = (x, y, w, h)
+        return w, h
+
+    def _render_stripped(self, w, h):
+        """Shows the Wave Loop animation as the preview — used both when the
+        video stream is stripped and when the imported file is audio-only —
+        over the whole preview and bleeding past its margin (plus the mute
+        badge if the audio is stripped too), on `_wave_label`, and arms the
+        playback tick. `w`/`h` (the carousel's own size) are ignored:
+        `_place_wave_label` picks the bleed size."""
+        self._base_scaled = None
+        self._displayed_base = None
+        self._overlay = None
+        self._start_wave()
+        ww, hh = self._place_wave_label()
+        self._paint_wave(ww, hh, self._wave_frame_at())
+
+    def _paint_wave(self, w, h, idx):
+        """Renders Wave Loop frame `idx` and shows it on `_wave_label`."""
+        img = self._wave_frame_rgb(w, h, idx)
+        self._wave_photo = ImageTk.PhotoImage(img)
+        self._wave_label_widget().configure(image=self._wave_photo)
+        self._wave_last_idx = idx
+
+    def _wave_frame_at(self):
+        """The loop frame index for right now — wall-clock elapsed since
+        `_wave_t0`, at `_WAVE_SPEED`× the comp's own rate, wrapped. Time-based
+        so an irregular `after` cadence can't change playback speed."""
+        frames = _wave_frame_count() or 1
+        elapsed = time.monotonic() - self._wave_t0
+        return int(elapsed * _wave_source_fps() * _WAVE_SPEED) % frames
+
+    def _start_wave(self):
+        """Arms the Wave Loop playback tick, unless it's already running or the
+        animation failed to load. Anchors the wall clock on the first arm."""
+        if self._wave_job is None and _wave_animation() is not None:
+            self._wave_t0 = time.monotonic()
+            self._wave_last_idx = -1
+            self._wave_job = self.after(_WAVE_INTERVAL_MS, self._wave_tick)
+
+    def _stop_wave(self):
+        """Cancels the playback tick and hides `_wave_label` (a toplevel child —
+        it would otherwise float over the whole window), revealing the normal
+        preview on `img_label` beneath it."""
+        if self._wave_job is not None:
+            self.after_cancel(self._wave_job)
+            self._wave_job = None
+        if self._wave_label is not None:
+            self._wave_label.place_forget()
+            self._wave_placed = None
+
+    def _wave_tick(self):
+        """Keep `_wave_label` placed at the current bleed geometry and repaint
+        iff the wall-clock frame index has advanced, then re-arm. Bails
+        (without re-arming) once the video is no longer stripped or the widget
+        is gone; while the carousel's tab is hidden it `place_forget`s the
+        label (a toplevel child floats over every tab otherwise) but keeps the
+        clock running so it resumes at the right phase."""
+        self._wave_job = None
+        if not (self._strip_video or self._audio_only) or not self.winfo_exists():
+            return
+        if self.winfo_viewable():
+            w, h = self._place_wave_label()
+            idx = self._wave_frame_at()
+            if idx != self._wave_last_idx:
+                self._paint_wave(w, h, idx)
+        elif self._wave_placed is not None:
+            self._wave_label.place_forget()
+            self._wave_placed = None
+        self._wave_job = self.after(_WAVE_INTERVAL_MS, self._wave_tick)
 
     def _build_overlay(self, w, h, dot_t=1.0, ss=_OVERLAY_SS):
         """The chevrons + dot indicators for the current index as a standalone
@@ -384,6 +772,9 @@ class ThumbnailCarousel(ctk.CTkFrame):
         else:
             full = Image.alpha_composite(base.convert("RGBA"), self._overlay).convert("RGB")
             disp = full if alpha >= 0.99 else Image.blend(base, full, alpha)
+        # Audio-only strip: the video's still here, just badge it.
+        if self._strip_audio and not self._strip_video:
+            disp = self._with_badge(disp)
         self._ctk_img = ctk.CTkImage(light_image=disp, dark_image=disp, size=self._rendered_size)
         self.img_label.configure(image=self._ctk_img)
 
@@ -480,7 +871,7 @@ class ThumbnailCarousel(ctk.CTkFrame):
         self._rescale()
 
     def _on_enter(self, _event):
-        if len(self._frames) > 1:
+        if len(self._frames) > 1 and not self._strip_video and not self._audio_only:
             self._fade_to(1.0)
 
     def _on_leave(self, _event):
@@ -534,6 +925,11 @@ class ThumbnailCarousel(ctk.CTkFrame):
         central area → a repeat press reselects the input file, but only if
         the press before it was also central (so one stray click mid-spam is
         harmless, while a deliberate double-click on the frame still works)."""
+        if self._strip_video or self._audio_only:
+            # No previews to step through — a double-click still reselects.
+            if repeat and self._on_reselect:
+                self._on_reselect()
+            return
         xy = self._event_image_xy(event) if len(self._frames) > 1 else None
         if xy is not None:
             x, y = xy
@@ -555,10 +951,20 @@ class ThumbnailCarousel(ctk.CTkFrame):
             self._on_reselect()
         self._prev_press_central = central
 
-    def _step(self, delta):
+    def step(self, delta):
+        """Public stepper — the app's Left/Right arrow-key binding calls this
+        to flip previews on the visible tab's carousel. Doesn't force the
+        chevrons visible (there's no pointer over the preview to justify it);
+        no-op unless there's more than one frame."""
+        if len(self._frames) > 1 and not self._strip_video:
+            self._step(delta, show_arrows=False)
+
+    def _step(self, delta, show_arrows=True):
         """Moves `delta` previews (clamped) with a slide transition from
-        whatever's currently on screen, re-flowing the dot row to match."""
-        if not self._frames:
+        whatever's currently on screen, re-flowing the dot row to match.
+        `show_arrows` is False for a keyboard step, which has no hover to
+        justify lighting the chevrons up."""
+        if not self._frames or self._strip_video or self._audio_only:
             return
         new_index = max(0, min(len(self._frames) - 1, self._index + delta))
         if new_index == self._index:
@@ -570,7 +976,8 @@ class ThumbnailCarousel(ctk.CTkFrame):
         if self._on_index is not None:
             self._on_index(new_index)   # mirror the scrub onto the other tab
         self._dot_start = self._resolve_dot_start(new_index, delta, prev_index, prev_start)
-        self._arrow_alpha = 1.0   # pointer is over the preview
+        if show_arrows:
+            self._arrow_alpha = 1.0   # pointer is over the preview
         self._rescale(render=False, overlay=False)   # _base_scaled only; slide rebuilds _overlay
         if (from_base is None or self._base_scaled is None
                 or from_base.size != self._base_scaled.size):
@@ -626,3 +1033,13 @@ class ThumbnailCarousel(ctk.CTkFrame):
         self._dot_start = self._centered_dot_start(index)
         self._arrow_alpha = 0.0
         self._rescale()
+
+    def destroy(self):
+        """Stop the Wave Loop tick before teardown so a queued frame can't fire
+        against a destroyed widget (a live theme rebuild destroys the carousel
+        along with its tab)."""
+        self._stop_wave()
+        if self._wave_label is not None:
+            self._wave_label.destroy()
+            self._wave_label = None
+        super().destroy()
