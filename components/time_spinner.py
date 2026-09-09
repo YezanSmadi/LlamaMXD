@@ -4,8 +4,13 @@ class TimeSpinner(ctk.CTkFrame):
     # String index (within "HH:MM:SS") of each of the 6 digit slots, in order.
     _SEGMENT_POSITIONS = (0, 1, 3, 4, 6, 7)
 
-    def __init__(self, master, initial_seconds=0):
+    def __init__(self, master, initial_seconds=0, command=None):
         super().__init__(master=master, fg_color="transparent")
+
+        # Fired on every value change (typing, +/-, backspace, set()) so a
+        # live readout — the Overview rundown's trim line — can update as the
+        # user types rather than only on the next _sync_controls pass.
+        self._command = command
 
         # Internal state representation [H, H, M, M, S, S]
         self.digits = ["0", "0", "0", "0", "0", "0"]
@@ -21,18 +26,7 @@ class TimeSpinner(ctk.CTkFrame):
         self._current_delay = 400  # Initial delay before accelerating (ms)
         self._min_delay = 30       # Speed cap for fast-scrolling (ms)
 
-        # Minus Button
-        self.btn_minus = ctk.CTkButton(
-            self, text="-", width=30, height=30
-        )
-        self.btn_minus.pack(side="left", padx=(0, 5))
-
-        # Bind press/release events for accelerating auto-repeat
-        self.btn_minus.bind("<ButtonPress-1>", lambda e: self._start_hold(self.decrement))
-        self.btn_minus.bind("<ButtonRelease-1>", lambda e: self._stop_hold())
-        self.btn_minus.bind("<Leave>", lambda e: self._stop_hold())
-
-        # Time Entry Field
+        # Time Entry Field — sits on the left; the stepper goes to its right.
         self.entry = ctk.CTkEntry(
             self,
             width=100,
@@ -50,16 +44,30 @@ class TimeSpinner(ctk.CTkFrame):
 
         self.update_display()
 
-        # Plus Button
-        self.btn_plus = ctk.CTkButton(
-            self, text="+", width=30, height=30
-        )
-        self.btn_plus.pack(side="left", padx=(5, 0))
+        # Up/Down stepper, to the RIGHT of the time. The two arrows stacked
+        # together take up the width one +/- button used to — a compact pair
+        # rather than two buttons flanking the field. btn_plus/btn_minus keep
+        # their names (set_state configures them).
+        self._stepper = ctk.CTkFrame(self, fg_color="transparent")
+        self._stepper.pack(side="left", padx=(5, 0))
 
-        # Bind press/release events for accelerating auto-repeat
-        self.btn_plus.bind("<ButtonPress-1>", lambda e: self._start_hold(self.increment))
-        self.btn_plus.bind("<ButtonRelease-1>", lambda e: self._stop_hold())
-        self.btn_plus.bind("<Leave>", lambda e: self._stop_hold())
+        self.btn_plus = ctk.CTkButton(
+            self._stepper, text="▲", width=30, height=13, corner_radius=3,
+            font=ctk.CTkFont(size=9),
+        )
+        self.btn_plus.pack(side="top")
+
+        self.btn_minus = ctk.CTkButton(
+            self._stepper, text="▼", width=30, height=13, corner_radius=3,
+            font=ctk.CTkFont(size=9),
+        )
+        self.btn_minus.pack(side="top", pady=(2, 0))
+
+        # Bind press/release events for accelerating auto-repeat on both.
+        for _btn, _action in ((self.btn_plus, self.increment), (self.btn_minus, self.decrement)):
+            _btn.bind("<ButtonPress-1>", lambda e, a=_action: self._start_hold(a))
+            _btn.bind("<ButtonRelease-1>", lambda e: self._stop_hold())
+            _btn.bind("<Leave>", lambda e: self._stop_hold())
 
     def _start_hold(self, action):
         """Starts the repeating action loop on button press."""
@@ -196,6 +204,10 @@ class TimeSpinner(ctk.CTkFrame):
         # Only highlight cursor block if this field is currently focused
         if self._is_focused():
             self.after(1, self._render_block_cursor)
+
+        # Notify a listener (e.g. the Overview rundown) of the new value.
+        if self._command is not None:
+            self._command()
 
     def increment(self):
         """Adds 1 second and updates display."""

@@ -204,6 +204,12 @@ interpreter instance.
   all five tabs eagerly at startup: `MuxingTab`, `EncodingTab`, `QueueTab`,
   `YtDlpTab`, `SettingsTab` — each is given `master=self, app=self`.
 - Calls `self.show_tab("Muxing")` to display the first tab.
+- Binds the global keybinds on the root (which outlives the live theme
+  rebuild). So far: **Left / Right** → `_nudge_preview(∓1)`, which steps the
+  current tab's `ThumbnailCarousel` (`carousel.step(delta)`). Ignored while a
+  `tkinter.Entry` has focus — the `TimeSpinner` and save-path fields own the
+  arrow keys — and a no-op on tabs with no `carousel`. Meant to grow; new
+  binds go here, not on individual tabs.
 
 `register_tab_ui(self, label_widget, img_widget, on_thumbnail=None)`:
 Lets a tab opt into the cross-tab file-selection broadcast (see
@@ -221,7 +227,8 @@ whitespace; if the result is empty, bails out. Otherwise:
    a theme rebuild keeps the scrub position).
 2. Walks `self.tab_ui_registry`, updating each entry's label text to
    `f"Selected File:  {self.current_file_path}"` (one line — the label sits
-   inline to the right of each tab's `Video`/`Audio` sub-tab switch).
+   inline to the right of each tab's `Video`/`Audio` sub-tab switch, and is a
+   `MarqueeLabel` that scrolls the text when the path doesn't fit).
 3. Walks every tab in `self.tabs`, and for any tab that has a `drop_box`
    attribute, calls `tab.drop_box.hide_drop_text()` (collapsing that tab's
    drop-target hint/border now that a file is selected); for any tab
@@ -277,7 +284,11 @@ tabs. `sync_index` doesn't fire `on_index` back, so this can't loop.
 
 `show_tab(self, name)`: records `name` into `self._current_tab_name`, then
 `grid_forget()`s every tab, then `grid()`s only the
-requested one into `(row=0, column=1)` with 10px padding on all sides. It
+requested one into `(row=0, column=1)` with 10px padding on all sides. Then
+`self.focus_set()` (unless an `Entry` holds focus) — a CTk nav button keeps
+keyboard focus after a click and eats `<space>`/`<Return>`, so the global
+keybinds (Space → queue toggle) wouldn't fire until the user clicked
+elsewhere in the tab. It
 then (re)schedules `_update_tab_indicator(name)` via `self.after(50, ...)`
 — deliberately delayed rather than called synchronously, and any
 previously-scheduled-but-not-yet-fired call is cancelled first
@@ -521,9 +532,10 @@ Named codec/quality recipes, persisted to a gitignored `presets.json` at the
 repo root shaped `{tab: {name: settings}}`.
 
 A preset is a **recipe, not a job**: `PRESET_KEYS` limits what's stored to
-the container and the codec/quality choices, and deliberately excludes the
-trim, the input/output paths and (on Muxing) the track picks — so loading
-one can't quietly re-trim a clip or repoint its output. Presets are scoped
+the container, the `av_sync` flag and the codec/quality choices, and
+deliberately excludes the trim, the input/output paths and (on Muxing) the
+track picks — so loading one can't quietly re-trim a clip or repoint its
+output. Presets are scoped
 per source tab, since Muxing and Encoding no longer share a settings shape.
 
 `names(tab)` / `menu_values(tab)` (the latter prepends `NONE_LABEL`,
@@ -694,35 +706,55 @@ and restores the prior selection if it survived the retarget. It never fires
 
 ### `components/sub_tab_bar.py`
 
-Defines **`SubTabBar(ctk.CTkFrame)`** — a compact row of mutually-exclusive
-tab buttons, used for the `Overview` / `Video` / `Audio` switch in the
-top-left of the Muxing and Encoding preview areas. Constructed with
-`options` (list of names), `command` (called with the newly-selected name,
-on a *change* only — re-clicking the active tab does nothing), and optional
-`initial`. Each option is a small `CTkButton` whose width tracks its label
-so "Overview" isn't clipped while "Video" doesn't float in dead space.
+Defines **`SubTabBar(ctk.CTkFrame)`** — the `Overview` / `Video` / `Audio`
+switch top-left of the Muxing/Encoding preview area. Constructed with
+`options`, `command` (fired on a *change* only), and optional `initial`.
 
-`_repaint()` paints the active button the active theme's `primary`
-(+ `primary_hover` / `primary_text`) and every other one `secondary`
-(+ `secondary_hover` / `secondary_text`) — the adaptive black/white label
-colour via the theme's `*_text` keys, same as every themed button.
+**The whole bar is one `tkinter.Canvas`** (`self._cv`), not a row of
+`CTkButton`s. Each "button" is two canvas items — **one filled
+`create_polygon`** whose corners are short point-arcs (`_round_rect_points`),
+plus a centred text item. It used to be a body rect + a cross rect + four
+corner shapes, but Tk rasterises a `create_rectangle` edge and an adjacent
+`create_oval` / `pieslice` edge a pixel apart, so a 1px notch showed wherever
+a corner met a straight edge. A single polygon fills by one rule — no seam.
+`_make_items` creates the items at (0,0) once; `_redraw` → `_paint` repaint
+every button from `self._state`
+(`{name: (fill, height, text_colour)}`) by updating those items' `coords` /
+`itemconfig` **in place**. Nothing is a widget, so nothing is resized or
+reconfigured per frame — which is what eliminates the redraw / text-reflow
+flicker an animated `CTkButton` row produced (reported three times).
 
-`set_marked(name, marked)` shows/hides a `⊘` suffix on one button. This is
-structural rather than decorative: `Strip Video` lives on the Video panel
-and `Strip Audio` on the Audio panel, so without a marker, removing a stream
-would silently change state on a panel the user can't currently see. It
-no-ops when nothing changes, since `_sync_controls` calls it on every pass.
+The active button is `primary` at `_ACTIVE_H`, inactive ones `secondary` at
+`_INACTIVE_H` (80%), bottom-aligned so the current tab reads as raised.
+`_animate` → `_anim_tick` runs the transition on a **wall-clock** ease
+(`_ANIM_DURATION` 0.17s; `_ANIM_MS` is just the poll interval — a
+step-counted version dropped frames unevenly since `after` runs ~11ms slow
+here, and the fade lurched into the final colour). `smoothstep` on height
+(kept float), straight-RGB `_lerp_hex` on fill, text colour snapping at the
+midpoint. Both fade endpoints run through `_display_fill` — hover-aware — so
+the fade can't end on `_fill_for` then snap to the hover shade. Hover and
+click are hit-tested by x against the button ranges
+(`_hit` / `_on_motion` / `_on_click_event`). The canvas `bg` is pinned to
+the header's resolved colour (`self._canvas.cget("bg")`) so the bar blends
+into its surroundings.
 
-`get()` returns the active name; `set(name, fire=False)` selects one
-programmatically. Nothing to refresh on a live theme switch — the owning tab
-is destroyed and rebuilt whole, so this is reconstructed and re-reads
-`get_active_theme()` from scratch.
+`set_marked(name, marked)` cross-fades one button to/from the permanent
+`STOP_RED` (Strip / Stop Queue colour), active or not — `Strip Video` lives
+on the Video panel and `Strip Audio` on the Audio panel, so without the red
+tab a removed stream would silently change state on a panel the user can't
+see. No-ops when nothing changes.
+
+`get()` / `set(name, fire=False)` are the same as before. Nothing to refresh
+on a live theme switch — the owning tab is rebuilt whole. **Gotcha:** don't
+name an attribute `self._options` — it shadows a real `tkinter.Misc` method
+and breaks every `.configure()` call on the widget. It's `self._names`.
 
 ### `components/summary_panel.py`
 
 Defines **`SummaryPanel(ctk.CTkFrame)`** — the Overview sub-tab's export
-rundown, a compact `label  value` list (`Container` / `Video` / `Audio` /
-`Trim`).
+rundown, a compact `label  value` list (`Video` / `Audio` / `Trim` — the
+output container is not a row, since the Output Format dropdown right beside
+it already says it).
 
 It solves a structural problem, not just an informational one: the Video and
 Audio sub-tabs each hide the other's state, and several rules span them (the
@@ -738,6 +770,36 @@ churn at that rate flickers. `values` is a list of `(text, color)` pairs
 matching the construction order; `color=None` means the normal label colour,
 and `STOP_RED` is what a removed stream's `— removed —` uses. A short list
 leaves trailing rows blank rather than raising.
+
+### `components/marquee_label.py`
+
+Defines **`MarqueeLabel(ctk.CTkFrame)`** — a single-line label that
+**smoothly** scrolls its text sideways (pixel by pixel, ~60fps) when the text
+is wider than the space it's given, and stands still when it fits. Both Muxing
+and Encoding use it for the `header_row` "Selected File:" label, which is
+usually a path too long to fit beside the `SubTabBar`.
+
+It renders onto its **own raw `tkinter.Canvas`** (`self._cv`), packed over
+CTkFrame's placed background canvas — the two coexist because they use
+different geometry managers (place vs pack). A canvas, *not* a `CTkLabel`,
+specifically so the scroll can advance by sub-character amounts: a `tk.Label`
+only shifts a whole glyph at a time, which made the first version jerky. Two
+`create_text` items trail each other by `text width + gap`; when the leading
+one has scrolled a full span off the left, the offset snaps back by a span and
+the trailing copy becomes the leading one — a seamless loop. The canvas `bg`
+is pinned to CTkFrame's own resolved background colour (via `self._canvas`,
+the internal one), so a `fg_color="transparent"` parent still shows through;
+`_draw` is overridden to keep that and the text colour in step with CTk's
+redraws.
+
+Drop-in: `configure(text=…)` is intercepted and fed to `set_text` (so
+`app.update_global_file` needs no changes), `cget("text")` returns the full
+string, and `bind(…)` is forwarded to the canvas too so the tab's
+double-click-to-reselect handler fires when the text is clicked. Font is
+measured and drawn through `_apply_font_scaling` so the overflow test matches
+what's actually rendered. `_restart` re-decides scroll-vs-static on every
+width change and `set_text`; the `after` loop is cancelled on `<Unmap>` /
+`<Destroy>`.
 
 ### `components/animated_switch.py`
 
@@ -995,13 +1057,58 @@ Internals:
   predecessor was also central calls `on_reselect`; edge-strip and single
   presses don't, so spamming a chevron past the last preview never pops the
   file dialog while a deliberate double-click on the frame still does.
-- `_step(delta)` — clamps the new index, resolves the new `_dot_start`
-  (`_resolve_dot_start`), `_rescale(render=False)`s it (so `_base_scaled` +
-  settled `_overlay` are ready for the destination), then `_animate_slide`s
-  from `_displayed_base` with `dot_anim=(prev_start, prev_index)` (falls back
-  to `_update_image` if there's nothing shown yet or the sizes disagree).
-  Callers only ever pass `delta` ±1; a larger jump snaps the row to the
-  target edge.
+- `_step(delta, show_arrows=True)` — clamps the new index, resolves the new
+  `_dot_start` (`_resolve_dot_start`), `_rescale(render=False)`s it (so
+  `_base_scaled` + settled `_overlay` are ready for the destination), then
+  `_animate_slide`s from `_displayed_base` with `dot_anim=(prev_start,
+  prev_index)` (falls back to `_update_image` if there's nothing shown yet or
+  the sizes disagree). Callers only ever pass `delta` ±1; a larger jump snaps
+  the row to the target edge.
+- `step(delta)` — the public wrapper the app's **Left/Right arrow keybind**
+  calls (see `core/app.py` → `_nudge_preview`). Forwards to `_step` with
+  `show_arrows=False` — a keyboard step has no pointer over the preview, so it
+  doesn't light the hover chevrons.
+- `set_audio_only(bool)` — pushed in by `app._broadcast_audio_only` when the
+  imported file has no video stream. Same visualiser as a stripped video
+  (`_render_stripped` runs when `_strip_video or _audio_only`); additionally
+  clears stale video `_frames` and fires `on_populated` so an audio import
+  reveals the carousel instead of sitting behind a collapsed DropBox.
+- `set_strip_state(strip_video, strip_audio)` — pushed in by the tab's
+  `_sync_controls`. **Video stripped** → `_render_stripped` replaces the whole
+  preview with the `Wave Loop.json` Bodymovin dot-wave animation, played by a
+  self-re-arming `after` tick (`_start_wave` / `_wave_tick` / `_stop_wave`,
+  also stopped on `destroy`). Each frame is rendered by **rlottie**
+  (`_wave_animation` — a singleton, dot fills flattened to white by
+  `_force_white_fills`); its alpha composites the horizontal
+  `primary`→`secondary` gradient over the resolved backdrop colour into an
+  **opaque** RGB image (`_wave_frame_rgb` / `_wave_gradient`), painted via
+  `ImageTk.PhotoImage` on a bare `tk.Label` (`_wave_label`) — **not**
+  `CTkImage`, whose per-swap DPI-scaling pass is ~150ms here and dropped the
+  animation to ~6fps (raw `ImageTk` → ~32fps; see the CLAUDE.md Known Issues
+  entry). `_wave_label` is a child of the **selected tab's frame** (`_wave_host`,
+  the last ancestor before the toplevel), `_wave_geometry`-placed over the
+  carousel's vertical band at the full tab-frame width — so the wave bleeds
+  past the DropBox's inner padding but stays inside the tab. It hides / is
+  destroyed with the tab like a normal child; `_wave_tick` also
+  `place_forget`s it while the tab is hidden and `destroy` also kills it. Playback is time-based (`_wave_frame_at` maps
+  wall-clock elapsed → loop index at `_WAVE_SPEED`× the comp rate), so
+  `after` jitter doesn't affect speed and a tick whose index hasn't moved
+  repaints nothing; `_WAVE_INTERVAL_MS` is 16 because Tcl's `after` adds
+  ~11ms. rlottie scales the comp to the render *width* (dots stay round), so
+  `_wave_frame_rgb` renders at natural aspect, oversampled `_WAVE_SS`× for
+  crispness, crops the dot band (`_WAVE_BAND_LO`..`_WAVE_BAND_HI`, outside
+  the ~0.48–0.89 envelope) and scales it to `_WAVE_FILL` (0.88) of the
+  height, centred — a gentle ~1.3× vertical stretch, dots stay round-ish;
+  the width fills the bled-out label so the wave reaches the tab frame's
+  edges (past the DropBox margin). If rlottie won't import,
+  `_wave_frame_rgb` degrades to a flat gradient wash and no tick is armed.
+  Navigation is disabled (`_step` / `_on_enter` / `_handle_press` all bail);
+  a double-click still reselects (`_wave_label` carries the press bindings).
+  **Audio stripped** → `_with_badge` composites `audio-mute.png` into the
+  **top-left** corner (in `_push` for the audio-only case; `_wave_frame_rgb`
+  does its own paste when the video is stripped too). `audio-mute.png` and
+  `Wave Loop.json` are loaded `__file__`-anchored from the repo root, where
+  `audio-mute.svg` is also checked in.
 
 ### `components/sidebar.py`
 
@@ -1026,7 +1133,7 @@ primary). From top to bottom:
    the moment it's packed*, so packing the spacer first would starve
    anything packed after it of space regardless of its own `side`.
    `footer_label` (copyright/version text, `"{year} Yezan Smadi
-   v0.5.0-alpha.2"`, in `theme["primary_text"]`) is packed first so it
+   v0.5.0-alpha.4"`, in `theme["primary_text"]`) is packed first so it
    claims the literal bottom edge; `btn_settings` packs second, landing
    just above it.
 5. `self.spacer` — a transparent, `fill="both", expand=True` frame packed
@@ -1054,12 +1161,17 @@ index to its character offset in the rendered `"HH:MM:SS"` string (skipping
 over the two `:` characters) — used both to draw the selection highlight and
 to translate a raw click position back into the nearest digit.
 
-**Construction**: builds, left to right: a `-` button (`btn_minus`), a
-`CTkEntry` (`self.entry`, width 100, centered text) used purely as a
-read/display surface for the formatted string, and a `+` button
-(`btn_plus`). Both buttons bind `<ButtonPress-1>`/`<ButtonRelease-1>`/
-`<Leave>` to start/stop an accelerating auto-repeat loop (see below) that
-calls `self.increment`/`self.decrement`. The entry itself binds `<Key>`,
+**Construction**: builds, left to right: a `CTkEntry` (`self.entry`, width
+100, centered text) used purely as a read/display surface for the formatted
+string, then a `_stepper` frame holding a **stacked ▲ (`btn_plus`) over ▼
+(`btn_minus`)** pair — the two arrows together take up the width one flanking
+`+`/`-` button used to. Both buttons bind `<ButtonPress-1>`/
+`<ButtonRelease-1>`/`<Leave>` to start/stop an accelerating auto-repeat loop
+(see below) that calls `self.increment`/`self.decrement`. An optional
+`command` callback (stored as `self._command`) fires from `update_display` on
+*every* value change — typing, stepper, backspace/delete, `set()` — so a live
+readout like the Overview rundown's Trim line can update as the user types.
+The entry itself binds `<Key>`,
 `<BackSpace>`, `<Delete>`, `<Button-1>`, `<FocusIn>`, and `<FocusOut>` to
 custom handlers that intercept and replace Tkinter's native text-editing
 behavior — every key handler returns `"break"` to stop Tk's default entry
@@ -1151,22 +1263,35 @@ window's bottom edge and the flexible `DropBox` absorbs what's left:
   `core.theme.get_active_theme()` at construction rather than hardcoded.
 - `top_container` packed *after*, `fill="both", expand=True`. It opens with
   a persistent `header_row` — a **`SubTabBar`** (`Overview`/`Video`/`Audio`)
-  top-left, then the always-packed one-line filename `label` — followed by a
+  top-left, then the always-packed one-line filename `label` (a
+  `MarqueeLabel` — scrolls when the path overflows) — followed by a
   `ThumbnailCarousel` and a `DropBox` (height 380).
 - Registers `label`/`carousel` via `app.register_tab_ui(...,
   on_thumbnail=self.carousel.set_frames)`.
 
 **Sub-tab panels.** `_build_overview_panel(left_parent, right_parent)`,
 `_build_video_panel(...)` and `_build_audio_panel(...)` each return a
-`(left, right)` frame pair, built once and returned unpacked;
-`_show_subtab(name)` `pack_forget`s all six and packs the chosen pair.
-`_pin_options_height()` measures each pair's `winfo_reqheight()` and locks
-`options_row` to the tallest with `pack_propagate(False)`, so the preview
-above never resizes on a sub-tab switch.
+`(left, right)` frame pair, built once and returned unpacked.
+`_pin_options_height()` measures each pair, then **freezes every panel to one
+footprint and `.place()`s all six stacked** — `(widest_left, tallest)` for
+the `left` frames, `(height=tallest, relwidth=1.0)` for the `right`, each
+`pack_propagate(False)`, with an `expand=True` spacer packed `before` the
+first content row so the content floats to the panel's bottom.
+`_show_subtab(name)` is then just `left.lift(); right.lift()` — no re-pack,
+no relayout, no synchronous flush. One shared footprint + `lift` is what
+stops the switch flicker: the incoming panel covers exactly what the outgoing
+one did (no strip of stale pixels above a shorter panel, no sideways shift of
+the rundown), and there's no progressive dropdown redraw. `_prewarm_subtabs`
+(bound once to `<Map>`) cycles each panel onscreen briefly right after the
+tab appears so nothing is left unpainted-behind-another for its first real
+reveal. `options_row` is also height-pinned so the preview above never
+resizes.
 - **Overview** — `Output Format` + the preset row (`Preset` dropdown +
   `Save` + `Delete`) on one line, the single global trim (`Start Time` /
-  `Clip Duration` `TimeSpinner`s) below, and the `SummaryPanel` rundown on
-  the right. Format and Preset share a row specifically to keep the left
+  `Clip Duration` `TimeSpinner`s + an `A/V Sync` checkbox to their right)
+  below, and the `SummaryPanel` rundown on the right. The spinners pass
+  `command=_on_trim_change`, so the rundown's Trim line updates live as the
+  user types. Format and Preset share a row specifically to keep the left
   column narrow: the rundown needs real width and the spinners are the
   widest things here.
 - **Video** / **Audio** — a track picker (`Auto` / `Track 1-3`) plus a
@@ -1182,7 +1307,7 @@ reports the backing path only when such an entry is actually selected, so
 **`_sync_controls()`** is the single constraint pass (see the same-named
 method on `EncodingTab` for the general rationale). Muxing's rules:
 1. stream presence — ticking one Strip disables the other, so an empty file
-   is unreachable; `SubTabBar.set_marked` puts a `⊘` on the other tab button
+   is unreachable; `SubTabBar.set_marked` turns the other tab button red
    so the hidden panel's state stays visible;
 2. track lists rebuilt to carry any browsed-in external entry;
 3. **the container inversion** — `formats.containers_for(video, audio)`,
@@ -1211,8 +1336,8 @@ only while `_auto_output` says the path is still ours);
 which hand off to `QueueTab` with `source_tab="Muxing"`.
 
 **Settings shape**: `input_file, output_path, output_format, start_secs,
-duration_secs, video_track, video_track_file, strip_video, audio_track,
-audio_track_file, strip_audio`. No codec keys at all.
+duration_secs, av_sync, video_track, video_track_file, strip_video,
+audio_track, audio_track_file, strip_audio`. No codec keys at all.
 
 ### `tabs/encoding_tab.py`
 
@@ -1223,9 +1348,10 @@ pinned `options_row`, presets, rundown), so only the differences are listed
 here.
 
 **Overview** is near-identical to Muxing's: `Output Format` + preset row,
-the single global trim, `SummaryPanel` on the right. Output Format lives
-here because it is **the root of the whole option tree** — it filters both
-codec lists, so the panel that owns it has to be reachable from either side.
+the single global trim + `A/V Sync` checkbox, `SummaryPanel` on the right.
+Output Format lives here because it is **the root of the whole option tree**
+— it filters both codec lists, so the panel that owns it has to be reachable
+from either side.
 There is no `Retain Video Length` checkbox: `Duration 00:00:00` already
 means "to the end of the file", so it was a second way to say the same thing
 and an ambiguous one whenever the two disagreed.
@@ -1251,22 +1377,28 @@ order stops mattering. This replaced a pile of pairwise handlers
 `toggle_time_spinners`) that clobbered each other and needed early-return
 guards to stop fighting. **Add a rule here, never a new pairwise handler.**
 Its rules, in dependency order:
-1. stream presence (mutual Strip exclusion + the `⊘` tab markers);
+1. stream presence (mutual Strip exclusion + the red tab markers);
 2. container → legal video/audio codec lists;
 3. video codec → profile/level lists *and* the rate-control kind and range
    (`_apply_quality` re-ranges the slider, because CRF is not universal —
-   MPEG-4/MPEG-2 take a qscale on 1-31);
-4. audio codec → whether a bitrate is ours to set at all;
-5. everything a removed or copied stream makes meaningless — a `Source`
-   (copy) video codec disables HDR and quality, since neither is possible
-   without re-encoding;
+   MPEG-4/MPEG-2 take a qscale on 1-31; `Source` has no spec, so it falls
+   back to `_FALLBACK_QUALITY`, a plain 0-51 CRF);
+4. audio codec → whether a bitrate is ours to set at all (and, for audio
+   only, copy state still disables channels / sample-rate);
+5. everything a *removed* stream makes meaningless — Strip Video greys the
+   whole Video panel. **HDR→SDR and the quality slider deliberately stay
+   live on `Source`** (dial them in, let the encoder follow); only Strip
+   Video greys them, and when it does, `_set_quality_enabled` greys the
+   slider's knob + fill too (not just the labels — `state="disabled"` alone
+   leaves a CTk slider looking active);
 6. the rundown.
 
 `_retarget(menu, values, what)` calls `ThemedDropdown.set_values` and, when
 the current pick had to snap, posts a toast naming the reason ("Encoder
 switched to VP9 — .webm can't carry H.265 (x265)"). `_set_enabled(widget,
 label, enabled)` dims a control's label in step with the control so a dead
-option never looks live.
+option never looks live; `_set_quality_enabled(enabled)` is the slider's
+richer version (state + knob/fill colour + all three labels).
 
 **`_apply_settings(settings)`** writes a dict into the form **in dependency
 order** — container, sync, codecs, sync, codec-detail leaves — so every list
@@ -1277,9 +1409,9 @@ this path with a full restore; snap-toasts are muted throughout via
 snapshot.
 
 **Settings shape**: `input_file, output_path, output_format, start_secs,
-duration_secs, encoder, profile, level, quality, gpu_enabled, hdr_to_sdr,
-strip_video, audio_codec, audio_bitrate, audio_channels, audio_sample_rate,
-strip_audio`. Note `quality` rather than `crf` (the number is a qscale under
+duration_secs, av_sync, encoder, profile, level, quality, gpu_enabled,
+hdr_to_sdr, strip_video, audio_codec, audio_bitrate, audio_channels,
+audio_sample_rate, strip_audio`. Note `quality` rather than `crf` (the number is a qscale under
 the MPEG-era encoders), and `_menu_value` reports `""` instead of the `—`
 placeholder so a settings dict never carries a placeholder as if it were a
 real choice. `gpu_enabled` is the global Settings-tab preference, read as
@@ -1508,6 +1640,9 @@ it to know whether to resume the queue after a declined close prompt.
 **Queue playback controls**:
 - `_set_running(is_running)`: flips `start_all_btn` between "Start Queue"/
   `start_queue` and "Pause Queue"/`pause_queue`.
+- `toggle_queue()`: pause if running, else start/resume — the **Space-bar**
+  shortcut (`LlamaGUI._toggle_queue`, Queue tab only, ignored when a control
+  that Space already acts on has focus).
 - `start_queue()`: if a paused job exists (`self._paused_state`), resumes
   it exactly where it left off via `_animate_progress(task_id, step,
   rest)`; otherwise collects every row still `"Queued"` and starts

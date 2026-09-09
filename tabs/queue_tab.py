@@ -44,6 +44,7 @@ _DETAIL_FIELDS = [
     ("output_format", "Format", None),
     ("start_secs", "Start Time", "time"),
     ("duration_secs", "Clip Duration", "time"),
+    ("av_sync", "A/V Sync", "bool"),
     # Video-stream fields — Encode tasks carry `profile`/`level`/`quality`;
     # Mux tasks carry `video_track`/`video_track_file` instead (it never
     # re-encodes). Each is skipped when simply absent from the settings dict.
@@ -545,6 +546,14 @@ class QueueTab(ctk.CTkFrame):
             self.start_all_btn.configure(text="Pause Queue", command=self.pause_queue)
         else:
             self.start_all_btn.configure(text="Start Queue", command=self.start_queue)
+
+    def toggle_queue(self):
+        """Pause if running, start / resume if not — the Space-bar shortcut
+        (`LlamaGUI._toggle_queue`), mirroring the `start_all_btn` toggle."""
+        if self._is_running:
+            self.pause_queue()
+        else:
+            self.start_queue()
 
     def start_queue(self):
         """Starts processing queued tasks in order, or resumes exactly where

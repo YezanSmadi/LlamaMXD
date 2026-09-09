@@ -29,13 +29,13 @@ NONE_LABEL = "— none —"
 # Muxing's per-file track picks) is job state, not recipe state.
 PRESET_KEYS = {
     "Encoding": [
-        "output_format",
+        "output_format", "av_sync",
         "encoder", "profile", "level", "quality", "hdr_to_sdr", "strip_video",
         "audio_codec", "audio_bitrate", "audio_channels", "audio_sample_rate",
         "strip_audio",
     ],
     "Muxing": [
-        "output_format", "strip_video", "strip_audio",
+        "output_format", "av_sync", "strip_video", "strip_audio",
     ],
 }
 
