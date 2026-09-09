@@ -1,237 +1,93 @@
 import os
 import customtkinter as ctk
 from tkinter import filedialog
-from PIL import Image
+
 from components.animated_switch import AnimatedSwitch
-from components.dialogs import show_message
+from components.dialogs import ask_text, ask_yes_no, show_message
 from components.drop_box import DropBox
 from components.dropdown import ThemedDropdown
+from components.sub_tab_bar import SubTabBar
+from components.summary_panel import SummaryPanel
 from components.thumbnail_carousel import ThumbnailCarousel
 from components.time_spinner import TimeSpinner
+from core import formats, presets
 from core.theme import get_active_theme, readable_text_on, STOP_RED, STOP_RED_HOVER
 
-# Container formats offered by the Format dropdown — the leading dot is kept
-# so the value drops straight onto a filename stem. (Duplicated in
-# muxing_tab.py on purpose — see CLAUDE.md on the two tabs' shared code.)
-_OUTPUT_FORMATS = [".mp4", ".mkv", ".mov", ".webm"]
-
-# Video codecs offered by the Encoder dropdown (first of the codec-options
-# row, ahead of the container Format). Display strings only for now — no
-# ffmpeg mapping yet.
-_ENCODERS = ["H.264 (x264)", "H.265 (x265)", "MPEG-4", "MPEG-2"]
-
-# One consistent "disabled" label colour, shared by toggle_time_spinners and
-# the Strip Video blanket-disable so re-disabling an already-disabled control
-# looks identical (no compounding dim).
+# One consistent "disabled" label colour, so a control that's dimmed by two
+# different rules never compounds into a darker grey than one dimmed by one.
 _DISABLED_LABEL = "gray50"
 
+# What a derived dropdown shows when the current codec has no such option at
+# all (VP8 profiles, VP9 levels). Paired with state="disabled".
+_NO_OPTION = "—"
+
+_TAB = "Encoding"
+
+
+def _hms(total_seconds):
+    """Seconds as HH:MM:SS, for the Overview rundown's trim line."""
+    total_seconds = int(total_seconds or 0)
+    hours, rest = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(rest, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
 class EncodingTab(ctk.CTkFrame):
+    """Re-encoding: the superset tab. Three sub-tabs — Overview (container,
+    global trim, presets, and the export rundown), Video, and Audio.
+
+    Every derived control state in here is computed by one function,
+    `_sync_controls`; see its docstring for why there are no pairwise
+    handlers."""
+
     def __init__(self, master, app):
         super().__init__(master=master)
         self.app = app
         theme = get_active_theme()
+        self._label_color = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
+        # Suppresses the "codec switched" toasts while a settings dict is
+        # being written into the form (theme rebuild, preset load) — those
+        # snaps aren't the user changing anything.
+        self._ready = False
+        self._quality_spec = None
+        # Mirrors _auto_output: holds the container we defaulted for the
+        # user, and goes None the moment they pick one themselves, so a new
+        # file drop never overrides a deliberate choice.
+        self._auto_format = formats.containers()[0]
 
-        # --- Bottom Section: Fixed Encoding Controls ---
-        # Packed FIRST with side="bottom" to anchor at the bottom edge
+        # --- Bottom Section: Fixed Controls ---
+        # Packed FIRST with side="bottom" to anchor at the window edge; the
+        # top_container (preview / drop box) built afterward absorbs the rest.
         self.controls_frame = ctk.CTkFrame(master=self, fg_color="transparent")
         self.controls_frame.pack(side="bottom", fill="x", padx=10, pady=(0, 4))
 
-        # 1. Main Options Row — two columns sharing one row so nothing is
-        # stacked further down than it needs to be:
-        #   left  = Retain Video Length checkbox, time spinners, Profile/Level
-        #   right = GPU/HDR switches stacked directly above the CRF slider
-        # Both columns bottom-align (anchor="s") so this whole block hugs the
-        # save-file row beneath it rather than floating at the top — leaving
-        # the DropBox above as much vertical room as possible.
-        self.main_options_row = ctk.CTkFrame(master=self.controls_frame, fg_color="transparent")
-        self.main_options_row.pack(fill="x", pady=(2, 4))
+        # 1. Options row — one two-column block. Each sub-tab owns *both*
+        # columns: a dropdown row on the left, a checkbox/slider stack on the
+        # right. Both bottom-align (anchor="s") against the save row beneath,
+        # so the block hugs it and leaves the DropBox above as much room as
+        # possible.
+        self.options_row = ctk.CTkFrame(master=self.controls_frame, fg_color="transparent")
+        self.options_row.pack(fill="x", pady=(2, 4))
 
-        self.left_col = ctk.CTkFrame(master=self.main_options_row, fg_color="transparent")
+        self.left_col = ctk.CTkFrame(master=self.options_row, fg_color="transparent")
         self.left_col.pack(side="left", anchor="s", padx=(0, 20))
 
-        self.right_col = ctk.CTkFrame(master=self.main_options_row, fg_color="transparent")
+        self.right_col = ctk.CTkFrame(master=self.options_row, fg_color="transparent")
         self.right_col.pack(side="left", anchor="s", fill="x", expand=True)
 
-        # -- Left column: Retain Video Length + time spinners + Profile/Level --
-        self.checkbox = ctk.CTkCheckBox(
-            master=self.left_col,
-            text="Retain Video Length",
-            command=self.toggle_time_spinners
-        )
-        self.checkbox.pack(anchor="w")
-        self.checkbox.select()  # Default to retaining the source video length
+        self.overview_left, self.overview_right = self._build_overview_panel(self.left_col, self.right_col)
+        self.video_left, self.video_right = self._build_video_panel(self.left_col, self.right_col)
+        self.audio_left, self.audio_right = self._build_audio_panel(self.left_col, self.right_col)
 
-        self.time_container = ctk.CTkFrame(master=self.left_col, fg_color="transparent")
-        self.time_container.pack(anchor="w", pady=(4, 0))
+        self._pin_options_height()
+        self._active_subtab = "Overview"
+        self._show_subtab("Overview")
 
-        # Start Timestamp Sub-Frame
-        self.start_frame = ctk.CTkFrame(master=self.time_container, fg_color="transparent")
-        self.start_frame.pack(side="left", padx=(0, 15))
-
-        self.start_label = ctk.CTkLabel(master=self.start_frame, text="Start Time:", font=("Arial", 12, "bold"))
-        self.start_label.pack(anchor="w", pady=(0, 1))
-
-        self.start_time_spinner = TimeSpinner(master=self.start_frame, initial_seconds=0)
-        self.start_time_spinner.pack(anchor="w")
-
-        # Clip Duration Sub-Frame
-        self.duration_frame = ctk.CTkFrame(master=self.time_container, fg_color="transparent")
-        self.duration_frame.pack(side="left")
-
-        self.duration_label = ctk.CTkLabel(master=self.duration_frame, text="Clip Duration:", font=("Arial", 12, "bold"))
-        self.duration_label.pack(anchor="w", pady=(0, 1))
-
-        self.duration_time_spinner = TimeSpinner(master=self.duration_frame, initial_seconds=0)
-        self.duration_time_spinner.pack(anchor="w")
-
-        self.toggle_time_spinners()  # Reflect the checkbox's default checked state
-
-        # Encoder / Format / Profile / Level Dropdowns, underneath the time
-        # spinners. Encoder (video codec) leads; Format (container) follows it
-        # since it's the choice that changes the output filename; then the
-        # codec-detail dropdowns. Widths are kept tight so all four fit the
-        # left column without crowding the CRF slider in the right one.
-        self.codec_options_frame = ctk.CTkFrame(master=self.left_col, fg_color="transparent")
-        self.codec_options_frame.pack(anchor="w", pady=(6, 0))
-
-        # Video codec — display strings only for now (no ffmpeg mapping yet);
-        # rides along in _gather_settings as "encoder".
-        self.encoder_frame = ctk.CTkFrame(master=self.codec_options_frame, fg_color="transparent")
-        self.encoder_frame.pack(side="left", padx=(0, 10))
-
-        self.encoder_label = ctk.CTkLabel(master=self.encoder_frame, text="Encoder:", font=("Arial", 12, "bold"))
-        self.encoder_label.pack(anchor="w", pady=(0, 1))
-
-        self.encoder_menu = ThemedDropdown(
-            master=self.encoder_frame,
-            values=_ENCODERS,
-            width=122,
-        )
-        self.encoder_menu.pack(anchor="w")
-
-        # Output container format — drives the suggested save path's extension
-        # (and the save dialog's default) via _on_format_change /
-        # _autofill_output_path, and rides along in _gather_settings as
-        # "output_format".
-        self.format_frame = ctk.CTkFrame(master=self.codec_options_frame, fg_color="transparent")
-        self.format_frame.pack(side="left", padx=(0, 10))
-
-        self.format_label = ctk.CTkLabel(master=self.format_frame, text="Format:", font=("Arial", 12, "bold"))
-        self.format_label.pack(anchor="w", pady=(0, 1))
-
-        self.format_menu = ThemedDropdown(
-            master=self.format_frame,
-            values=_OUTPUT_FORMATS,
-            width=74,
-            command=self._on_format_change,
-        )
-        self.format_menu.pack(anchor="w")
-
-        self.profile_frame = ctk.CTkFrame(master=self.codec_options_frame, fg_color="transparent")
-        self.profile_frame.pack(side="left", padx=(0, 10))
-
-        self.profile_label = ctk.CTkLabel(master=self.profile_frame, text="Profile:", font=("Arial", 12, "bold"))
-        self.profile_label.pack(anchor="w", pady=(0, 1))
-
-        self.profile_menu = ThemedDropdown(
-            master=self.profile_frame,
-            values=["High", "Main", "Main 10", "Baseline"],
-            width=92,
-        )
-        self.profile_menu.pack(anchor="w")
-
-        self.level_frame = ctk.CTkFrame(master=self.codec_options_frame, fg_color="transparent")
-        self.level_frame.pack(side="left")
-
-        self.level_label = ctk.CTkLabel(master=self.level_frame, text="Level:", font=("Arial", 12, "bold"))
-        self.level_label.pack(anchor="w", pady=(0, 1))
-
-        self.level_menu = ThemedDropdown(
-            master=self.level_frame,
-            values=["4.0", "4.1", "5.0", "5.1"],
-            width=64,
-        )
-        self.level_menu.pack(anchor="w")
-
-        # -- Right column: Strip Video checkbox, the HDR switch (label to the
-        # LEFT of the toggle), then the CRF slider directly beneath it.
-        # Hardware Acceleration (GPU) used to live here too but is now a
-        # global preference on the Settings tab (read as self.app.gpu_enabled
-        # in _gather_settings). The column has vertical slack — the left
-        # column (checkbox + spinners + codec row) is much taller — so adding
-        # the Strip Video row here doesn't cost the DropBox any height. --
-
-        # Strip Video — the destructive red (STOP_RED, the Stop Queue button's
-        # colour; a permanent theme-independent exception). Ticking it blanket-
-        # disables every encoding option (_on_strip_video_toggle); an option
-        # that's already disabled just stays as it looks.
-        self.strip_video_check = ctk.CTkCheckBox(
-            master=self.right_col,
-            text="Strip Video",
-            fg_color=STOP_RED,
-            hover_color=STOP_RED_HOVER,
-            checkmark_color=readable_text_on(STOP_RED),
-            command=self._on_strip_video_toggle,
-        )
-        self.strip_video_check.pack(anchor="e", pady=(0, 4))
-
-        # HDR to SDR Conversion Switch — an AnimatedSwitch (slides instead of
-        # snapping). Built without its own text so a separate label can sit to
-        # its left instead of CTkSwitch's default label-on-the-right layout;
-        # clicking the label toggles it. CTkSwitch's internal grid always
-        # reserves its (here-empty) text column with weight=1, so it defaults
-        # to a 100px-wide widget even with text="" — width=42 trims that down
-        # to just the toggle track, so anchor="e" on the row actually lands
-        # the visible switch flush against the right edge instead of leaving
-        # phantom label space.
-        self.hdr_row = ctk.CTkFrame(master=self.right_col, fg_color="transparent")
-        self.hdr_row.pack(anchor="e", pady=2)
-
-        self.hdr_label = ctk.CTkLabel(master=self.hdr_row, text="HDRtoSDR")
-        self.hdr_label.pack(side="left", padx=(0, 8))
-        self.hdr_label.bind("<Button-1>", lambda e: self.hdr_switch.toggle())
-
-        self.hdr_switch = AnimatedSwitch(master=self.hdr_row, text="", width=42)
-        self.hdr_switch.pack(side="left")
-
-        # CRF (Quality) Slider — longer, title centered above it.
-        # Range is 0 (best) to 40 (worst), reversed so the slider still reads
-        # low-quality-on-the-left, placebo-quality-on-the-right.
-        self.crf_frame = ctk.CTkFrame(master=self.right_col, fg_color="transparent")
-        self.crf_frame.pack(fill="x", pady=(6, 0))
-
-        self.crf_label = ctk.CTkLabel(master=self.crf_frame, text="Quality (CRF):", font=("Arial", 12, "bold"))
-        self.crf_label.pack(anchor="center", pady=(0, 1))
-
-        self.crf_slider_row = ctk.CTkFrame(master=self.crf_frame, fg_color="transparent")
-        self.crf_slider_row.pack(anchor="center")
-
-        self.crf_low_label = ctk.CTkLabel(master=self.crf_slider_row, text="Low", text_color="gray60", font=("Arial", 11))
-        self.crf_low_label.pack(side="left", padx=(0, 4))
-
-        self.crf_slider = ctk.CTkSlider(
-            master=self.crf_slider_row,
-            from_=40,
-            to=0,
-            number_of_steps=40,
-            width=180,
-            command=self._on_crf_change,
-        )
-        self.crf_slider.pack(side="left")
-        self.crf_slider.set(23)  # Common default CRF
-        self._on_crf_change(23)
-
-        self.crf_high_label = ctk.CTkLabel(master=self.crf_slider_row, text="Placebo", text_color="gray60", font=("Arial", 12))
-        self.crf_high_label.pack(side="left", padx=(4, 0))
-
-        # 4. Save Location Section
+        # 2. Save Location Section
         self.save_frame = ctk.CTkFrame(master=self.controls_frame, fg_color="transparent")
         self.save_frame.pack(fill="x", pady=4)
 
-        self.save_entry = ctk.CTkEntry(
-            master=self.save_frame,
-            placeholder_text="Save file as..."
-        )
+        self.save_entry = ctk.CTkEntry(master=self.save_frame, placeholder_text="Save file as...")
         self.save_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
         # Pre-fill with the default save folder and keep refining it to
@@ -243,14 +99,11 @@ class EncodingTab(ctk.CTkFrame):
             self._auto_output = self.app.default_save_location
 
         self.browse_save_btn = ctk.CTkButton(
-            master=self.save_frame, 
-            text="Browse", 
-            width=80, 
-            command=self.select_save_location
+            master=self.save_frame, text="Browse", width=80, command=self.select_save_location
         )
         self.browse_save_btn.pack(side="right")
 
-        # 5. Action Buttons Row: Queue Task (blue) + Encode (yellow), each half-width
+        # 3. Action Buttons Row: Queue Task (secondary) + Encode (primary)
         self.action_frame = ctk.CTkFrame(master=self.controls_frame, fg_color="transparent")
         self.action_frame.pack(fill="x", pady=(5, 0))
         self.action_frame.grid_columnconfigure(0, weight=1, uniform="action")
@@ -262,7 +115,7 @@ class EncodingTab(ctk.CTkFrame):
             fg_color=theme["secondary"],
             hover_color=theme["secondary_hover"],
             text_color=theme["secondary_text"],
-            command=self.add_to_queue
+            command=self.add_to_queue,
         )
         self.queue_btn.grid(row=0, column=0, sticky="ew", padx=(0, 4))
 
@@ -272,26 +125,31 @@ class EncodingTab(ctk.CTkFrame):
             fg_color=theme["primary"],
             text_color=theme["primary_text"],
             hover_color=theme["primary_hover"],
-            command=self.encode_now
+            command=self.encode_now,
         )
         self.encode_btn.grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
-        # --- Top Flexible Section: DropBox & Dynamic Image ---
+        # --- Top Flexible Section: sub-tab switch + Selected File header,
+        # then the DropBox / preview carousel. ---
         self.top_container = ctk.CTkFrame(master=self, fg_color="transparent")
         self.top_container.pack(side="top", fill="both", expand=True, padx=10, pady=(5, 5))
 
-        # Selected File Text Header — doubles as a "click to change file" hint.
-        # Left unpacked until a file is actually selected: it's empty until
-        # then, and packing it unconditionally still reserves its (nonzero,
-        # font-driven) height permanently, which is exactly the vertical room
-        # the empty DropBox should get instead. _reveal_preview() packs it (and
-        # the carousel) in when the first thumbnail set arrives.
-        self.label = ctk.CTkLabel(master=self.top_container, text="", font=ctk.CTkFont(size=11))
+        self.header_row = ctk.CTkFrame(master=self.top_container, fg_color="transparent")
+        self.header_row.pack(fill="x", pady=(0, 4))
+
+        self.sub_tab_bar = SubTabBar(
+            master=self.header_row,
+            options=["Overview", "Video", "Audio"],
+            command=self._show_subtab,
+        )
+        self.sub_tab_bar.pack(side="left")
+
+        self.label = ctk.CTkLabel(
+            master=self.header_row, text="", font=ctk.CTkFont(size=11), anchor="w"
+        )
+        self.label.pack(side="left", fill="x", expand=True, padx=(10, 0))
         self.label.bind("<Double-Button-1>", lambda e: self.select_input_file())
 
-        # Multi-frame preview carousel — owns the thumbnail label, its resize
-        # math, and the fade-in prev/next chevrons. Double-clicking it (like
-        # the old single thumbnail label) reselects the input file.
         self.carousel = ThumbnailCarousel(
             master=self.top_container,
             on_reselect=self.select_input_file,
@@ -299,39 +157,586 @@ class EncodingTab(ctk.CTkFrame):
             on_index=self.app.sync_preview_index,   # keep both tabs on the same frame
         )
 
-        # DropBox fills all available space in top_container while it's the
-        # only thing packed there.
-        self.drop_box = DropBox(master=self.top_container, on_file_selected=self.app.update_global_file, height=380)
+        self.drop_box = DropBox(
+            master=self.top_container, on_file_selected=self.app.update_global_file, height=380
+        )
         self.drop_box.pack(fill="both", expand=True)
 
-        # Register controls with main app — the carousel's set_frames is the
-        # thumbnail-broadcast target.
         self.app.register_tab_ui(self.label, self.carousel, on_thumbnail=self.carousel.set_frames)
 
+        self._sync_controls()
+        self._ready = True
+
+    # ------------------------------------------------------------------ #
+    #  Sub-tab panels
+    # ------------------------------------------------------------------ #
+    def _build_overview_panel(self, left_parent, right_parent):
+        """Overview: the globals (output container + the one global trim) and
+        preset management on the left, the export rundown on the right.
+
+        Output Format lives here rather than on the Video panel because it's
+        the root of the whole option tree — it filters *both* codec lists, so
+        the panel that owns it has to be reachable from either side."""
+        left = ctk.CTkFrame(master=left_parent, fg_color="transparent")
+        right = ctk.CTkFrame(master=right_parent, fg_color="transparent")
+
+        # -- Row 1: container + preset recipes. Format and Preset share this
+        # row (rather than Format sitting beside the trim spinners) purely to
+        # keep `left` narrow: the rundown on the right needs real width, and
+        # the spinners are the widest things here. --
+        theme = get_active_theme()
+        self.globals_row = ctk.CTkFrame(master=left, fg_color="transparent")
+        self.globals_row.pack(anchor="w")
+
+        self.format_label, self.format_menu = self._panel_dropdown(
+            self.globals_row, "Output Format:", formats.containers(), 88,
+            default=formats.containers()[0], command=self._on_format_change,
+        )
+
+        self.preset_label, self.preset_menu = self._panel_dropdown(
+            self.globals_row, "Preset:", presets.menu_values(_TAB), 132,
+            default=presets.NONE_LABEL, padx=(14, 0), command=self._on_preset_selected,
+        )
+
+        self.preset_save_btn = ctk.CTkButton(
+            master=self.globals_row, text="Save", width=54, height=28,
+            fg_color=theme["secondary"], hover_color=theme["secondary_hover"],
+            text_color=theme["secondary_text"], command=self._on_preset_save,
+        )
+        self.preset_save_btn.pack(side="left", anchor="s", padx=(8, 0))
+
+        self.preset_delete_btn = ctk.CTkButton(
+            master=self.globals_row, text="Delete", width=54, height=28,
+            fg_color=theme["secondary"], hover_color=theme["secondary_hover"],
+            text_color=theme["secondary_text"], command=self._on_preset_delete,
+        )
+        self.preset_delete_btn.pack(side="left", anchor="s", padx=(6, 0))
+
+        # -- Row 2: the one global trim --
+        # There is no "Retain Video Length" checkbox any more: a duration of
+        # 00:00:00 already means "to the end of the file", so the checkbox was
+        # a second way to say the same thing — and an ambiguous one whenever
+        # it disagreed with the spinner values.
+        self.trim_row = ctk.CTkFrame(master=left, fg_color="transparent")
+        self.trim_row.pack(anchor="w", pady=(6, 0))
+
+        self.start_frame = ctk.CTkFrame(master=self.trim_row, fg_color="transparent")
+        self.start_frame.pack(side="left")
+        self.start_label = ctk.CTkLabel(master=self.start_frame, text="Start Time:", font=("Arial", 12, "bold"))
+        self.start_label.pack(anchor="w", pady=(0, 1))
+        self.start_time_spinner = TimeSpinner(master=self.start_frame, initial_seconds=0)
+        self.start_time_spinner.pack(anchor="w")
+
+        self.duration_frame = ctk.CTkFrame(master=self.trim_row, fg_color="transparent")
+        self.duration_frame.pack(side="left", padx=(14, 0))
+        self.duration_label = ctk.CTkLabel(master=self.duration_frame, text="Clip Duration:", font=("Arial", 12, "bold"))
+        self.duration_label.pack(anchor="w", pady=(0, 1))
+        self.duration_time_spinner = TimeSpinner(master=self.duration_frame, initial_seconds=0)
+        self.duration_time_spinner.pack(anchor="w")
+
+        # -- Right: the rundown --
+        self.summary = SummaryPanel(master=right, labels=["Container", "Video", "Audio", "Trim"])
+        self.summary.pack(fill="x", anchor="s")
+
+        return left, right
+
+    def _build_video_panel(self, left_parent, right_parent):
+        """Video: the Encoder / Profile / Level codec row on the left, Strip
+        Video + the HDR switch + the quality slider on the right.
+
+        Profile and Level are *derived* from Encoder — '4.0' means different
+        things to H.264 and H.265, and VP8 has no profiles at all — so their
+        option lists are filled by `_sync_controls`, not hardcoded here."""
+        left = ctk.CTkFrame(master=left_parent, fg_color="transparent")
+        right = ctk.CTkFrame(master=right_parent, fg_color="transparent")
+
+        self.codec_options_frame = ctk.CTkFrame(master=left, fg_color="transparent")
+        self.codec_options_frame.pack(anchor="w")
+
+        self.encoder_label, self.encoder_menu = self._panel_dropdown(
+            self.codec_options_frame, "Encoder:", [formats.SOURCE], 138,
+            command=self._on_control_change,
+        )
+        self.profile_label, self.profile_menu = self._panel_dropdown(
+            self.codec_options_frame, "Profile:", [_NO_OPTION], 108, padx=(10, 0),
+            command=self._on_control_change,
+        )
+        self.level_label, self.level_menu = self._panel_dropdown(
+            self.codec_options_frame, "Level:", [_NO_OPTION], 92, padx=(10, 0),
+            command=self._on_control_change,
+        )
+
+        # Strip Video — the destructive red (STOP_RED, the Stop Queue button's
+        # colour; a permanent theme-independent exception). Removing a stream
+        # is the one rule that spans sub-tabs, so _sync_controls also marks
+        # the tab button (see SubTabBar.set_marked) and locks Strip Audio.
+        self.strip_video_check = ctk.CTkCheckBox(
+            master=right,
+            text="Strip Video",
+            fg_color=STOP_RED,
+            hover_color=STOP_RED_HOVER,
+            checkmark_color=readable_text_on(STOP_RED),
+            command=self._on_control_change,
+        )
+        self.strip_video_check.pack(anchor="e", pady=(0, 4))
+
+        # HDR to SDR — an AnimatedSwitch (slides instead of snapping). Built
+        # with text="" and width=42 so a separate label sits to its LEFT:
+        # CTkSwitch's internal grid always reserves its (here-empty) text
+        # column, so without the narrow width anchor="e" would leave phantom
+        # label space instead of landing the toggle flush right.
+        self.hdr_row = ctk.CTkFrame(master=right, fg_color="transparent")
+        self.hdr_row.pack(anchor="e", pady=2)
+
+        self.hdr_label = ctk.CTkLabel(master=self.hdr_row, text="HDRtoSDR")
+        self.hdr_label.pack(side="left", padx=(0, 8))
+        self.hdr_label.bind("<Button-1>", lambda e: self._toggle_hdr())
+
+        self.hdr_switch = AnimatedSwitch(
+            master=self.hdr_row, text="", width=42, command=self._on_control_change
+        )
+        self.hdr_switch.pack(side="left")
+
+        # Quality slider. Its range, default, end labels and even its *kind*
+        # (CRF vs qscale) come from the encoder — see formats.quality_for and
+        # _apply_quality. Always built reversed (from_=worst, to=best) so the
+        # slider reads low-quality-left / high-quality-right whichever scale
+        # is in play.
+        self.crf_frame = ctk.CTkFrame(master=right, fg_color="transparent")
+        self.crf_frame.pack(fill="x", pady=(6, 0))
+
+        self.crf_label = ctk.CTkLabel(master=self.crf_frame, text="Quality", font=("Arial", 12, "bold"))
+        self.crf_label.pack(anchor="center", pady=(0, 1))
+
+        self.crf_slider_row = ctk.CTkFrame(master=self.crf_frame, fg_color="transparent")
+        self.crf_slider_row.pack(anchor="center")
+
+        self.crf_low_label = ctk.CTkLabel(
+            master=self.crf_slider_row, text="Low", text_color="gray60", font=("Arial", 11)
+        )
+        self.crf_low_label.pack(side="left", padx=(0, 4))
+
+        self.crf_slider = ctk.CTkSlider(
+            master=self.crf_slider_row, from_=51, to=0, number_of_steps=51,
+            width=180, command=self._on_quality_change,
+        )
+        self.crf_slider.pack(side="left")
+
+        self.crf_high_label = ctk.CTkLabel(
+            master=self.crf_slider_row, text="Placebo", text_color="gray60", font=("Arial", 12)
+        )
+        self.crf_high_label.pack(side="left", padx=(4, 0))
+
+        return left, right
+
+    def _build_audio_panel(self, left_parent, right_parent):
+        """Audio: Codec / Bitrate / Channels / Sample Rate on one row
+        (mirroring the Video codec row), Strip Audio on the right."""
+        left = ctk.CTkFrame(master=left_parent, fg_color="transparent")
+        right = ctk.CTkFrame(master=right_parent, fg_color="transparent")
+
+        self.audio_options_frame = ctk.CTkFrame(master=left, fg_color="transparent")
+        self.audio_options_frame.pack(anchor="w")
+
+        self.audio_codec_label, self.audio_codec_menu = self._panel_dropdown(
+            self.audio_options_frame, "Audio Codec:", [formats.SOURCE], 108,
+            command=self._on_control_change,
+        )
+        self.audio_bitrate_label, self.audio_bitrate_menu = self._panel_dropdown(
+            self.audio_options_frame, "Bitrate:", [_NO_OPTION], 78, padx=(10, 0),
+            command=self._on_control_change,
+        )
+        self.audio_channels_label, self.audio_channels_menu = self._panel_dropdown(
+            self.audio_options_frame, "Channels:", formats.AUDIO_CHANNELS, 92,
+            default=formats.SOURCE, padx=(10, 0), command=self._on_control_change,
+        )
+        self.audio_samplerate_label, self.audio_samplerate_menu = self._panel_dropdown(
+            self.audio_options_frame, "Sample Rate:", formats.AUDIO_SAMPLE_RATES, 106,
+            default=formats.SOURCE, padx=(10, 0), command=self._on_control_change,
+        )
+
+        self.strip_audio_check = ctk.CTkCheckBox(
+            master=right,
+            text="Strip Audio",
+            fg_color=STOP_RED,
+            hover_color=STOP_RED_HOVER,
+            checkmark_color=readable_text_on(STOP_RED),
+            command=self._on_control_change,
+        )
+        self.strip_audio_check.pack(anchor="e", pady=(0, 4))
+
+        return left, right
+
+    def _panel_dropdown(self, parent, label_text, values, width,
+                        default=None, padx=(0, 0), command=None):
+        """Bold label above a ThemedDropdown in its own frame, packed left
+        into `parent`. Returns `(label, menu)` — the menu for its value, the
+        label so `_sync_controls` can dim it in step with the control."""
+        frame = ctk.CTkFrame(master=parent, fg_color="transparent")
+        frame.pack(side="left", anchor="s", padx=padx)
+
+        label = ctk.CTkLabel(master=frame, text=label_text, font=("Arial", 12, "bold"))
+        label.pack(anchor="w", pady=(0, 1))
+
+        menu = ThemedDropdown(master=frame, values=values, width=width, command=command)
+        if default is not None:
+            menu.set(default)
+        menu.pack(anchor="w")
+        return label, menu
+
+    def _pin_options_height(self):
+        """Locks `options_row` to the tallest sub-tab's natural height.
+
+        The three panels legitimately differ (Overview stacks two rows, Video
+        stacks Strip/HDR/quality, Audio is a single row), so without this the
+        DropBox / preview above would resize every time the sub-tab changed.
+        Measured once here rather than hardcoded, so the number can't drift
+        out of step with the widgets."""
+        tallest = 0
+        for left, right in (
+            (self.overview_left, self.overview_right),
+            (self.video_left, self.video_right),
+            (self.audio_left, self.audio_right),
+        ):
+            left.pack(anchor="w")
+            right.pack(fill="x")
+            self.options_row.update_idletasks()
+            tallest = max(tallest, left.winfo_reqheight(), right.winfo_reqheight())
+            left.pack_forget()
+            right.pack_forget()
+
+        self.options_row.configure(height=max(tallest, 96))
+        self.options_row.pack_propagate(False)
+
+    def _show_subtab(self, name):
+        """Swaps the visible sub-tab: packs one panel's left row into
+        `left_col` and its right stack into `right_col`, forgetting the
+        others'. `options_row` is height-pinned, so the shorter panels simply
+        get slack below the preview rather than resizing it."""
+        self._active_subtab = name
+        for frame in (self.overview_left, self.video_left, self.audio_left):
+            frame.pack_forget()
+        for frame in (self.overview_right, self.video_right, self.audio_right):
+            frame.pack_forget()
+
+        pairs = {
+            "Overview": (self.overview_left, self.overview_right),
+            "Video": (self.video_left, self.video_right),
+            "Audio": (self.audio_left, self.audio_right),
+        }
+        left, right = pairs.get(name, pairs["Overview"])
+        left.pack(anchor="w")
+        right.pack(fill="x")
+
+    # ------------------------------------------------------------------ #
+    #  The single constraint pass
+    # ------------------------------------------------------------------ #
+    def _on_control_change(self, *_):
+        """Every control's `command` lands here, which just re-runs the one
+        constraint pass. No control ever reaches into another directly."""
+        self._sync_controls()
+
+    def _toggle_hdr(self):
+        """Clicking the HDRtoSDR label toggles the switch (and re-syncs)."""
+        if self.hdr_switch.cget("state") != "disabled":
+            self.hdr_switch.toggle()
+            self._sync_controls()
+
+    def _sync_controls(self, *_):
+        """**The only place derived UI state is decided.**
+
+        Idempotent: reads the whole form and rewrites every dependent
+        widget's option list, selection and enabled-state from scratch. This
+        replaced a pile of pairwise handlers (`_on_strip_video_toggle`,
+        `_on_format_change`, `toggle_time_spinners`) that could each clobber
+        the others' work and needed early-return guards to stop them
+        fighting — with one recompute, call order stops mattering and the
+        whole ruleset is readable in one place.
+
+        The rules, in dependency order:
+          1. stream presence — both streams stripped would write an empty file
+          2. container -> legal video/audio codec lists
+          3. video codec -> profile / level / rate-control kind and range
+          4. audio codec -> whether a bitrate is ours to set
+          5. everything a removed or copied stream makes meaningless
+          6. the Overview rundown, which is the only cross-panel view
+        """
+        container = self.format_menu.get()
+        stripping_video = bool(self.strip_video_check.get())
+        stripping_audio = bool(self.strip_audio_check.get())
+
+        # 1. Stream presence. Ticking one Strip locks the other, so the
+        # empty-output combination simply can't be reached; the tab-button
+        # marker is what makes that visible from the panel you're not on.
+        self.strip_video_check.configure(state="disabled" if stripping_audio else "normal")
+        self.strip_audio_check.configure(state="disabled" if stripping_video else "normal")
+        self.sub_tab_bar.set_marked("Video", stripping_video)
+        self.sub_tab_bar.set_marked("Audio", stripping_audio)
+
+        # 2. Container -> codecs.
+        self._retarget(self.encoder_menu, formats.video_codecs_for(container), "Encoder")
+        self._retarget(self.audio_codec_menu, formats.audio_codecs_for(container), "Audio codec")
+        encoder = self.encoder_menu.get()
+        audio_codec = self.audio_codec_menu.get()
+
+        # 3. Video codec -> profile / level / quality.
+        profiles = formats.profiles_for(encoder)
+        levels = formats.levels_for(encoder)
+        self._retarget(self.profile_menu, profiles)
+        self._retarget(self.level_menu, levels)
+        self._quality_spec = formats.quality_for(encoder)
+        self._apply_quality()
+
+        # 4. Audio codec -> bitrate (lossless and copied streams have none).
+        bitrates = formats.audio_bitrates_for(audio_codec)
+        self._retarget(self.audio_bitrate_menu, bitrates)
+
+        # 5. Enabled states. A stripped stream disables its whole panel; a
+        # copied one disables everything that would require re-encoding.
+        copying_video = encoder == formats.SOURCE
+        copying_audio = audio_codec == formats.SOURCE
+        video_live = not stripping_video
+        audio_live = not stripping_audio
+
+        self._set_enabled(self.encoder_menu, self.encoder_label, video_live)
+        self._set_enabled(self.profile_menu, self.profile_label, video_live and bool(profiles))
+        self._set_enabled(self.level_menu, self.level_label, video_live and bool(levels))
+        self._set_enabled(self.hdr_switch, self.hdr_label, video_live and not copying_video)
+        quality_live = video_live and self._quality_spec is not None
+        self._set_enabled(self.crf_slider, self.crf_label, quality_live)
+        for label in (self.crf_low_label, self.crf_high_label):
+            label.configure(text_color=_DISABLED_LABEL if not quality_live else "gray60")
+
+        self._set_enabled(self.audio_codec_menu, self.audio_codec_label, audio_live)
+        self._set_enabled(self.audio_bitrate_menu, self.audio_bitrate_label,
+                          audio_live and bool(bitrates))
+        self._set_enabled(self.audio_channels_menu, self.audio_channels_label,
+                          audio_live and not copying_audio)
+        self._set_enabled(self.audio_samplerate_menu, self.audio_samplerate_label,
+                          audio_live and not copying_audio)
+
+        # 6. The rundown.
+        self._refresh_summary()
+
+    def _retarget(self, menu, values, what=None):
+        """Points a derived dropdown at a freshly-computed option list.
+
+        When the current selection isn't in the new list the dropdown snaps
+        to the first legal value — and if `what` is given, says so in a
+        toast. Silently swapping a codec out from under the user is exactly
+        the kind of thing that makes an options screen feel haunted."""
+        before = menu.get()
+        menu.set_values(values or [_NO_OPTION])
+        after = menu.get()
+        if what and self._ready and before != after and before != _NO_OPTION:
+            self.app.notify(
+                f"{what} switched to {after} — {self.format_menu.get()} can't carry {before}.",
+                go_to_queue=False,
+            )
+        return after
+
+    def _set_enabled(self, widget, label, enabled):
+        """Enables/disables a control and dims its label to match, so a dead
+        option never looks live."""
+        widget.configure(state="normal" if enabled else "disabled")
+        if label is not None:
+            label.configure(text_color=self._label_color if enabled else _DISABLED_LABEL)
+
+    def _apply_quality(self):
+        """Re-ranges the quality slider for the current encoder.
+
+        CRF is not universal — the MPEG-era encoders take a qscale on a
+        completely different scale (1-31 vs 0-51/0-63), so the slider's
+        bounds and its label both come from `formats.quality_for`. The
+        current value is kept when it still falls inside the new range, and
+        reset to the codec's own default when it doesn't."""
+        spec = self._quality_spec
+        if spec is None:
+            self.crf_label.configure(text="Quality")
+            return
+
+        low, high = spec["lo"], spec["hi"]
+        value = self.crf_slider.get()
+        if not (low <= value <= high):
+            value = spec["default"]
+        # from_ = worst, to = best: keeps low-quality on the left whichever
+        # scale is active (both CRF and qscale count *down* toward better).
+        self.crf_slider.configure(from_=high, to=low, number_of_steps=high - low)
+        self.crf_slider.set(value)
+        self.crf_low_label.configure(text=spec["low"])
+        self.crf_high_label.configure(text=spec["high"])
+        self._update_quality_label()
+
+    def _update_quality_label(self):
+        """Writes the live quality readout into the slider's title."""
+        spec = self._quality_spec
+        if spec is None:
+            self.crf_label.configure(text="Quality")
+            return
+        self.crf_label.configure(text=f"{spec['label']}: {int(round(self.crf_slider.get()))}")
+
+    def _on_quality_change(self, _value=None):
+        """Slider callback — the value feeds nothing else, so this refreshes
+        the readout and the rundown rather than running a whole sync pass."""
+        self._update_quality_label()
+        self._refresh_summary()
+
+    def _refresh_summary(self):
+        """Rebuilds the Overview rundown — the one view where the container,
+        both streams and the trim are visible at the same time."""
+        container = self.format_menu.get()
+        info = self.app.media_info
+        source_container = info.get("container")
+
+        # Text here is kept terse on purpose — the rundown shares its row
+        # with the controls, so it has maybe 260px to say everything in.
+        container_text = container
+        if source_container and source_container != container:
+            container_text = f"{container} ← {source_container}"
+
+        # Video
+        if self.strip_video_check.get():
+            video = ("— removed —", STOP_RED)
+        elif self.encoder_menu.get() == formats.SOURCE:
+            actual = formats.short_name(info.get("video"))
+            video = ("copy" + (f" · {actual}" if actual else ""), None)
+        else:
+            encoder = self.encoder_menu.get()
+            bits = [formats.short_name(encoder)]
+            if formats.profiles_for(encoder):
+                bits.append(self.profile_menu.get())
+            if formats.levels_for(encoder):
+                bits.append("L" + self.level_menu.get())
+            if self._quality_spec:
+                kind = "CRF" if self._quality_spec["kind"] == "crf" else "Q"
+                bits.append(f"{kind}{int(round(self.crf_slider.get()))}")
+            if self.hdr_switch.get():
+                bits.append("SDR")
+            video = (" · ".join(bits), None)
+
+        # Audio
+        if self.strip_audio_check.get():
+            audio = ("— removed —", STOP_RED)
+        elif self.audio_codec_menu.get() == formats.SOURCE:
+            actual = formats.short_name(info.get("audio"))
+            audio = ("copy" + (f" · {actual}" if actual else ""), None)
+        else:
+            bits = [self.audio_codec_menu.get()]
+            if formats.audio_bitrates_for(self.audio_codec_menu.get()):
+                bits.append(self.audio_bitrate_menu.get())
+            for menu in (self.audio_channels_menu, self.audio_samplerate_menu):
+                if menu.get() != formats.SOURCE:
+                    bits.append(menu.get().replace(" Hz", ""))
+            audio = (" · ".join(bits), None)
+
+        # Trim
+        start = self.start_time_spinner.get_total_seconds()
+        duration = self.duration_time_spinner.get_total_seconds()
+        if not start and not duration:
+            trim = ("whole file", None)
+        elif not duration:
+            trim = (f"{_hms(start)} → end", None)
+        else:
+            trim = (f"{_hms(start)} → {_hms(start + duration)}", None)
+
+        self.summary.set_values([(container_text, None), video, audio, trim])
+
+    # ------------------------------------------------------------------ #
+    #  Presets
+    # ------------------------------------------------------------------ #
+    def _refresh_preset_menu(self, select=None):
+        """Re-reads the saved preset names into the dropdown."""
+        self.preset_menu.set_values(presets.menu_values(_TAB))
+        if select is not None:
+            self.preset_menu.set(select)
+
+    def _on_preset_selected(self, name):
+        """Applies a saved recipe. Presets carry codec/quality settings only
+        — never the trim or the paths — so loading one can't quietly re-trim
+        a clip or repoint its output."""
+        if name == presets.NONE_LABEL:
+            return
+        stored = presets.get(_TAB, name)
+        if stored is None:
+            self._refresh_preset_menu(select=presets.NONE_LABEL)
+            return
+        self._apply_settings(stored)
+        self.app.notify(f"Preset '{name}' applied.", go_to_queue=False)
+
+    def _on_preset_save(self):
+        """Names and saves the current codec/quality settings as a recipe."""
+        current = self.preset_menu.get()
+        initial = "" if current == presets.NONE_LABEL else current
+        name = ask_text(
+            self.app, "Save Preset",
+            "Name this preset. It stores the container and every codec / "
+            "quality setting — not the trim, and not the file paths.",
+            initial=initial,
+        )
+        if name is None:
+            return
+        if name == presets.NONE_LABEL:
+            show_message(self.app, "Reserved Name", "That name is reserved. Pick another.")
+            return
+        if presets.exists(_TAB, name) and not ask_yes_no(
+            self.app, "Overwrite Preset?", f"'{name}' already exists. Replace it?"
+        ):
+            return
+        presets.save(_TAB, name, self._gather_settings())
+        self._refresh_preset_menu(select=name)
+        self.app.notify(f"Preset '{name}' saved.", go_to_queue=False)
+
+    def _on_preset_delete(self):
+        """Deletes the selected recipe, after confirming."""
+        name = self.preset_menu.get()
+        if name == presets.NONE_LABEL:
+            show_message(self.app, "No Preset Selected", "Pick a preset to delete first.")
+            return
+        if not ask_yes_no(self.app, "Delete Preset?", f"Delete the preset '{name}'?"):
+            return
+        presets.delete(_TAB, name)
+        self._refresh_preset_menu(select=presets.NONE_LABEL)
+        self.app.notify(f"Preset '{name}' deleted.", go_to_queue=False)
+
+    # ------------------------------------------------------------------ #
+    #  File selection / output path
+    # ------------------------------------------------------------------ #
     def select_input_file(self):
         """Allows user to pick a video file via file dialog."""
         file_path = filedialog.askopenfilename(
             title="Select Video File",
-            filetypes=[("Video Files", "*.mp4 *.mkv *.avi *.mov *.webm"), ("All Files", "*.*")]
+            filetypes=[("Video Files", "*.mp4 *.mkv *.avi *.mov *.webm"), ("All Files", "*.*")],
         )
         if file_path:
             self.app.update_global_file(file_path)
 
     def _reveal_preview(self):
         """First thumbnail set has arrived: swap the DropBox out for the
-        filename header + preview carousel. (The non-thumbnail half of the
-        old display_image.)"""
-        if not self.label.winfo_ismapped():
-            self.label.pack(pady=(0, 0))
+        preview carousel. (The header row with the sub-tab switch + filename
+        label is always packed, so it isn't touched here.)"""
         self.drop_box.pack_forget()
         if not self.carousel.winfo_ismapped():
             self.carousel.pack(pady=(2, 2), fill="both", expand=True)
 
+    def on_media_info(self, info):
+        """A probe of the selected file landed (see LlamaGUI._decode_worker).
+
+        Adopts the source's own container as the output default, which is
+        what makes the untouched form a true passthrough — but only while the
+        user hasn't picked a container themselves (`_auto_format`), so a new
+        file drop never overrides a deliberate choice."""
+        container = info.get("container")
+        if container and self._auto_format is not None and container in formats.containers():
+            self.format_menu.set(container)
+            self._auto_format = container
+            self._autofill_output_path()
+        self._sync_controls()
+
     def _autofill_output_path(self):
         """Suggests '<default folder>/<input basename>_encoded<format>' in the
-        output field (format = the current format_menu value) — but only while
-        the user hasn't set their own path (self._auto_output holds the last
-        value we filled; None once the user picks via Browse)."""
+        output field — but only while the user hasn't set their own path
+        (`self._auto_output` holds the last value we filled; None once the
+        user picks via Browse)."""
         current = self.save_entry.get().strip()
         if current and current != self._auto_output:
             return
@@ -347,74 +752,23 @@ class EncodingTab(ctk.CTkFrame):
         self._auto_output = suggested
 
     def _on_format_change(self, _value=None):
-        """Swaps the output path's extension to the newly-picked format. Only
-        touches a path that already has an extension to replace — before a file
-        is picked the entry holds just a folder, which _autofill_output_path
-        completes with the right extension once there's an input."""
+        """The user picked a container themselves: stop auto-adopting the
+        source's, swap the output path's extension, and re-run the cascade
+        (the container is the root of the whole option tree)."""
+        self._auto_format = None
         current = self.save_entry.get().strip()
-        root, ext = os.path.splitext(current)
-        if not ext:
-            return
-        updated = root + self.format_menu.get()
-        self.save_entry.delete(0, "end")
-        self.save_entry.insert(0, updated)
-        if self._auto_output is not None:
-            self._auto_output = updated
-
-    def _on_crf_change(self, value):
-        """Updates the live CRF value readout in the slider's title label."""
-        self.crf_label.configure(text=f"Quality (CRF): {int(round(value))}")
-
-    def toggle_time_spinners(self):
-        """Enables/disables the Start/Duration spinners from the Retain Video
-        Length checkbox. Skipped while Strip Video holds everything disabled —
-        that path owns the spinner state until it's unticked."""
-        if getattr(self, "strip_video_check", None) is not None and self.strip_video_check.get() == 1:
-            return
-        is_checked = self.checkbox.get() == 1
-        state = "disabled" if is_checked else "normal"
-        label_color = _DISABLED_LABEL if is_checked else ctk.ThemeManager.theme["CTkLabel"]["text_color"]
-
-        self.start_time_spinner.set_state(state)
-        self.duration_time_spinner.set_state(state)
-
-        self.start_label.configure(text_color=label_color)
-        self.duration_label.configure(text_color=label_color)
-
-    def _on_strip_video_toggle(self):
-        """Strip Video disables every encoding option at once. It's a plain
-        binary disable — a control that's already disabled (the time spinners
-        when Retain Video Length is checked) just stays exactly as it looks,
-        no compounding dim — so unticking Strip Video restores each control to
-        the state it *should* be in (via toggle_time_spinners for the
-        spinners), not a blanket 'normal'."""
-        stripping = self.strip_video_check.get() == 1
-        state = "disabled" if stripping else "normal"
-
-        for widget in (self.checkbox, self.encoder_menu, self.format_menu,
-                       self.profile_menu, self.level_menu, self.hdr_switch,
-                       self.crf_slider):
-            widget.configure(state=state)
-
-        normal = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
-        for label in (self.encoder_label, self.format_label, self.profile_label,
-                      self.level_label, self.hdr_label, self.crf_label):
-            label.configure(text_color=_DISABLED_LABEL if stripping else normal)
-        for label in (self.crf_low_label, self.crf_high_label):
-            label.configure(text_color=_DISABLED_LABEL if stripping else "gray60")
-
-        if stripping:
-            self.start_time_spinner.set_state("disabled")
-            self.duration_time_spinner.set_state("disabled")
-            self.start_label.configure(text_color=_DISABLED_LABEL)
-            self.duration_label.configure(text_color=_DISABLED_LABEL)
-        else:
-            self.toggle_time_spinners()   # hand the spinners back to Retain Video Length
+        root, extension = os.path.splitext(current)
+        if extension:
+            updated = root + self.format_menu.get()
+            self.save_entry.delete(0, "end")
+            self.save_entry.insert(0, updated)
+            if self._auto_output is not None:
+                self._auto_output = updated
+        self._sync_controls()
 
     def select_save_location(self):
         """Lets the user pick a full output FILE path (not just a folder)."""
         input_file = self.app.current_file_path
-
         fmt = self.format_menu.get()  # e.g. ".mkv" — already dotted
 
         if input_file:
@@ -426,7 +780,6 @@ class EncodingTab(ctk.CTkFrame):
             initial_dir = self.app.default_save_location
             default_name = f"output{fmt}"
 
-        # Pre-fill the dialog's starting folder from whatever's already typed, if valid
         existing = self.save_entry.get().strip()
         if existing:
             existing_dir = "/".join(existing.replace("\\", "/").split("/")[:-1])
@@ -438,86 +791,132 @@ class EncodingTab(ctk.CTkFrame):
             initialdir=initial_dir,
             initialfile=default_name,
             defaultextension=fmt,
-            filetypes=[
-                ("MP4 Video", "*.mp4"),
-                ("MKV Video", "*.mkv"),
-                ("All Files", "*.*"),
-            ],
+            filetypes=[("MP4 Video", "*.mp4"), ("MKV Video", "*.mkv"), ("All Files", "*.*")],
         )
         if file_path:
             self.save_entry.delete(0, "end")
             self.save_entry.insert(0, file_path)
             self._auto_output = None  # user chose their own — stop auto-filling
 
+    # ------------------------------------------------------------------ #
+    #  Settings in / out
+    # ------------------------------------------------------------------ #
     def _gather_settings(self):
-        """Collects the current Encoding tab state into a plain dict.
-        `gpu_enabled` is the global Settings-tab preference, not a per-tab
-        control anymore."""
+        """Collects the current Encoding state into a plain dict. Every field
+        is read regardless of which sub-tab is showing — all three panels
+        stay built and alive. `gpu_enabled` is the global Settings-tab
+        preference, not a control of ours."""
         return {
             "input_file": self.app.current_file_path,
             "output_path": self.save_entry.get(),
-            "encoder": self.encoder_menu.get(),
             "output_format": self.format_menu.get(),
             "start_secs": self.start_time_spinner.get_total_seconds(),
             "duration_secs": self.duration_time_spinner.get_total_seconds(),
+            "encoder": self.encoder_menu.get(),
+            "profile": self._menu_value(self.profile_menu),
+            "level": self._menu_value(self.level_menu),
+            "quality": int(round(self.crf_slider.get())),
             "gpu_enabled": bool(self.app.gpu_enabled),
             "hdr_to_sdr": bool(self.hdr_switch.get()),
-            "retain_length": bool(self.checkbox.get()),
             "strip_video": bool(self.strip_video_check.get()),
-            "crf": int(round(self.crf_slider.get())),
-            "profile": self.profile_menu.get(),
-            "level": self.level_menu.get(),
+            "audio_codec": self.audio_codec_menu.get(),
+            "audio_bitrate": self._menu_value(self.audio_bitrate_menu),
+            "audio_channels": self.audio_channels_menu.get(),
+            "audio_sample_rate": self.audio_samplerate_menu.get(),
+            "strip_audio": bool(self.strip_audio_check.get()),
         }
 
-    def load_settings(self, settings):
-        """Restores a settings dict (e.g. from a queued task) into the UI."""
+    def _apply_settings(self, settings):
+        """Writes a settings dict into the form **in dependency order** —
+        container, then codecs, then codec-detail options — running a sync
+        pass between each tier so every list is legal before the next tier's
+        value is written into it. A key that's absent leaves its control
+        alone, which is how a preset (recipe keys only) can share this path
+        with a full restore.
+
+        Snap-toasts are muted for the duration: a value landing in a list
+        that hasn't been rebuilt yet isn't the user changing anything."""
         if not settings:
             return
+        was_ready, self._ready = self._ready, False
+        try:
+            if settings.get("input_file"):
+                self.app.update_global_file(settings["input_file"])
 
-        input_file = settings.get("input_file")
-        if input_file:
-            self.app.update_global_file(input_file)
+            if "output_path" in settings:
+                self.save_entry.delete(0, "end")
+                self.save_entry.insert(0, settings["output_path"])
+                self._auto_output = self.save_entry.get().strip()
 
-        self.encoder_menu.set(settings.get("encoder", _ENCODERS[0]))
-        self.format_menu.set(settings.get("output_format", _OUTPUT_FORMATS[0]))
+            if "start_secs" in settings:
+                self.start_time_spinner.set(settings["start_secs"])
+            if "duration_secs" in settings:
+                self.duration_time_spinner.set(settings["duration_secs"])
 
-        self.save_entry.delete(0, "end")
-        self.save_entry.insert(0, settings.get("output_path", ""))
-        self._auto_output = self.save_entry.get().strip()
+            # Strip flags first: they gate whole panels, so settling them
+            # before the cascade means the enabled-state pass runs once.
+            if "strip_video" in settings:
+                self._set_check(self.strip_video_check, settings["strip_video"])
+            if "strip_audio" in settings:
+                self._set_check(self.strip_audio_check, settings["strip_audio"])
 
-        self.start_time_spinner.set(settings.get("start_secs", 0))
-        self.duration_time_spinner.set(settings.get("duration_secs", 0))
+            # Tier 1 — the container decides which codecs exist at all.
+            if "output_format" in settings:
+                self.format_menu.set(settings["output_format"])
+                self._auto_format = None
+            self._sync_controls()
 
-        if settings.get("hdr_to_sdr"):
-            self.hdr_switch.select()
-        else:
-            self.hdr_switch.deselect()
+            # Tier 2 — codecs decide which profiles/levels/bitrates exist.
+            self._set_menu(self.encoder_menu, settings.get("encoder"))
+            self._set_menu(self.audio_codec_menu, settings.get("audio_codec"))
+            self._sync_controls()
 
-        if settings.get("retain_length"):
-            self.checkbox.select()
-        else:
-            self.checkbox.deselect()
-        self.toggle_time_spinners()
+            # Tier 3 — the leaves.
+            self._set_menu(self.profile_menu, settings.get("profile"))
+            self._set_menu(self.level_menu, settings.get("level"))
+            self._set_menu(self.audio_bitrate_menu, settings.get("audio_bitrate"))
+            self._set_menu(self.audio_channels_menu, settings.get("audio_channels"))
+            self._set_menu(self.audio_samplerate_menu, settings.get("audio_sample_rate"))
+            if "hdr_to_sdr" in settings:
+                self._set_check(self.hdr_switch, settings["hdr_to_sdr"])
+            if settings.get("quality") is not None:
+                self.crf_slider.set(settings["quality"])
+        finally:
+            self._ready = was_ready
+        self._sync_controls()
 
-        crf = settings.get("crf", 23)
-        self.crf_slider.set(crf)
-        self._on_crf_change(crf)
+    def load_settings(self, settings):
+        """Restores a full settings dict into the UI (used by the live theme
+        rebuild, which snapshots each tab before destroying it)."""
+        self._apply_settings(settings)
 
-        self.profile_menu.set(settings.get("profile", "High"))
-        self.level_menu.set(settings.get("level", "4.1"))
+    @staticmethod
+    def _menu_value(menu):
+        """A derived dropdown's value, with the `—` placeholder reported as
+        an empty string — so a settings dict says "this codec has no profile"
+        rather than carrying a dash around as if it were a real choice."""
+        value = menu.get()
+        return "" if value == _NO_OPTION else value
 
-        # Applied last: if the task had Strip Video on, this re-disables
-        # everything set above (and unticking it later restores each control).
-        if settings.get("strip_video"):
-            self.strip_video_check.select()
-        else:
-            self.strip_video_check.deselect()
-        self._on_strip_video_toggle()
+    @staticmethod
+    def _set_menu(menu, value):
+        """Selects `value` only if it's actually one of the menu's current
+        options — a stale value from an older settings dict is dropped rather
+        than displayed as a selection the list doesn't contain."""
+        if value is not None and value in menu.cget("values"):
+            menu.set(value)
+
+    @staticmethod
+    def _set_check(widget, on):
+        """select()/deselect() from a truthy value, for checkboxes and the
+        HDR switch alike."""
+        widget.select() if on else widget.deselect()
 
     def _validate_settings(self, settings):
-        """Checks that the minimum required fields are filled in before
-        queueing/encoding, raising a modal dialog on the first thing missing.
-        Returns True if valid, else False."""
+        """Checks the minimum required fields before queueing/encoding,
+        raising a modal dialog on the first thing missing. Combination
+        validity isn't checked here — `_sync_controls` makes illegal
+        container/codec pairings unrepresentable in the first place."""
         if not settings["input_file"]:
             show_message(
                 self.app, "No File Selected",
@@ -535,6 +934,9 @@ class EncodingTab(ctk.CTkFrame):
             return False
         return True
 
+    # ------------------------------------------------------------------ #
+    #  Queue hand-off
+    # ------------------------------------------------------------------ #
     def encode_now(self):
         settings = self._gather_settings()
         if not self._validate_settings(settings):

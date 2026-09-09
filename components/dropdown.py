@@ -260,6 +260,55 @@ class ThemedDropdown(ctk.CTkOptionMenu):
         if self._user_command is not None:
             self._user_command(value)
 
+    def set_values(self, values):
+        """Replaces the option list, rebuilding the popup's rows.
+
+        Needed because the Encoding/Muxing option lists are *derived* — the
+        output container decides which codecs exist, the encoder decides
+        which profiles/levels exist (see `core/formats.py`), so these menus
+        get retargeted on every `_sync_controls` pass.
+
+        **No-ops when the list is unchanged**, which is the common case on a
+        sync: rebuilding the row buttons every keystroke would both flicker
+        and churn widgets pointlessly. An empty list renders a single em-dash
+        placeholder — callers pair that with `state="disabled"` for an option
+        the current codec simply doesn't have.
+
+        Does not fire `command`; the caller owns any value change it causes."""
+        values = list(values) or ["—"]
+        if values == self._values:
+            return
+        current = self.get()
+
+        self.close(animate=False)
+        self._geo = None          # cached open geometry — height just changed
+        for row in self.rows.values():
+            row.destroy()
+        self.rows.clear()
+        self._values = values
+
+        for value in values:
+            row = ctk.CTkButton(
+                master=self.panel,
+                text=value,
+                anchor="w",
+                height=_ROW_HEIGHT,
+                corner_radius=4,
+                fg_color="transparent",
+                text_color=("gray10", "gray90"),
+                command=lambda v=value: self._select(v),
+            )
+            row.pack(fill="x", padx=3, pady=1)
+            if self._on_hover is not None:
+                row.bind("<Enter>", lambda e, v=value: self._on_hover(v))
+            self.rows[value] = row
+
+        # Keep the base class's own notion of the options in step, then put
+        # the selection back if it survived the retarget (configure(values=)
+        # resets it to the first entry).
+        super().configure(values=values)
+        self.set(current if current in values else values[0])
+
     def destroy(self):
         """Takes the popup window down too — it's a `Toplevel` of its own, not
         a child of the owning tab, so a live theme switch's tab rebuild (see

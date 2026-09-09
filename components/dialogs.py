@@ -16,10 +16,11 @@ class MessageDialog(ctk.CTkToplevel):
     native Windows boxes ignore the app's theme entirely, and this app's whole
     look is theme-driven (see CLAUDE.md's Theming section)."""
 
-    def __init__(self, app, title, message, buttons=("OK",)):
+    def __init__(self, app, title, message, buttons=("OK",), entry=None):
         super().__init__(master=app)
         theme = get_active_theme()
         self.result = None
+        self.value = None      # entry contents at dismissal, when `entry` is used
         self._buttons = buttons
 
         self.title(title)
@@ -42,6 +43,16 @@ class MessageDialog(ctk.CTkToplevel):
             master=self.body, text=message, wraplength=_WRAP, anchor="w", justify="left",
         )
         self.message_label.pack(anchor="w", fill="x")
+
+        # Optional single-line input (preset naming). Built here, before the
+        # button row, so pack order alone puts it between message and buttons
+        # — no `before=` juggling, and _center_on below still measures the
+        # dialog at its real final height.
+        self.entry = None
+        if entry is not None:
+            self.entry = ctk.CTkEntry(master=self.body)
+            self.entry.pack(anchor="w", fill="x", pady=(10, 0))
+            self.entry.insert(0, entry)
 
         self.button_row = ctk.CTkFrame(master=self.body, fg_color="transparent")
         self.button_row.pack(anchor="e", pady=(16, 0))
@@ -68,6 +79,8 @@ class MessageDialog(ctk.CTkToplevel):
         self.wait_visibility()
         self.grab_set()
         self.focus_force()
+        if self.entry is not None:
+            self.entry.focus_set()
         # Enter confirms, Escape declines — Escape resolves to the LAST button
         # (the decline in a two-button dialog, the only button in a one-button
         # one), matching what the window's close box does.
@@ -94,6 +107,10 @@ class MessageDialog(ctk.CTkToplevel):
         self.geometry(f"{width}x{height}+{max(0, x)}+{max(0, y)}")
 
     def _dismiss(self, choice):
+        # Read the entry *before* destroying — the widget is gone afterwards,
+        # but `self.value` outlives the window for show()'s caller.
+        if self.entry is not None:
+            self.value = self.entry.get()
         self.result = choice
         self.grab_release()
         self.destroy()
@@ -113,3 +130,14 @@ def ask_yes_no(app, title, message):
     """Yes/No confirmation. Returns True only on an explicit Yes — closing the
     dialog or pressing Escape both count as No."""
     return MessageDialog(app, title, message, buttons=("Yes", "No")).show() == "Yes"
+
+
+def ask_text(app, title, message, initial="", confirm="Save"):
+    """Prompts for a single line of text (preset names). Returns the stripped
+    string, or None if cancelled/closed or left blank — so callers only ever
+    get something usable back."""
+    dialog = MessageDialog(app, title, message, buttons=(confirm, "Cancel"), entry=initial)
+    choice = dialog.show()
+    if choice != confirm:
+        return None
+    return (dialog.value or "").strip() or None

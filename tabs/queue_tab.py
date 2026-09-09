@@ -44,13 +44,27 @@ _DETAIL_FIELDS = [
     ("output_format", "Format", None),
     ("start_secs", "Start Time", "time"),
     ("duration_secs", "Clip Duration", "time"),
-    ("retain_length", "Retain Length", "bool"),
+    # Video-stream fields — Encode tasks carry `profile`/`level`/`quality`;
+    # Mux tasks carry `video_track`/`video_track_file` instead (it never
+    # re-encodes). Each is skipped when simply absent from the settings dict.
     ("strip_video", "Strip Video", "bool"),
     ("gpu_enabled", "GPU Acceleration", "bool"),
     ("hdr_to_sdr", "HDR to SDR", "bool"),
-    ("crf", "Quality (CRF)", None),
+    ("quality", "Quality", None),
     ("profile", "Profile", None),
     ("level", "Level", None),
+    ("video_track", "Video Track", None),
+    ("video_track_file", "Video From", None),
+    # Audio-stream fields — `audio_codec`/`audio_bitrate`/`strip_audio` are
+    # shared by both tabs; `audio_channels`/`audio_sample_rate` are Encode
+    # only, `audio_track` is Mux only.
+    ("audio_track", "Audio Track", None),
+    ("audio_track_file", "Audio From", None),
+    ("audio_codec", "Audio Codec", None),
+    ("audio_bitrate", "Audio Bitrate", None),
+    ("audio_channels", "Audio Channels", None),
+    ("audio_sample_rate", "Audio Sample Rate", None),
+    ("strip_audio", "Strip Audio", "bool"),
 ]
 
 
