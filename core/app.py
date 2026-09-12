@@ -8,7 +8,7 @@ from tkinterdnd2 import TkinterDnD
 from PIL import Image
 
 from core import formats
-from core.utilities import extract_video_thumbnails, probe_media
+from core.utilities import extract_hdr_tonemapped_thumbnails, extract_video_thumbnails, probe_media
 from core.theme import get_active_theme, load_settings, apply_ctk_theme
 from components.dialogs import ask_yes_no
 from components.sidebar import Sidebar
@@ -63,11 +63,20 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         self._thumb_token = 0
         # What the selected file actually *is* — container + codecs, from a
         # best-effort ffprobe on the same worker as the thumbnails. This is
-        # what gives `Source` a concrete meaning: tabs use it to default the
-        # output container, to name a copied stream in the Overview rundown,
-        # and (Muxing) to work out which containers the file can be remuxed
-        # into. Every field may stay None; nothing here is load-bearing.
-        self.media_info = {"container": None, "video": None, "audio": None}
+        # what gives Encoding's `Select` a concrete meaning: EncodingTab
+        # auto-resolves it from this, both tabs default the output container
+        # from it, and (Muxing) it decides which containers the file can be
+        # remuxed into. `has_video`/`has_audio` are a separate question from
+        # `video`/`audio` — stream presence vs. a recognized codec name; both
+        # stay None ("unknown", never "absent") until a probe actually runs.
+        # `audio_streams` starts as [] to match probe_media's own "unknown"
+        # shape, not None -- every consumer iterates it directly.
+        self.media_info = dict.fromkeys(
+            ("container", "video", "audio", "video_profile", "video_level", "hdr",
+             "width", "height", "duration", "file_size",
+             "has_video", "has_audio")
+        )
+        self.media_info["audio_streams"] = []
         self._media_info_path = None
         # Which preview frame the carousels are scrubbed to — shared across
         # tabs (Muxing/Encoding both mirror it) and preserved across a live
@@ -78,6 +87,21 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         # thread-safe. _drain_thumbnails polls it on the main thread.
         self._thumb_queue = queue.Queue()
         self._thumb_pending = 0
+        # HDR->SDR preview (EncodingTab's hdr_switch — Muxing has no HDR
+        # toggle). Lives here, not on EncodingTab, specifically so a live
+        # theme rebuild (which destroys and reconstructs Muxing/Encoding
+        # wholesale — see apply_theme) doesn't throw away an already-
+        # rendered tone-mapped set or orphan an in-flight render: the tab
+        # instance is gone, but `self` (the app) survives untouched, so
+        # `hdr_frames`/`hdr_frames_path` are still exactly as they were the
+        # moment the rebuilt EncodingTab re-registers and asks. See
+        # start_hdr_render/_poll_hdr_queue and core.utilities.extract_hdr_
+        # tonemapped_thumbnails.
+        self.hdr_frames = None          # cached tone-mapped set for hdr_frames_path, or None
+        self.hdr_frames_path = None     # which file hdr_frames belongs to
+        self._hdr_inflight_path = None  # path a background render is currently running for
+        self._hdr_token = 0             # bumped on every new render, so a superseded one's late result is dropped
+        self._hdr_queue = queue.Queue()
         self._tab_indicator_job = None
         self._current_tab_name = "Muxing"
         # In-window drop-down notifications ("job added to queue" etc). Built
@@ -215,7 +239,12 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
             # can never render the previous input's codecs against the new
             # one while the fresh probe is still in flight.
             if clean_path != self._media_info_path:
-                self.media_info = {"container": None, "video": None, "audio": None}
+                self.media_info = dict.fromkeys(
+                    ("container", "video", "audio", "video_profile", "video_level", "hdr",
+                     "width", "height", "duration", "file_size",
+                     "has_video", "has_audio")
+                )
+                self.media_info["audio_streams"] = []
         self.current_file_path = clean_path
 
         for ui in self.tab_ui_registry:
@@ -327,11 +356,17 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
     def _broadcast_media_info(self):
         """Hands the probe result to every tab exposing `on_media_info`
         (Muxing and Encoding), so they can settle their `Source` defaults and
-        refresh the Overview rundown."""
+        refresh the Overview rundown -- and to every registered carousel
+        (`set_media_info`), which is what feeds the bottom-left info badge
+        and its hover tooltip."""
         for tab in self.tabs.values():
             handler = getattr(tab, "on_media_info", None)
             if callable(handler):
                 handler(self.media_info)
+        for ui in self.tab_ui_registry:
+            setter = getattr(ui["img"], "set_media_info", None)
+            if callable(setter):
+                setter(self.media_info)
 
     def _deliver_thumbnails(self, token, path, frames):
         """Drops stale (user moved on) results; caches and broadcasts real
@@ -360,6 +395,71 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
             sync = getattr(ui["img"], "sync_index", None)
             if callable(sync):
                 sync(self._preview_index)
+
+    def start_hdr_render(self, path):
+        """Kicks off the one-time-per-file HDR tone-map decode
+        (`extract_hdr_tonemapped_thumbnails`) on a daemon thread — a no-op
+        if it's already cached (`hdr_frames_path == path`) or already
+        running for this exact path. Lives on the app (see the __init__
+        comment above) rather than on EncodingTab so the render — and its
+        result — survive a live theme rebuild instead of restarting from
+        scratch every time the tab is destroyed and reconstructed."""
+        if not path or path == self.hdr_frames_path or path == self._hdr_inflight_path:
+            return
+        self._hdr_inflight_path = path
+        self._hdr_token += 1
+        token = self._hdr_token
+        threading.Thread(
+            target=self._hdr_render_worker, args=(token, path), daemon=True
+        ).start()
+        self.after(120, self._poll_hdr_queue)
+
+    def _hdr_render_worker(self, token, path):
+        """Off-thread: must not touch a widget or call `after()` — the
+        result goes back through `_hdr_queue` only, same contract as
+        `_decode_worker`."""
+        frames = extract_hdr_tonemapped_thumbnails(path, count=10)
+        self._hdr_queue.put((token, path, frames))
+
+    def _poll_hdr_queue(self):
+        """Main-thread poll: delivers a finished render if it's still
+        wanted (matching token — a newer render request supersedes an
+        older one's eventual result, whether for the same path or a
+        different one), then broadcasts it to every tab exposing
+        `on_hdr_frames_ready` (today, only EncodingTab). Re-arms itself
+        while a render is still outstanding."""
+        if not self.winfo_exists():
+            return
+        while True:
+            try:
+                token, path, frames = self._hdr_queue.get_nowait()
+            except queue.Empty:
+                break
+            if path == self._hdr_inflight_path:
+                self._hdr_inflight_path = None
+            if token != self._hdr_token:
+                continue
+            self.hdr_frames = frames or None
+            self.hdr_frames_path = path if frames else None
+            for tab in self.tabs.values():
+                ready = getattr(tab, "on_hdr_frames_ready", None)
+                if callable(ready):
+                    ready(path, self.hdr_frames)
+        if self._hdr_inflight_path is not None:
+            self.after(120, self._poll_hdr_queue)
+
+    def refresh_previews_appearance(self):
+        """Settings' Appearance Mode switch is live — no tab rebuild — so
+        this tells every tab that has its own `refresh_appearance` (Muxing/
+        Encoding, for their carousel's info badge and their SubTabBar's
+        pinned background colour — see ThumbnailCarousel.refresh_appearance
+        / SubTabBar.refresh_appearance) to reapply the new mode right away.
+        Without it those go stale until some unrelated repaint (a hover
+        fade, a slide) happens to trigger one."""
+        for tab in self.tabs.values():
+            refresh = getattr(tab, "refresh_appearance", None)
+            if callable(refresh):
+                refresh()
 
     def sync_preview_index(self, index):
         """A carousel was scrubbed to `index`; mirror it onto every other
@@ -539,11 +639,15 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         """Confirms before discarding unfinished queue work, then hard-exits.
 
         Processing is paused for the duration of the prompt and resumed if the
-        user backs out — otherwise a job would keep animating (and could even
+        user backs out — otherwise a job would keep encoding (and could even
         finish) behind a modal dialog asking whether to cancel it. Pausing
-        rather than stopping is what makes that reversible: pause_queue keeps
-        the in-flight task's progress in `_paused_state`, so start_queue picks
-        it up from the exact step it left off at."""
+        rather than stopping is what makes that reversible: pause_queue
+        suspends the in-flight ffmpeg in place, so start_queue resumes it
+        from the exact frame it froze on.
+
+        On the way out, `QueueTab.shutdown()` kills any active ffmpeg first:
+        Windows doesn't take a child process down with its parent, so it
+        would otherwise keep running (or stay frozen) after the app is gone."""
         queue_tab = self.tabs.get("Queue")
         pending = queue_tab.pending_task_count() if queue_tab else 0
         if pending:
@@ -564,5 +668,7 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
                 if was_running:
                     queue_tab.start_queue()
                 return
+        if queue_tab:
+            queue_tab.shutdown()
         self.destroy()
         sys.exit(0)

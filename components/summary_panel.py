@@ -1,5 +1,7 @@
 import customtkinter as ctk
 
+from components.marquee_label import MarqueeLabel
+
 _LABEL_WIDTH = 72
 _FONT_SIZE = 11
 _ROW_PADY = 1
@@ -40,7 +42,14 @@ class SummaryPanel(ctk.CTkFrame):
                 anchor="w", text_color="gray60",
             ).pack(side="left")
 
-            value = ctk.CTkLabel(master=row, text="—", font=plain, anchor="w", justify="left")
+            # A MarqueeLabel, not a plain CTkLabel -- a genuinely long value
+            # (a multi-stream audio summary, e.g.) would otherwise silently
+            # overflow (CTkLabel ignores a width smaller than its natural
+            # text size; see CLAUDE.md) rather than scroll, extending past
+            # this panel's own narrow ~260px budget. Sits still when the
+            # text already fits, same as everywhere else this component's
+            # used.
+            value = MarqueeLabel(master=row, text="—", font=plain, anchor="w")
             value.pack(side="left", fill="x", expand=True)
             self._value_labels.append(value)
 

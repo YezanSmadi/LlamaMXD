@@ -52,6 +52,17 @@ class ThemedDropdown(ctk.CTkOptionMenu):
         # `command` is deliberately NOT handed to the base class: its own
         # value-picking path (the native menu) never runs, so we invoke the
         # caller's callback ourselves from _select.
+        #
+        # dynamic_resizing defaults OFF: CTkOptionMenu's own default (True)
+        # grows/shrinks the button to fit whatever text is currently set,
+        # which fights the app's whole "pinned, non-flickering footprint"
+        # design (`_pin_options_height`'s one-time width measurement assumes
+        # each dropdown stays the width it was given) — confirmed as the
+        # cause of the Encoding Audio panel visibly resizing as its Audio
+        # Codec value changed length (e.g. "Select" -> "Dolby TrueHD").
+        # `width=` should always be sized for the widest value a caller
+        # expects to show.
+        kwargs.setdefault("dynamic_resizing", False)
         super().__init__(master=master, values=list(values), **kwargs)
         self._values = list(values)
         self._user_command = command

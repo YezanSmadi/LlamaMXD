@@ -226,6 +226,11 @@ class SettingsTab(ctk.CTkFrame):
     def _on_appearance_change(self, value):
         """Live-switches light/dark/system appearance mode and persists it."""
         ctk.set_appearance_mode(value.lower())
+        # CTk's own widgets re-theme themselves automatically on this call;
+        # the info badge doesn't (it's a PIL composite, not a CTk-drawn
+        # widget), so it needs an explicit nudge to update right away rather
+        # than waiting on some unrelated repaint.
+        self.app.refresh_previews_appearance()
         save_settings(self._settings_snapshot())
 
     def _browse_save_location(self):

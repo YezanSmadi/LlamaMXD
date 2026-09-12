@@ -286,6 +286,22 @@ class SubTabBar(ctk.CTkFrame):
     # ------------------------------------------------------------------ #
     #  Public API
     # ------------------------------------------------------------------ #
+    def refresh_appearance(self):
+        """Called after a live Appearance Mode switch (Settings tab — no
+        tab rebuild happens for this, unlike a theme change). The canvas's
+        `bg` was pinned once at construction to the owning `CTkFrame`'s own
+        resolved background colour (`bg=self._canvas.cget("bg")` in
+        `__init__`) — a plain Tk colour string, not one of CTk's own
+        (light, dark) tuples, so it never updates on its own and is left
+        showing the old mode's colour as a mismatched box around the bar.
+        CTk's own appearance-mode machinery has already re-drawn
+        `self._canvas` by the time this runs (`ctk.set_appearance_mode` is
+        synchronous), so re-reading it here picks up the new mode."""
+        try:
+            self._cv.configure(bg=self._canvas.cget("bg"))
+        except Exception:
+            pass
+
     def set_marked(self, name, marked):
         """Cross-fades one tab button to/from `STOP_RED` to surface a stripped
         stream from whichever panel is on screen. No-ops when nothing changes,

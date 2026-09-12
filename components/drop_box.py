@@ -51,7 +51,7 @@ class DropBox(ctk.CTkFrame):
             title="Select a File",
             filetypes=[
                 ("Media files",
-                 "*.mp4 *.mkv *.mov *.webm *.avi *.m4v "
+                 "*.mp4 *.mkv *.mov *.webm *.avi *.m4v *.mxf "
                  "*.mp3 *.m4a *.aac *.flac *.wav *.opus *.ogg *.wma *.aiff"),
                 ("All files", "*.*"),
             ],

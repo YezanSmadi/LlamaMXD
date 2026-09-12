@@ -4,6 +4,7 @@ import tkinter as tk
 
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageTk
+from tkinterdnd2 import DND_FILES
 
 from core.theme import get_active_theme, readable_text_on
 
@@ -69,6 +70,59 @@ def _wave_source_fps():
     """The Wave Loop animation's own framerate (~29.97), for wall-clock playback."""
     _wave_animation()
     return _ASSET_CACHE.get("wave_fps", 30.0)
+
+
+def _info_badge_fallback():
+    """A plain dark disc with a hand-drawn 'i' glyph (a dot + a rounded
+    stem) — the badge's original procedural design, kept only as a fallback
+    for `_info_badge_source` when `info-icon-light.png`/`info-icon-dark.png`
+    can't be loaded (a partial checkout missing the asset files), so the
+    preview still shows *something* rather than raising. Rendered
+    oversampled and box-filtered down for the same antialiasing reason as
+    everywhere else PIL draws a circle (see CLAUDE.md's Known Issues)."""
+    base = 96
+    ss = 4
+    big = Image.new("RGBA", (base * ss, base * ss), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(big)
+    r = base * ss / 2
+    draw.ellipse([1, 1, base * ss - 1, base * ss - 1], fill=(32, 32, 32, 220))
+    dot_r = r * 0.13
+    draw.ellipse(
+        [r - dot_r, r * 0.62 - dot_r, r + dot_r, r * 0.62 + dot_r],
+        fill=(255, 255, 255, 255),
+    )
+    stem_w = r * 0.26
+    draw.rounded_rectangle(
+        [r - stem_w / 2, r * 0.98, r + stem_w / 2, r * 1.62],
+        radius=stem_w / 2, fill=(255, 255, 255, 255),
+    )
+    return big.convert("RGBa").resize((base, base), Image.LANCZOS).convert("RGBA")
+
+
+# Appearance mode -> the badge asset drawn for it: `info-icon-dark.png`/
+# `info-icon-light.png` (both pre-masked to a transparent-cornered circle
+# from the "dark mode info icon"/"light mode info icon vector" artwork —
+# see scripts/make_info_badges.py) — a solid dark disc for Dark mode, a
+# white disc with a dark ring/glyph for Light. Named for the mode they were
+# designed to be shown in, not derived from either app theme's primary/
+# secondary (the info badge is deliberately theme-independent, same
+# reasoning as the mute badge always being red).
+_INFO_BADGE_FILES = {"Dark": "info-icon-dark.png", "Light": "info-icon-light.png"}
+
+
+def _info_badge_source(mode):
+    """The info badge for `mode` ("Light"/"Dark", from `ctk.
+    get_appearance_mode()`), loaded once per mode and cached. Falls back to
+    the old procedurally-drawn disc (`_info_badge_fallback`) if the file's
+    missing or unreadable."""
+    key = f"info_{mode}"
+    if key not in _ASSET_CACHE:
+        filename = _INFO_BADGE_FILES.get(mode, _INFO_BADGE_FILES["Light"])
+        try:
+            _ASSET_CACHE[key] = Image.open(os.path.join(_ROOT, filename)).convert("RGBA")
+        except Exception:
+            _ASSET_CACHE[key] = _info_badge_fallback()
+    return _ASSET_CACHE[key]
 
 
 def _mute_badge():
@@ -228,10 +282,17 @@ class ThumbnailCarousel(ctk.CTkFrame):
     edge it's heading for and only scrolls the row once the highlight is
     already there. See the dot-indicator comment block up top."""
 
-    def __init__(self, master, on_reselect=None, on_populated=None, on_index=None):
+    def __init__(self, master, on_reselect=None, on_populated=None, on_index=None,
+                 on_file_selected=None):
         super().__init__(master=master, fg_color="transparent")
         self._on_reselect = on_reselect
         self._on_populated = on_populated
+        # Once the DropBox is swapped out for this carousel (_reveal_preview),
+        # it's the only thing occupying the preview area — without its own
+        # drop target, dragging a replacement file onto it did nothing (the
+        # DropBox's registration exists but the widget has zero screen size).
+        # Wired to the same app.update_global_file the DropBox itself uses.
+        self._on_file_selected = on_file_selected
         # Reports the current preview index whenever the user steps it, so the
         # app can mirror the scrub position onto the other tab's carousel
         # (LlamaGUI.sync_preview_index). `sync_index` is the receiving end and
@@ -262,6 +323,14 @@ class ThumbnailCarousel(ctk.CTkFrame):
         # visualiser) and disables navigation, exactly like `_strip_video`.
         self._audio_only = False
         self._badge_scaled = None   # mute badge pre-sized for the current frame
+        # Probed source-file info (core.utilities.probe_media's dict), pushed
+        # in by app.set_media_info -- feeds the always-visible bottom-left
+        # info badge and its hover tooltip. Empty until a file's been probed.
+        self._media_info = {}
+        self._info_badge_cache = None   # RGBA, pre-sized per frame
+        self._info_badge_cache_key = None   # (size, appearance_mode) it was sized/loaded for
+        self._info_tooltip = None       # borderless Toplevel while hovering the badge
+        self._info_tooltip_label = None
         self._wave_job = None       # self-re-arming Wave Loop animation tick
         self._wave_t0 = 0.0         # wall-clock start of the current wave loop
         self._wave_last_idx = -1    # last Wave Loop frame index actually painted
@@ -298,9 +367,17 @@ class ThumbnailCarousel(ctk.CTkFrame):
         self.img_label = ctk.CTkLabel(master=self, text="", cursor="hand2")
         self.img_label.pack(fill="both", expand=True)
 
+        for widget in (self, self.img_label):
+            widget.drop_target_register(DND_FILES)
+            widget.dnd_bind("<<Drop>>", self._on_drop)
+
         self.bind("<Configure>", self._on_configure)
         self.img_label.bind("<Enter>", self._on_enter)
         self.img_label.bind("<Leave>", self._on_leave)
+        # The info badge's hover tooltip needs cursor position continuously,
+        # not just on entry/exit -- the badge is a small region of the image,
+        # not the whole label.
+        self.img_label.bind("<Motion>", lambda e: self._on_motion(e, on_wave=False))
         # Both: <Button-1> is the first click of a burst, <Double-Button-1>
         # every click after it (Tk stops sending <Button-1> once <Double> is
         # bound). Routing both through _handle_press is what lets a spam-click
@@ -349,6 +426,17 @@ class ThumbnailCarousel(ctk.CTkFrame):
         self._arrow_alpha = 0.0
         if not self._strip_video and not self._audio_only:
             self._stop_wave()
+        self._rescale()
+
+    def set_media_info(self, info):
+        """Caches the probed source-file info (app.set_media_info's
+        broadcast) for the bottom-left info badge and its hover tooltip.
+        Redraws so the badge appears the moment info arrives (there's nothing
+        to show, and nothing drawn, before the first probe lands) and
+        refreshes the tooltip's text live if it's currently open."""
+        self._media_info = info or {}
+        if self._info_tooltip_label is not None:
+            self._update_info_tooltip()
         self._rescale()
 
     def set_audio_only(self, audio_only):
@@ -458,6 +546,7 @@ class ThumbnailCarousel(ctk.CTkFrame):
         mask = Image.new("L", (w, h), 0)
         mask.paste(band, (0, (h - band_h) // 2))
         out = Image.composite(grad, bg, mask)
+        out = self._with_info_badge(out)
         if self._strip_audio:
             badge = self._mute_badge_for(w, h)
             m = max(4, round(badge.width * 0.28))
@@ -471,6 +560,45 @@ class ThumbnailCarousel(ctk.CTkFrame):
         if self._badge_scaled is None or self._badge_scaled.size != (size, size):
             self._badge_scaled = _mute_badge().resize((size, size), Image.LANCZOS)
         return self._badge_scaled
+
+    def _info_badge_for(self, w, h):
+        """The info badge pre-sized to ~9% of the frame's short side (a bit
+        smaller than the mute badge — it's a permanent fixture, not a rare
+        state, so it shouldn't compete for attention), cached so repeated
+        renders at the same size don't re-resize it. Cache key includes the
+        current appearance mode — Settings' Appearance Mode switch is live
+        (no tab rebuild), so a mode change mid-session must still pick up
+        the other badge on the very next render rather than a stale one
+        cached under the old mode."""
+        size = max(18, round(min(w, h) * 0.09))
+        mode = ctk.get_appearance_mode()
+        cache_key = (size, mode)
+        if self._info_badge_cache_key != cache_key:
+            self._info_badge_cache = _info_badge_source(mode).resize((size, size), Image.LANCZOS)
+            self._info_badge_cache_key = cache_key
+        return self._info_badge_cache
+
+    def _info_badge_position(self, w, h, badge):
+        """Top-left placement for the info badge — bottom-left of the frame,
+        mirroring the mute badge's top-left corner."""
+        margin = max(4, round(badge.width * 0.35))
+        return margin, h - badge.height - margin
+
+    def _with_info_badge(self, img):
+        """`img` with the info badge composited into its bottom-left corner,
+        a copy so the caller's original is never mutated — critical when
+        `img` might be `_base_scaled` itself (the *pure* frame the rest of
+        this module promises never gets drawn on) or a frame straight out of
+        the wave renderer. No-op (returns `img` unchanged) until a file's
+        actually been probed — nothing to show yet, so nothing's drawn."""
+        if not self._media_info:
+            return img
+        w, h = img.size
+        badge = self._info_badge_for(w, h)
+        x, y = self._info_badge_position(w, h, badge)
+        out = img.copy()
+        out.paste(badge, (x, y), badge)
+        return out
 
     def _with_badge(self, img):
         """`img` with the mute badge composited into its **top-left** corner.
@@ -509,6 +637,11 @@ class ThumbnailCarousel(ctk.CTkFrame):
                 "<Button-1>", lambda e: self._handle_press(e, repeat=False))
             self._wave_label.bind(
                 "<Double-Button-1>", lambda e: self._handle_press(e, repeat=True))
+            self._wave_label.bind(
+                "<Motion>", lambda e: self._on_motion(e, on_wave=True))
+            self._wave_label.bind("<Leave>", lambda e: self._hide_info_tooltip())
+            self._wave_label.drop_target_register(DND_FILES)
+            self._wave_label.dnd_bind("<<Drop>>", self._on_drop)
         return self._wave_label
 
     def _wave_geometry(self):
@@ -772,6 +905,10 @@ class ThumbnailCarousel(ctk.CTkFrame):
         else:
             full = Image.alpha_composite(base.convert("RGBA"), self._overlay).convert("RGB")
             disp = full if alpha >= 0.99 else Image.blend(base, full, alpha)
+        # The info badge is always on (once a file's been probed) — unlike
+        # the chevrons/dots, it's not part of _overlay, so it never fades
+        # with hover.
+        disp = self._with_info_badge(disp)
         # Audio-only strip: the video's still here, just badge it.
         if self._strip_audio and not self._strip_video:
             disp = self._with_badge(disp)
@@ -782,6 +919,19 @@ class ThumbnailCarousel(ctk.CTkFrame):
         """Repaints the resting frame (`_base_scaled`) at the current fade."""
         if self._base_scaled is not None:
             self._push(self._base_scaled)
+
+    def refresh_appearance(self):
+        """Called by `app.refresh_previews_appearance` right after a live
+        Appearance Mode switch (Settings tab — no rebuild happens for this,
+        unlike a theme change) so the info badge picks up the other mode's
+        asset immediately. `_info_badge_for` already re-checks `ctk.
+        get_appearance_mode()` on every call, so no cache to bust here — the
+        only thing missing is a reason to repaint at all: the resting
+        preview (`_push`/`_update_image`) only otherwise redraws on a hover
+        fade, a slide, or a frame change, none of which a mode switch causes
+        on its own. The Wave Loop path needs no help — `_wave_tick` already
+        re-renders (badge included) every ~16ms while visible."""
+        self._update_image()
 
     # ------------------------------------------------------------------ #
     #  Animation (fade + slide share one job channel)
@@ -863,6 +1013,14 @@ class ThumbnailCarousel(ctk.CTkFrame):
     # ------------------------------------------------------------------ #
     #  Events
     # ------------------------------------------------------------------ #
+    def _on_drop(self, event):
+        """A file was dropped on the preview (normal frame, or the Wave Loop
+        label shown while stripped/audio-only). Forwards straight to
+        `on_file_selected` (app.update_global_file), same as DropBox's own
+        drop handler — that method strips tkdnd's `{}` wrapping itself."""
+        if self._on_file_selected:
+            self._on_file_selected(event.data)
+
     def _on_configure(self, event):
         if (event.width, event.height) == self._last_config:
             return
@@ -876,6 +1034,7 @@ class ThumbnailCarousel(ctk.CTkFrame):
 
     def _on_leave(self, _event):
         self._fade_to(0.0)
+        self._hide_info_tooltip()
 
     def _event_image_xy(self, event):
         """The event's position in image-local pixels, or `None` before the
@@ -903,6 +1062,204 @@ class ThumbnailCarousel(ctk.CTkFrame):
                 if abs(x - center[0]) <= radius and abs(y - center[1]) <= radius:
                     return name
         return None
+
+    # ------------------------------------------------------------------ #
+    #  Info badge hover tooltip
+    # ------------------------------------------------------------------ #
+    def _motion_xy(self, event, on_wave):
+        """Like `_event_image_xy`, but for whichever widget is actually
+        showing the preview right now. `img_label`'s rendered image is
+        letterboxed and centred (see `_event_image_xy`); `_wave_label`'s
+        image is stretched to fill it exactly (`_place_wave_label` renders at
+        the label's own size), so its origin is just the label's own corner
+        with no centering offset to compute."""
+        w, h = self._rendered_size
+        if w <= 0:
+            return None
+        if on_wave:
+            if self._wave_label is None:
+                return None
+            origin_x, origin_y = self._wave_label.winfo_rootx(), self._wave_label.winfo_rooty()
+        else:
+            origin_x = self.img_label.winfo_rootx() + (self.img_label.winfo_width() - w) / 2
+            origin_y = self.img_label.winfo_rooty() + (self.img_label.winfo_height() - h) / 2
+        return event.x_root - origin_x, event.y_root - origin_y
+
+    def _hit_info_badge(self, x, y):
+        """Whether image-local point `(x, y)` is on the info badge — a bit
+        more generous than the badge's drawn radius, same reasoning as the
+        chevron discs' hit box being the whole disc rather than a pixel-exact
+        shape."""
+        if not self._media_info:
+            return False
+        w, h = self._rendered_size
+        if w <= 0 or h <= 0:
+            return False
+        badge = self._info_badge_for(w, h)
+        bx, by = self._info_badge_position(w, h, badge)
+        cx, cy = bx + badge.width / 2, by + badge.height / 2
+        radius = badge.width / 2 * 1.3
+        return (x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2
+
+    def _on_motion(self, event, on_wave=False):
+        """Shows/hides the tooltip as the cursor crosses the info badge's
+        hit region — bound to both `img_label` and `_wave_label`, since
+        which one is actually showing the preview depends on strip state."""
+        xy = self._motion_xy(event, on_wave)
+        if xy is not None and self._hit_info_badge(*xy):
+            self._show_info_tooltip()
+        else:
+            self._hide_info_tooltip()
+
+    @staticmethod
+    def _mastering_text(info):
+        """The tooltip's HDR sub-line — whether the source actually carries
+        ST 2086 mastering-display luminance / MaxCLL / MaxFALL (`core.
+        utilities.probe_media`'s `mastering_max_nits`/`max_cll`/`max_fall`),
+        since that's what the BT.2390 tonemap (`core.utilities.
+        libplacebo_tonemap_vf`) reads to know the source's real peak
+        brightness — confirmed directly that its absence measurably changes
+        the tonemapped result, and that mastering peak + a real MaxCLL
+        *together* (not the peak alone) now decide whether the filter's
+        `peak_detect` runs at all (see that function's docstring for the
+        real-world numbers in both directions — trusting a peak with no
+        real MaxCLL backing made one real file's output measurably worse).
+        Only ever called once `info["hdr"]` is already true, so there's
+        always something to say here, even when it's "not tagged"."""
+        max_nits = info.get("mastering_max_nits")
+        # A literal 0 for MaxCLL/MaxFALL reads the same as absent, not "zero
+        # nits" -- confirmed against a real-world file (a commercial HDR10
+        # encode) whose Content light level SEI is genuinely present but
+        # carries 0/0, which every tool that surfaces it (MediaInfo
+        # included) treats as "the encoder didn't bother setting this"
+        # rather than a real measurement, since no video has zero peak
+        # brightness.
+        max_cll = info.get("max_cll") or None
+        max_fall = info.get("max_fall") or None
+        if max_nits is None and max_cll is None and max_fall is None:
+            return "Mastering: not tagged — tonemap uses scene analysis"
+        bits = []
+        if max_nits is not None:
+            bits.append(f"{max_nits:g} nits")
+        else:
+            bits.append("not tagged")
+        if max_cll is not None or max_fall is not None:
+            cll = f"{max_cll:g}" if max_cll is not None else "?"
+            fall = f"{max_fall:g}" if max_fall is not None else "?"
+            bits.append(f"MaxCLL {cll}/{fall}")
+        return "Mastering: " + " · ".join(bits)
+
+    def _info_text(self):
+        """The tooltip's body text, built from whatever `probe_media` managed
+        to identify — every line is conditional, so a partial probe (or one
+        still in flight) just shows less rather than a row of blanks."""
+        info = self._media_info or {}
+        lines = []
+        if info.get("container"):
+            lines.append(f"Container: {info['container']}")
+
+        if info.get("has_video") is False:
+            lines.append("Video: none")
+        elif info.get("video"):
+            bits = [info["video"]]
+            if info.get("video_profile"):
+                bits.append(info["video_profile"])
+            if info.get("video_level"):
+                bits.append(f"L{info['video_level']}")
+            if info.get("width") and info.get("height"):
+                bits.append(f"{info['width']}x{info['height']}")
+            if info.get("hdr"):
+                bits.append("HDR")
+            lines.append("Video: " + " · ".join(bits))
+            if info.get("hdr"):
+                lines.append(self._mastering_text(info))
+
+        if info.get("has_audio") is False:
+            lines.append("Audio: none")
+        elif info.get("audio"):
+            bits = [info["audio"]]
+            for key in ("audio_channels", "audio_sample_rate", "audio_bitrate"):
+                if info.get(key):
+                    bits.append(info[key])
+            streams = info.get("audio_streams") or []
+            if len(streams) > 1:
+                bits.append(f"{len(streams)} tracks")
+            lines.append("Audio: " + " · ".join(bits))
+
+        if info.get("duration"):
+            lines.append(f"Duration: {self._format_duration(info['duration'])}")
+        if info.get("file_size"):
+            lines.append(f"Size: {self._format_size(info['file_size'])}")
+
+        return "\n".join(lines) if lines else "Gathering file info…"
+
+    @staticmethod
+    def _format_duration(total_seconds):
+        total_seconds = int(total_seconds)
+        hours, rest = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(rest, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    @staticmethod
+    def _format_size(num_bytes):
+        size = float(num_bytes)
+        for unit in ("B", "KB", "MB", "GB"):
+            if size < 1024 or unit == "GB":
+                return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+            size /= 1024
+
+    def _show_info_tooltip(self):
+        """Opens the tooltip if it isn't already up. A borderless Toplevel,
+        same family as the toast/dropdown-panel popups elsewhere in this app
+        — a real per-pixel-transparent overlay isn't needed here (unlike the
+        toast), since the tooltip never sits over the video itself, only
+        beside/above the badge."""
+        if self._info_tooltip is not None:
+            return
+        top = tk.Toplevel(self)
+        top.overrideredirect(True)
+        try:
+            top.attributes("-topmost", True)
+        except Exception:
+            pass
+        border = get_active_theme()["primary"]
+        frame = tk.Frame(top, bg="#202020", highlightthickness=1, highlightbackground=border)
+        frame.pack()
+        label = tk.Label(
+            frame, text=self._info_text(), bg="#202020", fg="white",
+            justify="left", anchor="w", padx=10, pady=8, font=("Arial", 10),
+        )
+        label.pack()
+        self._info_tooltip = top
+        self._info_tooltip_label = label
+        self._position_info_tooltip()
+
+    def _update_info_tooltip(self):
+        """Refreshes the open tooltip's text in place — set_media_info calls
+        this so a probe landing while the user happens to be hovering doesn't
+        need a re-hover to show the fresh info."""
+        if self._info_tooltip_label is not None:
+            self._info_tooltip_label.configure(text=self._info_text())
+            self._position_info_tooltip()
+
+    def _position_info_tooltip(self):
+        """Anchors the tooltip just above the badge's corner of this widget —
+        upward, since the badge itself sits at the bottom of the preview and
+        a tooltip below it could run off the window."""
+        if self._info_tooltip is None:
+            return
+        self._info_tooltip.update_idletasks()
+        width = self._info_tooltip.winfo_reqwidth()
+        height = self._info_tooltip.winfo_reqheight()
+        x = self.winfo_rootx() + 8
+        y = self.winfo_rooty() + self.winfo_height() - height - 34
+        self._info_tooltip.geometry(f"{width}x{height}+{max(0, x)}+{max(0, y)}")
+
+    def _hide_info_tooltip(self):
+        if self._info_tooltip is not None:
+            self._info_tooltip.destroy()
+            self._info_tooltip = None
+            self._info_tooltip_label = None
 
     def _in_chevron_band(self, x, w):
         """True if `x` is within the left/right edge strip the chevrons live
@@ -1020,6 +1377,13 @@ class ThumbnailCarousel(ctk.CTkFrame):
         hi = min(max(0, n - _DOT_CLUSTER), index)
         return max(lo, min(index - (_DOT_CLUSTER - 1) // 2, hi))
 
+    def current_index(self):
+        """The frame index currently shown — read by callers that need to
+        restore scrub position across an external frame-list swap (e.g.
+        EncodingTab's HDR->SDR preview toggling between the raw and
+        tone-mapped sets via `set_frames`+`sync_index`)."""
+        return self._index
+
     def sync_index(self, index):
         """Jump to preview `index` with no slide — used to mirror the other
         tab's carousel position (LlamaGUI.sync_preview_index) and to restore
@@ -1039,6 +1403,7 @@ class ThumbnailCarousel(ctk.CTkFrame):
         against a destroyed widget (a live theme rebuild destroys the carousel
         along with its tab)."""
         self._stop_wave()
+        self._hide_info_tooltip()
         if self._wave_label is not None:
             self._wave_label.destroy()
             self._wave_label = None

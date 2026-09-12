@@ -515,7 +515,13 @@ combination unrepresentable rather than something a dialog has to catch.
   `profiles`/`levels` list means the codec has none and the UI disables that
   dropdown rather than borrowing H.264's values.
 - `audio_bitrates_for(codec)` — empty for copy/lossless codecs, whose rate
-  isn't ours to set.
+  isn't ours to set. `AUDIO_BITRATES`' own entries are display text, not
+  raw numbers — `"96 kbps"` … `"768 kbps"`, then `"1 Mbps"`/`"1.5 Mbps"`
+  once a value clears 1024 kbps (`_format_bitrate`; 1024/1536 are exact
+  multiples of 1024 so the division is always clean). `bitrate_arg_for`
+  converts a display value back to the plain `"<n>k"` ffmpeg's `-b:a`
+  wants; `bitrate_display_for` snaps a probed bits/sec value to the
+  closest display entry.
 - `containers_for(video_codec, audio_codec)` — **the Muxing inversion**:
   given the codecs a source holds, which containers can it be remuxed into
   without re-encoding. A `None` codec constrains nothing, so an unprobed
@@ -752,9 +758,9 @@ and breaks every `.configure()` call on the widget. It's `self._names`.
 ### `components/summary_panel.py`
 
 Defines **`SummaryPanel(ctk.CTkFrame)`** — the Overview sub-tab's export
-rundown, a compact `label  value` list (`Video` / `Audio` / `Trim` — the
-output container is not a row, since the Output Format dropdown right beside
-it already says it).
+rundown, a compact `label  value` list (`Video` / `Audio` / `Length` —
+renamed from `Trim`; the output container is not a row, since the Output
+Format dropdown right beside it already says it).
 
 It solves a structural problem, not just an informational one: the Video and
 Audio sub-tabs each hide the other's state, and several rules span them (the
@@ -770,6 +776,15 @@ churn at that rate flickers. `values` is a list of `(text, color)` pairs
 matching the construction order; `color=None` means the normal label colour,
 and `STOP_RED` is what a removed stream's `— removed —` uses. A short list
 leaves trailing rows blank rather than raising.
+
+The value column is a **`MarqueeLabel`**, not a plain `CTkLabel` — a
+genuinely long value (a multi-stream audio summary with a "+N more" tail)
+would otherwise silently overflow rather than scroll (`CTkLabel` ignores a
+width smaller than its natural text size), past this panel's own narrow
+budget. This needed `MarqueeLabel` extended with a `text_color` override
+(see that file's own entry below) so the `STOP_RED` "removed" colouring
+still works through a `MarqueeLabel` the same way it did through a
+`CTkLabel`.
 
 ### `components/marquee_label.py`
 
@@ -800,6 +815,15 @@ measured and drawn through `_apply_font_scaling` so the overflow test matches
 what's actually rendered. `_restart` re-decides scroll-vs-static on every
 width change and `set_text`; the `after` loop is cancelled on `<Unmap>` /
 `<Destroy>`.
+
+`configure(text_color=…)` is also intercepted (`set_text_color`), added so
+`SummaryPanel` could switch its value column to `MarqueeLabel` without
+losing its `STOP_RED` "removed stream" colouring — the override is tracked
+separately (`self._color_override`) from the resolved, appearance-mode
+-applied `_fill` actually drawn, so a light/dark flip re-resolves the
+override instead of falling back to the plain theme default. A falsy
+`color` clears the override back to `CTkLabel`'s own theme colour, the
+same `color or default` convention `SummaryPanel.set_values` already used.
 
 ### `components/animated_switch.py`
 
@@ -1133,7 +1157,7 @@ primary). From top to bottom:
    the moment it's packed*, so packing the spacer first would starve
    anything packed after it of space regardless of its own `side`.
    `footer_label` (copyright/version text, `"{year} Yezan Smadi
-   v0.5.0-alpha.4"`, in `theme["primary_text"]`) is packed first so it
+   v0.5.0-alpha.5"`, in `theme["primary_text"]`) is packed first so it
    claims the literal bottom edge; `btn_settings` packs second, landing
    just above it.
 5. `self.spacer` — a transparent, `fill="both", expand=True` frame packed
@@ -1220,9 +1244,11 @@ user clicks on a `:` separator or between characters).
 string) read the current value; `set(total_seconds)` writes a new value and
 redraws; `increment()`/`decrement()` step by exactly one second (with
 `decrement` floored at 0); `set_state("normal"|"disabled")` enables/disables
-all three child widgets and greys out the text when disabled (used by the
-"Retain Video Length" checkbox in both Muxing and Encoding tabs to disable
-the time fields when the source length is being kept as-is).
+all three child widgets and greys out the text when disabled. (There is no
+"Retain Video Length" checkbox any more in either tab — `Duration 00:00:00`
+already means "to the end of the file", so it was a second way to say the
+same thing; this method's still here for any future case that needs to
+grey a spinner out.)
 
 ---
 
@@ -1272,28 +1298,39 @@ window's bottom edge and the flexible `DropBox` absorbs what's left:
 **Sub-tab panels.** `_build_overview_panel(left_parent, right_parent)`,
 `_build_video_panel(...)` and `_build_audio_panel(...)` each return a
 `(left, right)` frame pair, built once and returned unpacked.
-`_pin_options_height()` measures each pair, then **freezes every panel to one
-footprint and `.place()`s all six stacked** — `(widest_left, tallest)` for
-the `left` frames, `(height=tallest, relwidth=1.0)` for the `right`, each
+`_pin_options_height()` measures each pair, then **pins every panel's own
+height to Overview's own measured height specifically (the tallest of the
+three) while width stays independent per panel**, and `.place()`s all six
+stacked — `(own_width, shared_height)` for the `left` frames,
+`(height=shared_height, relwidth=1.0)` for the `right`, each
 `pack_propagate(False)`, with an `expand=True` spacer packed `before` the
 first content row so the content floats to the panel's bottom.
-`_show_subtab(name)` is then just `left.lift(); right.lift()` — no re-pack,
-no relayout, no synchronous flush. One shared footprint + `lift` is what
-stops the switch flicker: the incoming panel covers exactly what the outgoing
-one did (no strip of stale pixels above a shorter panel, no sideways shift of
-the rundown), and there's no progressive dropdown redraw. `_prewarm_subtabs`
-(bound once to `<Map>`) cycles each panel onscreen briefly right after the
-tab appears so nothing is left unpainted-behind-another for its first real
-reveal. `options_row` is also height-pinned so the preview above never
-resizes.
+`_show_subtab(name)` resizes `left_col`/`right_col` to the target panel's
+own width (height stays the shared constant) and lifts — no re-pack, no
+relayout, no synchronous flush. Height didn't used to be shared — each
+panel kept its own — which let `controls_frame`'s total height (and so how
+much room the DropBox/carousel above it got) change on every sub-tab
+switch, visibly resizing the preview; sharing it via Overview's own height
+fixed that, but only once every panel's own `left`/`right` frame was built
+*at* that shared height from construction — patching just the outer
+`left_col`/`right_col` containers at switch time left a shorter panel's
+own frame not fully covering a taller *inactive* sibling placed behind it
+at the same origin, so that sibling's own content bled through the
+uncovered strip beneath the shorter one (confirmed on Muxing's own Video
+panel: Overview's trim spinners visible through its bottom ~32px). One
+shared footprint + `lift` is what stops the switch flicker on top of that:
+the incoming panel covers exactly what the outgoing one did, and there's
+no progressive dropdown redraw. `_prewarm_subtabs` (bound once to `<Map>`)
+cycles each panel onscreen briefly right after the tab appears so nothing
+is left unpainted-behind-another for its first real reveal.
 - **Overview** — `Output Format` + the preset row (`Preset` dropdown +
   `Save` + `Delete`) on one line, the single global trim (`Start Time` /
   `Clip Duration` `TimeSpinner`s + an `A/V Sync` checkbox to their right)
   below, and the `SummaryPanel` rundown on the right. The spinners pass
-  `command=_on_trim_change`, so the rundown's Trim line updates live as the
-  user types. Format and Preset share a row specifically to keep the left
-  column narrow: the rundown needs real width and the spinners are the
-  widest things here.
+  `command=_on_trim_change`, so the rundown's Length line (renamed from
+  Trim) updates live as the user types. Format and Preset share a row
+  specifically to keep the left column narrow: the rundown needs real
+  width and the spinners are the widest things here.
 - **Video** / **Audio** — a track picker (`Auto` / `Track 1-3`) plus a
   **`Browse…`** button, with the panel's Strip checkbox on the right.
 
@@ -1306,9 +1343,13 @@ reports the backing path only when such an entry is actually selected, so
 
 **`_sync_controls()`** is the single constraint pass (see the same-named
 method on `EncodingTab` for the general rationale). Muxing's rules:
-1. stream presence — ticking one Strip disables the other, so an empty file
-   is unreachable; `SubTabBar.set_marked` turns the other tab button red
-   so the hidden panel's state stays visible;
+1. stream presence — ticking one Strip disables the other (via
+   `_set_strip_enabled`, which also swaps the disabled checkbox's own
+   fill/border to grey — a bare `state="disabled"` alone leaves a
+   `CTkCheckBox`'s destructive `STOP_RED` fill fully bright, since it only
+   dims its own text label; see `EncodingTab`'s copy of the same fix), so
+   an empty file is unreachable; `SubTabBar.set_marked` turns the other
+   tab button red so the hidden panel's state stays visible;
 2. track lists rebuilt to carry any browsed-in external entry;
 3. **the container inversion** — `formats.containers_for(video, audio)`,
    where a stripped or unprobed stream contributes `None` and constrains
@@ -1327,8 +1368,15 @@ extensions); `_reveal_preview()` (fired once by the carousel's
 `on_populated` — packs the carousel in, unpacks the `DropBox`);
 `on_media_info(info)` (a probe landed — adopt the source's container as the
 output default while `_auto_format` says the user hasn't picked one, then
-re-sync); `_autofill_output_path()` (`"<folder>/<basename>_muxed<fmt>"`,
-only while `_auto_output` says the path is still ours);
+re-sync); `_autofill_output_path()` (`"<directory>/<basename>_muxed<fmt>"` —
+the FILENAME always re-derives from whichever file was just imported; only
+the DIRECTORY persists, from whatever's currently in the field, whether
+that's the default save location or somewhere the user last Browsed to.
+Used to gate the whole refresh on `_auto_output` — i.e. skip it entirely
+once the user had Browsed a custom path even once — which silently froze
+the filename on the previous input for the rest of the session; a
+directory the user picked is worth remembering across a file swap, a
+stale filename from the previous input never is);
 `_on_format_change()`; `select_save_location()`; the preset block
 (`_refresh_preset_menu` / `_on_preset_selected` / `_on_preset_save` /
 `_on_preset_delete`); `_gather_settings()` / `_apply_settings()` /
@@ -1356,17 +1404,32 @@ There is no `Retain Video Length` checkbox: `Duration 00:00:00` already
 means "to the end of the file", so it was a second way to say the same thing
 and an ambiguous one whenever the two disagreed.
 
-**Video panel** — `encoder_menu` / `profile_menu` / `level_menu` on the
-left; `strip_video_check` (destructive `STOP_RED`, `checkmark_color` via
-`readable_text_on`), the label-left `HDRtoSDR` **`AnimatedSwitch`**
-(`text=""`, `width=42` so `anchor="e"` lands the toggle flush right rather
-than leaving phantom label space), and the quality slider on the right. The
-slider is always built reversed (`from_`=worst, `to`=best) so it reads
-low-quality-left whichever scale is active.
+**Video panel** — `encoder_menu` / `profile_menu` / `level_menu` /
+`speed_menu` ("Encoder Preset" on screen) on the left, with the quality
+slider directly beneath that row — the slider now spans the row's full
+width ("Low" flush with Encoder's left edge, "Placebo" flush with Encoder
+Preset's right edge), not a centered fixed-width unit. The right column
+holds the label-left `HDRtoSDR` **`AnimatedSwitch`** (`text=""`, `width=42`
+so `anchor="e"` lands the toggle flush right rather than leaving phantom
+label space) pinned to the *top* — aligned with the dropdown row opposite
+it, via a special case in `_pin_options_height` — then a flexible spacer,
+then `strip_video_check` (destructive `STOP_RED`, `checkmark_color` via
+`readable_text_on`) pinned to the *bottom*, mirroring where `strip_audio_
+check` sits alone in the Audio panel. HDR->SDR and Strip Video used to sit
+stacked directly on top of each other near the bottom; the two are now
+deliberately separated so they read as distinct controls. Both `hdr_switch`
+and the Strip checkboxes get their disabled *look* from `_set_hdr_enabled`/
+`_set_strip_enabled`, not a bare `state="disabled"` — `CTkSwitch`/
+`CTkCheckBox` only dim their own text label on disabled, leaving the
+knob/track or the destructive fill/border fully bright otherwise (see
+CLAUDE.md's Known Issues).
 
 **Audio panel** — `audio_codec_menu` / `audio_bitrate_menu` /
 `audio_channels_menu` / `audio_samplerate_menu` on one row, mirroring the
-codec row, with `strip_audio_check` on the right.
+codec row, with `strip_audio_check` on the right. `passthru_check`'s own
+label reads "Passthru" (no colon) and both it and the checkbox are packed
+`anchor="center"` rather than `anchor="w"`, so the (much narrower) checkbox
+mark centers under the word instead of sitting under its leading edge.
 
 **`_sync_controls()` — the only place derived UI state is decided.** Every
 control's `command` calls `_on_control_change`, which just re-runs it; it
