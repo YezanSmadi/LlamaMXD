@@ -30,14 +30,20 @@ NONE_LABEL = "— none —"
 PRESET_KEYS = {
     "Encoding": [
         "output_format", "av_sync",
-        "encoder", "profile", "level", "quality", "hdr_to_sdr", "strip_video",
-        "audio_codec", "audio_bitrate", "audio_channels", "audio_sample_rate",
+        "encoder", "profile", "level", "speed", "quality", "hdr_to_sdr", "strip_video",
         "strip_audio",
     ],
     "Muxing": [
         "output_format", "av_sync", "strip_video", "strip_audio",
     ],
 }
+# `audio_streams` (Encoding's multi-stream track picks + per-stream codec
+# settings) is deliberately excluded, same precedent as Muxing's video_track/
+# audio_track: which of a *particular file's* streams to include, and how
+# many it even has, is job state, not a recipe -- a preset loaded onto a
+# different file shouldn't try to reproduce track indices that may not even
+# exist on it. A preset load leaves whatever the current file's own probe
+# already set up alone.
 
 
 def _read_all():

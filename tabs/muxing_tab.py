@@ -2,7 +2,7 @@ import os
 import customtkinter as ctk
 from tkinter import filedialog
 
-from components.dialogs import ask_text, ask_yes_no, show_message
+from components.dialogs import ask_text, ask_yes_no, confirm_output_path, show_message
 from components.drop_box import DropBox
 from components.dropdown import ThemedDropdown
 from components.marquee_label import MarqueeLabel
@@ -14,6 +14,11 @@ from core import formats, presets
 from core.theme import get_active_theme, readable_text_on, STOP_RED, STOP_RED_HOVER
 
 _DISABLED_LABEL = "gray50"
+# Strip Video/Strip Audio's own fill/border/checkmark when the OTHER strip
+# (or an absent stream) disables them — state="disabled" alone doesn't touch
+# a CTkCheckBox's own colours (only its text label dims), so the destructive
+# STOP_RED would otherwise stay fully bright regardless of state.
+_DISABLED_CHECK = "gray40"
 
 # Track choices offered for each stream. There's no "None" entry — removing a
 # stream is the Strip checkbox's job, and having two controls that both mean
@@ -163,6 +168,7 @@ class MuxingTab(ctk.CTkFrame):
             on_reselect=self.select_input_file,
             on_populated=self._reveal_preview,
             on_index=self.app.sync_preview_index,
+            on_file_selected=self.app.update_global_file,
         )
 
         self.drop_box = DropBox(
@@ -222,7 +228,7 @@ class MuxingTab(ctk.CTkFrame):
 
         self.start_frame = ctk.CTkFrame(master=self.trim_row, fg_color="transparent")
         self.start_frame.pack(side="left", anchor="s")
-        self.start_label = ctk.CTkLabel(master=self.start_frame, text="Start Time:", font=("Arial", 11, "bold"))
+        self.start_label = ctk.CTkLabel(master=self.start_frame, text="Start Time:", font=("Arial", 12, "bold"))
         self.start_label.pack(anchor="w", pady=(0, 1))
         self.start_time_spinner = TimeSpinner(
             master=self.start_frame, initial_seconds=0, command=self._on_trim_change
@@ -231,7 +237,7 @@ class MuxingTab(ctk.CTkFrame):
 
         self.duration_frame = ctk.CTkFrame(master=self.trim_row, fg_color="transparent")
         self.duration_frame.pack(side="left", anchor="s", padx=(14, 0))
-        self.duration_label = ctk.CTkLabel(master=self.duration_frame, text="Clip Duration:", font=("Arial", 11, "bold"))
+        self.duration_label = ctk.CTkLabel(master=self.duration_frame, text="Clip Duration:", font=("Arial", 12, "bold"))
         self.duration_label.pack(anchor="w", pady=(0, 1))
         self.duration_time_spinner = TimeSpinner(
             master=self.duration_frame, initial_seconds=0, command=self._on_trim_change
@@ -241,12 +247,15 @@ class MuxingTab(ctk.CTkFrame):
         # A/V Sync — align the audio and video start and pass through the
         # streams' common metadata. Sits to the right of the trim spinners.
         self.av_sync_check = ctk.CTkCheckBox(
-            master=self.trim_row, text="A/V Sync", font=("Arial", 11, "bold"),
+            master=self.trim_row, text="A/V Sync", font=("Arial", 12, "bold"),
             command=self._on_control_change,
         )
+        # On by default (matches Encoding); a no-op here today since Muxing
+        # is always -c copy -- see build_mux_command's comment.
+        self.av_sync_check.select()
         self.av_sync_check.pack(side="left", anchor="s", padx=(16, 0), pady=(0, 4))
 
-        self.summary = SummaryPanel(master=right, labels=["Video", "Audio", "Trim"])
+        self.summary = SummaryPanel(master=right, labels=["Video", "Audio", "Length"])
         self.summary.pack(fill="x", anchor="s")
 
         return left, right
@@ -322,7 +331,7 @@ class MuxingTab(ctk.CTkFrame):
         frame = ctk.CTkFrame(master=parent, fg_color="transparent")
         frame.pack(side="left", anchor="s", padx=padx)
 
-        label = ctk.CTkLabel(master=frame, text=label_text, font=("Arial", 11, "bold"))
+        label = ctk.CTkLabel(master=frame, text=label_text, font=("Arial", 12, "bold"))
         label.pack(anchor="w", pady=(0, 1))
 
         menu = ThemedDropdown(master=frame, values=values, width=width, command=command)
@@ -340,31 +349,64 @@ class MuxingTab(ctk.CTkFrame):
         }
 
     def _pin_options_height(self):
-        """Freezes every sub-tab panel to one box (tallest panel's height,
-        widest left panel's width), floats its content to the bottom, and
-        **stacks all six with `.place()`** so `_show_subtab` is a pure
-        `lift()` — no re-pack, no relayout, no vacated strip of stale pixels
-        above a shorter panel, no sideways shift of the rundown. Measured,
-        not hardcoded."""
-        tallest, widest_left = 0, 0
-        for left, right in self._subtab_pairs().values():
+        """Measures each sub-tab panel's own natural footprint, floats its
+        content to the bottom of that footprint, and pre-places all six with
+        `.place()` so a switch is still cheap (no widget rebuild, no
+        progressive dropdown redraw).
+
+        **Width stays independent per sub-tab** (an earlier version shared
+        one width across all three, which meant a shared footprint had
+        whichever tab's own Video/Audio panel was widest squeezing Overview's
+        rundown to match, even on Muxing, where Video/Audio are just a track
+        picker + Browse button and there's no real reason Overview should be
+        forced that narrow). `_show_subtab` resizes `left_col` to the target
+        panel's own measured width before lifting it.
+
+        **Height, unlike width, IS shared across all three** — every panel's
+        `left`/`right` is built at Overview's own measured height, not its
+        own. `controls_frame` sits below the DropBox/preview carousel, packed
+        `side="bottom"`, so its actual height is exactly however much room
+        the DropBox above does *not* get in this fixed-size window — letting
+        each sub-tab's controls row size itself independently made the
+        DropBox visibly change size on every sub-tab switch. Overview's own
+        footprint (128px) measures as the tallest of the three here
+        (Video/Audio both clamp to the 96px floor), so pinning every sub-tab
+        to it costs nothing in clipping.
+
+        Building the *shorter* panels' own `left`/`right` at their own
+        smaller natural height, and only stretching the shared `left_col`/
+        `right_col` containers at switch time (an earlier version of this
+        method did exactly that), doesn't actually work: `left`/`right` are
+        real child windows, and Tk clips a child to its parent's rectangle,
+        not the other way around — a still-shorter, merely-lifted sibling
+        leaves whatever's directly behind it (a *taller* inactive sibling,
+        e.g. Overview's own trim row) visible in the leftover strip below it
+        once the now-taller `left_col`/`right_col` stops clipping that far
+        down. Confirmed by screenshot: Video's panel (96px) showed Overview's
+        trim spinners peeking through its bottom 32px once `left_col` grew to
+        Overview's 128px. Building every panel at the shared height from the
+        start avoids the problem entirely — each panel's own
+        spacer-before-content simply grows to fill the extra room instead of
+        leaving it uncovered."""
+        self._subtab_footprints = {}
+        natural = {}
+        for name, (left, right) in self._subtab_pairs().items():
             left.pack(anchor="w")
             right.pack(fill="x")
             self.options_row.update_idletasks()
-            tallest = max(tallest, left.winfo_reqheight(), right.winfo_reqheight())
-            widest_left = max(widest_left, left.winfo_reqwidth())
+            natural[name] = (left.winfo_reqwidth(), left.winfo_reqheight(), right.winfo_reqheight())
             left.pack_forget()
             right.pack_forget()
 
-        height = max(tallest, 96)
-        self.options_row.configure(height=height)
-        self.options_row.pack_propagate(False)
-        self.left_col.configure(width=widest_left, height=height)
-        self.right_col.configure(height=height)
+        _, overview_left_req, overview_right_req = natural["Overview"]
+        shared_height = max(overview_left_req, overview_right_req, 96)
 
-        for left, right in self._subtab_pairs().values():
-            left.configure(width=widest_left, height=height)
-            right.configure(height=height)
+        for name, (left, right) in self._subtab_pairs().items():
+            left_width, _, _ = natural[name]
+            self._subtab_footprints[name] = (left_width, shared_height)
+
+            left.configure(width=left_width, height=shared_height)
+            right.configure(height=shared_height)
             for frame in (left, right):
                 frame.pack_propagate(False)
                 kids = frame.pack_slaves()
@@ -375,11 +417,30 @@ class MuxingTab(ctk.CTkFrame):
             left.place(x=0, y=0)
             right.place(x=0, y=0, relwidth=1.0)
 
+        self.options_row.pack_propagate(False)
+
     def _show_subtab(self, name):
-        """Raises the chosen panel pair — a pure `lift()` (all six are
-        pre-placed in one stacked footprint by `_pin_options_height`)."""
+        """Resizes `left_col`/`right_col`/`options_row` to the target
+        panel's own measured *width* (`_subtab_footprints`, from
+        `_pin_options_height`) and raises it, but always at the **Overview**
+        panel's height rather than the target's own — see `_pin_options_
+        height`'s docstring on why the controls row's height has to be one
+        constant across all three sub-tabs regardless of each one's own
+        natural content height. `right_col`'s width isn't set directly — it
+        follows `left_col`'s (via its own `fill="x", expand=True` pack)
+        automatically, and the placed `right` panel's `relwidth=1.0` tracks
+        `right_col`'s width live, so Overview's rundown genuinely widens
+        when Video/Audio's wider left column isn't the one occupying
+        `left_col` any more."""
         self._active_subtab = name
         left, right = self._subtab_pairs().get(name, self._subtab_pairs()["Overview"])
+        left_width, _ = self._subtab_footprints.get(
+            name, (self.left_col.winfo_reqwidth(), 96)
+        )
+        height = self._subtab_footprints["Overview"][1]
+        self.options_row.configure(height=height)
+        self.left_col.configure(width=left_width, height=height)
+        self.right_col.configure(height=height)
         left.lift()
         right.lift()
 
@@ -414,7 +475,7 @@ class MuxingTab(ctk.CTkFrame):
         track dropdown as `External: <name>`, which `_sync_controls` keeps in
         the option list and `_gather_settings` reports alongside the track."""
         if kind == "video":
-            title, types = "Select Video Source", [("Video Files", "*.mp4 *.mkv *.avi *.mov *.webm")]
+            title, types = "Select Video Source", [("Video Files", "*.mp4 *.mkv *.avi *.mov *.webm *.mxf")]
         else:
             title, types = "Select Audio Source", [
                 ("Audio / Video Files", "*.mp3 *.aac *.ac3 *.flac *.opus *.wav *.m4a *.mp4 *.mkv *.mov")
@@ -442,6 +503,23 @@ class MuxingTab(ctk.CTkFrame):
             values.append(_EXTERNAL_PREFIX + os.path.basename(external_path.replace("\\", "/")))
         return values
 
+    def _audio_track_values(self, external_path):
+        """The Audio Track list, each real track annotated with its probed
+        codec name ("Track 1 (AAC)") when known — `probe_media`'s
+        `audio_streams`, matched by 0-based index. "Auto" and a slot the
+        source doesn't actually have stay unlabeled."""
+        streams = {s["index"]: s for s in (self.app.media_info.get("audio_streams") or [])}
+        values = ["Auto"]
+        for i in range(1, len(_STREAM_TRACKS)):
+            label = f"Track {i}"
+            stream = streams.get(i - 1)
+            if stream and stream.get("codec"):
+                label += f" ({stream['codec']})"
+            values.append(label)
+        if external_path:
+            values.append(_EXTERNAL_PREFIX + os.path.basename(external_path.replace("\\", "/")))
+        return values
+
     def _external_for(self, menu, path):
         """The external path backing `menu`'s current selection, or "" when
         an ordinary track of the primary input is selected."""
@@ -461,41 +539,52 @@ class MuxingTab(ctk.CTkFrame):
         call order never matters and no two rules can fight.
 
         The rules here:
-          1. stream presence — both stripped would write an empty file
+          1. stream presence — both stripped would write an empty file; a
+             stream the source doesn't have at all reads the same as
+             stripped (red tab, greyed panel) without touching the checkbox
           2. track lists carry whatever external file has been browsed in
           3. **the container inversion** — since nothing is re-encoded, the
              source's own codecs decide which containers are reachable
-          4. a stripped stream disables its own panel's controls
+          4. a stripped or absent stream disables its own panel's controls
           5. the Overview rundown
         """
         stripping_video = bool(self.strip_video_check.get())
         stripping_audio = bool(self.strip_audio_check.get())
+        info = self.app.media_info
+        # has_video/has_audio is False only once a probe has genuinely run
+        # and found no such stream — None ("unknown") must never read absent.
+        video_absent = info.get("has_video") is False
+        audio_absent = info.get("has_audio") is False
 
-        # 1. Stream presence.
-        self.strip_video_check.configure(state="disabled" if stripping_audio else "normal")
-        self.strip_audio_check.configure(state="disabled" if stripping_video else "normal")
-        self.sub_tab_bar.set_marked("Video", stripping_video)
-        self.sub_tab_bar.set_marked("Audio", stripping_audio)
+        # 1. Stream presence. A stream the source simply doesn't have gets
+        # the same red mark as a deliberate strip, and its Strip checkbox is
+        # disabled (nothing to strip) but never forced checked or unchecked.
+        self._set_strip_enabled(self.strip_video_check, not (stripping_audio or video_absent))
+        self._set_strip_enabled(self.strip_audio_check, not (stripping_video or audio_absent))
+        self.sub_tab_bar.set_marked("Video", stripping_video or video_absent)
+        self.sub_tab_bar.set_marked("Audio", stripping_audio or audio_absent)
         # The preview reflects it too: waveform for a stripped video, mute
-        # badge for stripped audio.
-        self.carousel.set_strip_state(stripping_video, stripping_audio)
+        # badge for stripped audio. A source that never had an audio stream
+        # gets the same mute badge as a deliberate strip — there's nothing to
+        # hear either way, and the checkbox above is already disabled for it.
+        self.carousel.set_strip_state(stripping_video, stripping_audio or audio_absent)
 
-        # 2. Track lists (+ any browsed-in external entry).
+        # 2. Track lists (+ any browsed-in external entry). Audio's list
+        # additionally carries each real track's probed codec name.
         self.video_track_menu.set_values(self._track_values(self._video_ext_file))
-        self.audio_track_menu.set_values(self._track_values(self._audio_ext_file))
+        self.audio_track_menu.set_values(self._audio_track_values(self._audio_ext_file))
 
         # 3. Container inversion. A stripped stream constrains nothing, and
         # neither does an unprobed one — so an unknown file still offers
         # every container rather than being narrowed on a guess.
-        info = self.app.media_info
         video_codec = None if stripping_video else info.get("video")
         audio_codec = None if stripping_audio else info.get("audio")
         allowed = formats.containers_for(video_codec, audio_codec)
         self._retarget_container(allowed)
 
         # 4. Enabled states.
-        video_live = not stripping_video
-        audio_live = not stripping_audio
+        video_live = not stripping_video and not video_absent
+        audio_live = not stripping_audio and not audio_absent
         self._set_enabled(self.video_track_menu, self.video_track_label, video_live)
         self.video_browse_btn.configure(state="normal" if video_live else "disabled")
         self._set_enabled(self.audio_track_menu, self.audio_track_label, audio_live)
@@ -524,6 +613,24 @@ class MuxingTab(ctk.CTkFrame):
         if label is not None:
             label.configure(text_color=self._label_color if enabled else _DISABLED_LABEL)
 
+    @staticmethod
+    def _set_strip_enabled(checkbox, enabled):
+        """Strip Video/Strip Audio's disabled look — see the identical
+        helper on EncodingTab for why state="disabled" alone isn't enough
+        (CTkCheckBox only dims its text label on disabled, leaving the
+        destructive STOP_RED fill/border fully bright otherwise)."""
+        if enabled:
+            checkbox.configure(
+                state="normal", fg_color=STOP_RED, hover_color=STOP_RED_HOVER,
+                border_color=ctk.ThemeManager.theme["CTkCheckBox"]["border_color"],
+                checkmark_color=readable_text_on(STOP_RED),
+            )
+        else:
+            checkbox.configure(
+                state="disabled", fg_color=_DISABLED_CHECK, hover_color=_DISABLED_CHECK,
+                border_color=_DISABLED_CHECK, checkmark_color=_DISABLED_CHECK,
+            )
+
     def _on_trim_change(self, *_):
         """A trim spinner's value changed — refresh just the rundown so the
         trim line updates as the user types. Guarded on `_ready` so it's
@@ -540,6 +647,8 @@ class MuxingTab(ctk.CTkFrame):
 
         if self.strip_video_check.get():
             video = ("— removed —", STOP_RED)
+        elif info.get("has_video") is False:
+            video = ("— no video stream —", STOP_RED)
         else:
             bits = ["copy"]
             actual = formats.short_name(info.get("video"))
@@ -550,6 +659,8 @@ class MuxingTab(ctk.CTkFrame):
 
         if self.strip_audio_check.get():
             audio = ("— removed —", STOP_RED)
+        elif info.get("has_audio") is False:
+            audio = ("— no audio stream —", STOP_RED)
         else:
             bits = ["copy"]
             actual = formats.short_name(info.get("audio"))
@@ -564,13 +675,13 @@ class MuxingTab(ctk.CTkFrame):
         start = self.start_time_spinner.get_total_seconds()
         duration = self.duration_time_spinner.get_total_seconds()
         if not start and not duration:
-            trim = ("whole file", None)
+            length = ("Whole File", None)
         elif not duration:
-            trim = (f"{_hms(start)} → end · keyframe", None)
+            length = (f"{_hms(start)} → end · keyframe", None)
         else:
-            trim = (f"{_hms(start)} → {_hms(start + duration)} · keyframe", None)
+            length = (f"{_hms(start)} → {_hms(start + duration)} · keyframe", None)
 
-        self.summary.set_values([video, audio, trim])
+        self.summary.set_values([video, audio, length])
 
     # ------------------------------------------------------------------ #
     #  Presets
@@ -635,7 +746,7 @@ class MuxingTab(ctk.CTkFrame):
         """Allows user to pick a video file via file dialog."""
         file_path = filedialog.askopenfilename(
             title="Select Video File",
-            filetypes=[("Video Files", "*.mp4 *.mkv *.avi *.mov *.webm"), ("All Files", "*.*")],
+            filetypes=[("Video Files", "*.mp4 *.mkv *.avi *.mov *.webm *.mxf"), ("All Files", "*.*")],
         )
         if file_path:
             self.app.update_global_file(file_path)
@@ -646,6 +757,14 @@ class MuxingTab(ctk.CTkFrame):
         self.drop_box.pack_forget()
         if not self.carousel.winfo_ismapped():
             self.carousel.pack(pady=(2, 2), fill="both", expand=True)
+
+    def refresh_appearance(self):
+        """Called by `app.refresh_previews_appearance` right after a live
+        Appearance Mode switch — this tab is never rebuilt for that (unlike
+        a theme change), so anything that pinned a colour at construction
+        needs an explicit nudge to pick up the new mode."""
+        self.carousel.refresh_appearance()
+        self.sub_tab_bar.refresh_appearance()
 
     def on_media_info(self, info):
         """A probe of the selected file landed. Adopts the source's own
@@ -660,17 +779,32 @@ class MuxingTab(ctk.CTkFrame):
         self._sync_controls()
 
     def _autofill_output_path(self):
-        """Suggests '<default folder>/<input basename>_muxed<format>' in the
-        output field, while the user hasn't set their own path."""
-        current = self.save_entry.get().strip()
-        if current and current != self._auto_output:
-            return
+        """Refreshes the output field's FILENAME for the newly-selected
+        input file, every time — '<directory>/<input basename>_muxed
+        <format>'. The directory is whatever's currently in the field
+        (the default save location the first time, or wherever the user
+        last Browsed to since), never reset back to the default just
+        because a new file came in — see EncodingTab's own copy of this
+        method for the full reasoning (this used to gate on
+        `self._auto_output` and silently freeze the filename on the
+        previous input the moment the user Browsed a custom path once)."""
         input_file = self.app.current_file_path
         if not input_file:
             return
         base = os.path.splitext(os.path.basename(input_file.replace("\\", "/")))[0]
+        # The field may hold either a full file path or a bare directory
+        # (fresh off __init__, just `default_save_location` with no
+        # filename) -- tell them apart by whether there's a file extension
+        # to split off, or os.path.dirname() would strip the last real
+        # folder segment off a bare directory instead of leaving it alone.
+        current = self.save_entry.get().strip().replace("\\", "/")
+        if current and os.path.splitext(current)[1]:
+            directory = os.path.dirname(current)
+        else:
+            directory = current
+        directory = directory or self.app.default_save_location or ""
         suggested = os.path.normpath(
-            os.path.join(self.app.default_save_location or "", f"{base}_muxed{self.format_menu.get()}")
+            os.path.join(directory, f"{base}_muxed{self.format_menu.get()}")
         )
         self.save_entry.delete(0, "end")
         self.save_entry.insert(0, suggested)
@@ -794,9 +928,21 @@ class MuxingTab(ctk.CTkFrame):
 
     @staticmethod
     def _set_menu(menu, value):
-        """Selects `value` only if it's one of the menu's current options."""
-        if value is not None and value in menu.cget("values"):
+        """Selects `value` if it's one of the menu's current options, or —
+        so a settings dict saved before the Audio Track list carried a
+        "(codec)" suffix still lands on the right entry — by matching just
+        the leading "Track N"/"Auto"/"External: ..." token."""
+        if value is None:
+            return
+        values = menu.cget("values")
+        if value in values:
             menu.set(value)
+            return
+        prefix = value.split(" (")[0]
+        for candidate in values:
+            if candidate.split(" (")[0] == prefix:
+                menu.set(candidate)
+                return
 
     @staticmethod
     def _set_check(widget, on):
@@ -820,7 +966,11 @@ class MuxingTab(ctk.CTkFrame):
                 "Settings tab.",
             )
             return False
-        return True
+        queue_tab = self.app.tabs.get("Queue")
+        claimed = bool(queue_tab and queue_tab.claims_output(settings["output_path"]))
+        return confirm_output_path(
+            self.app, settings["output_path"], settings["input_file"], claimed
+        )
 
     # ------------------------------------------------------------------ #
     #  Queue hand-off
@@ -830,14 +980,18 @@ class MuxingTab(ctk.CTkFrame):
         if not self._validate_settings(settings):
             return
 
-        filename = settings["input_file"].split("/")[-1]
+        filename = os.path.basename(settings["input_file"].replace("\\", "/"))
         description = f"{filename}  ·  Direct Mux"
 
         queue_tab = self.app.tabs.get("Queue")
         if queue_tab:
             task_id = queue_tab.add_task(description, settings=settings, status="Queued", source_tab="Muxing")
-            queue_tab.start_task(task_id)
-            self.app.notify("Muxing job has begun.")
+            outcome = queue_tab.start_task(task_id)
+            self.app.notify({
+                "started": "Muxing job has begun.",
+                "next": "Muxing job will run next.",
+                "paused": "Muxing job will run next — the queue is paused.",
+            }[outcome])
         else:
             print(f"Queue tab unavailable — would have muxed now: {settings}")
 
@@ -846,7 +1000,7 @@ class MuxingTab(ctk.CTkFrame):
         if not self._validate_settings(settings):
             return
 
-        filename = settings["input_file"].split("/")[-1]
+        filename = os.path.basename(settings["input_file"].replace("\\", "/"))
         description = f"{filename}  ·  {settings['duration_secs']}s from {settings['start_secs']}s"
 
         queue_tab = self.app.tabs.get("Queue")

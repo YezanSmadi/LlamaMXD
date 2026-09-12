@@ -39,6 +39,12 @@ class MarqueeLabel(ctk.CTkFrame):
         self._avail = 0
         self._cy = 0
         self._job = None
+        # None = the plain CTkLabel theme color; a real value (e.g. STOP_RED)
+        # overrides it -- set via configure(text_color=...), same convention
+        # as a real CTkLabel. Tracked separately from `_fill` (the resolved,
+        # appearance-mode-applied colour actually drawn) so a light/dark flip
+        # re-resolves the override instead of falling back to the default.
+        self._color_override = None
 
         self._font = font if font is not None else ctk.CTkFont(size=12)
         # The scaled (family, size, style) tuple CTk would render this font at
@@ -73,26 +79,40 @@ class MarqueeLabel(ctk.CTkFrame):
     # ------------------------------------------------------------------ #
     def _draw(self, no_color_updates=False):
         """Keep the overlay canvas' background and text colour in step with
-        CTk's own redraws (appearance-mode flip, scaling change)."""
+        CTk's own redraws (appearance-mode flip, scaling change) -- re-applies
+        the colour override (if any) rather than always falling back to the
+        plain theme default, so it survives a live appearance-mode switch."""
         super()._draw(no_color_updates)
         if not hasattr(self, "_cv"):
             return
         self._cv.configure(bg=self._canvas.cget("bg"))
-        self._fill = self._apply_appearance_mode(
-            ctk.ThemeManager.theme["CTkLabel"]["text_color"]
-        )
+        color = self._color_override or ctk.ThemeManager.theme["CTkLabel"]["text_color"]
+        self._fill = self._apply_appearance_mode(color)
         self._cv.itemconfigure("txt", fill=self._fill)
 
     # ------------------------------------------------------------------ #
     #  Public API
     # ------------------------------------------------------------------ #
     def configure(self, require_redraw=False, **kwargs):
-        """Intercepts `text=` to feed the marquee; everything else passes
-        straight through to `CTkFrame.configure`."""
+        """Intercepts `text=`/`text_color=` to feed the marquee; everything
+        else passes straight through to `CTkFrame.configure`."""
+        if "text_color" in kwargs:
+            self.set_text_color(kwargs.pop("text_color"))
         if "text" in kwargs:
             self.set_text(kwargs.pop("text"))
         if kwargs or require_redraw:
             super().configure(require_redraw=require_redraw, **kwargs)
+
+    def set_text_color(self, color):
+        """Overrides the text colour (e.g. STOP_RED for a removed stream),
+        or clears the override back to the plain theme default when `color`
+        is falsy -- the same `color or default` convention SummaryPanel's
+        own set_values already uses for a real CTkLabel."""
+        self._color_override = color or None
+        self._fill = self._apply_appearance_mode(
+            color or ctk.ThemeManager.theme["CTkLabel"]["text_color"]
+        )
+        self._cv.itemconfigure("txt", fill=self._fill)
 
     def cget(self, key):
         """Reports the full (un-scrolled) string for `"text"`."""

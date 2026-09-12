@@ -132,6 +132,49 @@ def ask_yes_no(app, title, message):
     return MessageDialog(app, title, message, buttons=("Yes", "No")).show() == "Yes"
 
 
+def confirm_output_path(app, output_path, input_file, claimed=False):
+    """The pre-queue checks on where a job will write, shared by the
+    Encoding and Muxing tabs' `_validate_settings`. Returns True when the
+    job may be queued.
+
+    A folder or the input file itself is refused outright. A path that
+    already exists — or that another unfinished job will write (`claimed`,
+    from `QueueTab.claims_output`) — asks first, and No means the job isn't
+    queued at all. Asking here, at queue time, is what lets the queue itself
+    run without ever stopping to prompt."""
+    import os
+
+    if os.path.isdir(output_path):
+        show_message(
+            app, "Choose a File Name",
+            "The save location is a folder. Add a file name to it, or use "
+            "Browse to pick where the file should be saved.",
+        )
+        return False
+
+    target = os.path.normcase(os.path.abspath(output_path))
+    if input_file and target == os.path.normcase(os.path.abspath(input_file)):
+        show_message(
+            app, "Same File",
+            "The output can't overwrite the input file it's made from. "
+            "Choose a different name or folder.",
+        )
+        return False
+
+    if claimed or os.path.exists(output_path):
+        folder, name = os.path.split(os.path.abspath(output_path))
+        where = (
+            f"Another job in the queue is already set to save “{name}” in {folder}."
+            if claimed and not os.path.exists(output_path)
+            else f"A file named “{name}” already exists in {folder}."
+        )
+        return ask_yes_no(
+            app, "File Already Exists",
+            f"{where}\n\nDo you want to overwrite it? Choosing No won't queue this job.",
+        )
+    return True
+
+
 def ask_text(app, title, message, initial="", confirm="Save"):
     """Prompts for a single line of text (preset names). Returns the stripped
     string, or None if cancelled/closed or left blank — so callers only ever

@@ -36,12 +36,22 @@ class AnimatedSwitch(ctk.CTkSwitch):
         self._ease_to(1.0 if self._check_state else 0.0)
 
     def _draw(self, no_color_updates=False):
-        """CTk redraws (resize, appearance mode, a colour change) re-snap the
-        knob to 0/1 from `_check_state` — put it straight back wherever the
-        animation has it, unless a tick is already queued to do that."""
+        """CTk redraws (resize, appearance mode, a colour change, *or a hover
+        state change* — `_on_enter`/`_on_leave` both call this) re-snap the
+        knob to 0/1 from `_check_state`. Put it straight back wherever the
+        animation actually has it — unconditionally, not just when no tick is
+        in flight.
+
+        This used to skip the correction while `_anim_job` was set, on the
+        theory that the next queued tick would fix it anyway — but a redraw
+        can land *between* ticks (a stray hover during the ease, a tooltip,
+        anything that touches `_draw`), and for that one frame the knob would
+        visibly snap to the final position before the next tick pulled it
+        back: the reported jiggle. Reapplying every time is cheap (one
+        draw-engine `coords()` call, not a redraw) so there's no reason to
+        skip it."""
         super()._draw(no_color_updates)
-        if self._anim_job is None:
-            self._position_knob()
+        self._position_knob()
 
     # ------------------------------------------------------------------ #
     #  Animation

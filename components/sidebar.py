@@ -60,7 +60,7 @@ class Sidebar(ctk.CTkFrame):
         # second, landing just above it.
         self.footer_label = ctk.CTkLabel(
             master=self,
-            text=f"{datetime.now().year} Yezan Smadi     v0.5.0-alpha.4",
+            text=f"{datetime.now().year} Yezan Smadi     v0.5.0-alpha.5",
             font=ctk.CTkFont(size=10),
             text_color=theme["primary_text"],
         )
