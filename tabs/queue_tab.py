@@ -7,9 +7,10 @@ import tkinter
 import customtkinter as ctk
 
 from components.dialogs import ask_yes_no, show_message
-from core import ffmpeg_vars, formats
+from core import downloader, ffmpeg_vars, formats
 from core.ffmpeg_build import compile_command, uses_hdr_tonemap
 from core.ffmpeg_runner import FfmpegJob, partial_path
+from core.ytdlp_runner import YtDlpJob
 from core.utilities import extract_video_thumbnail
 from core.theme import get_active_theme, readable_text_on, STOP_RED, STOP_RED_HOVER
 
@@ -52,10 +53,16 @@ _DETAIL_SCROLL_HEIGHT = 140  # fixed so Encode/Mux popups match height; Encode's
 # "time" to format as HH:MM:SS, "bool" to format as Yes/No. Fields not present
 # in a given task's settings (e.g. GPU/CRF for a Mux task) are skipped.
 _DETAIL_FIELDS = [
+    # Downloader tasks: what was downloaded, and how.
+    ("title", "Title", None),
+    ("url", "Link", None),
     ("input_file", "Input File", None),
     ("output_path", "Output Path", None),
     ("encoder", "Encoder", None),
     ("output_format", "Format", None),
+    ("mode", "Mode", None),
+    ("video_codec", "Video Codec", None),
+    ("audio_codec", "Audio Codec", None),
     ("start_secs", "Start Time", "time"),
     ("duration_secs", "Clip Duration", "time"),
     ("av_sync", "A/V Sync", "bool"),
@@ -90,6 +97,13 @@ _VIDEO_DETAIL_KEYS = {
     "speed", "video_track", "video_track_file",
 }
 _AUDIO_DETAIL_KEYS = {"audio_track", "audio_track_file"}
+
+# Source tab name for a download task (the Downloader tab). Download jobs
+# are YtDlpJobs, which share FfmpegJob's control/event contract plus a
+# ("stage", text) event.
+_YTDLP = "Downloader"
+# A download row's status before yt-dlp reports its first stage.
+_PREPARING = "Preparing..."
 
 
 def _format_seconds(total_seconds):
@@ -344,7 +358,7 @@ class QueueTab(ctk.CTkFrame):
         thumb_label = ctk.CTkLabel(master=row, text="", width=_THUMB_SIZE[0], height=_THUMB_SIZE[1])
 
         thumb_label.pack(side="left", padx=(10, 8), pady=8)
-        self._load_thumbnail(thumb_label, settings.get("input_file"))
+        self._load_thumbnail(thumb_label, settings.get("input_file"), settings.get("thumbnail_url"))
 
         status_label = ctk.CTkLabel(master=row, text=status, width=80)
         remove_btn = ctk.CTkButton(
@@ -420,7 +434,7 @@ class QueueTab(ctk.CTkFrame):
         leaves the row looking rounded on all four corners, fill or no fill."""
         return self._flatten_color(row_frame.cget("bg_color"))
 
-    def _load_thumbnail(self, thumb_label, input_file):
+    def _load_thumbnail(self, thumb_label, input_file, thumbnail_url=None):
         """Gives a row a small preview frame of its input file, if any —
         without decoding video on the Tk thread, which used to hitch the UI
         every time a job was queued.
@@ -430,7 +444,26 @@ class QueueTab(ctk.CTkFrame):
         simply reused. Otherwise (e.g. queued before those frames landed) one
         frame is decoded on a worker thread and delivered via
         _drain_thumbnails — same worker/queue/poll pattern as the app's own
-        thumbnail loading."""
+        thumbnail loading.
+
+        A download task has no file yet — it shows the video's online
+        thumbnail instead: the one the Downloader tab's fetch already
+        downloaded when it's the same link, else fetched on a worker."""
+        if not input_file and thumbnail_url:
+            cache = getattr(self.app, "ytdlp_cache", None)
+            if cache and cache.get("thumb") is not None \
+                    and cache["info"].get("thumbnail") == thumbnail_url:
+                self._set_thumbnail(thumb_label, cache["thumb"])
+                return
+
+            def fetch():
+                self._thumb_results.put((thumb_label, downloader.download_thumbnail(thumbnail_url)))
+
+            self._thumb_pending += 1
+            threading.Thread(target=fetch, daemon=True).start()
+            if self._thumb_pending == 1:
+                self.after(80, self._drain_thumbnails)
+            return
         if not input_file:
             return
         cached = getattr(self.app, "_thumb_frames", None)
@@ -556,7 +589,7 @@ class QueueTab(ctk.CTkFrame):
             return
 
         self._detail_task_id = task_id
-        kind = "Encode" if row["source_tab"] == "Encoding" else "Mux"
+        kind = {"Encoding": "Encode", _YTDLP: "Download"}.get(row["source_tab"], "Mux")
         self.detail_title_label.configure(text=f"{kind} Details")
 
         settings = row["settings"]
@@ -780,7 +813,7 @@ class QueueTab(ctk.CTkFrame):
             if active["paused"]:
                 active["job"].resume()
                 active["paused"] = False
-                self.update_status(active["task_id"], self._running_label(active["task_id"]))
+                self.update_status(active["task_id"], self._running_label(active["task_id"], active))
             self._set_running(True)
             self._schedule_poll()
             return
@@ -837,9 +870,14 @@ class QueueTab(ctk.CTkFrame):
         self._process_next([task_id])
         return "started"
 
-    def _running_label(self, task_id):
-        """A row's in-progress status text: "Encoding..." or "Muxing..."."""
-        return "Encoding..." if self._rows[task_id]["source_tab"] == "Encoding" else "Muxing..."
+    def _running_label(self, task_id, active=None):
+        """A row's in-progress status text: "Encoding..." / "Muxing...", or
+        for a download, the last stage its job reported ("Downloading
+        video...", "Merging...")."""
+        source = self._rows[task_id]["source_tab"]
+        if source == _YTDLP:
+            return (active or {}).get("stage") or _PREPARING
+        return "Encoding..." if source == "Encoding" else "Muxing..."
 
     def _process_next(self, remaining_ids):
         """Launches the next Queued job in `remaining_ids` as a real ffmpeg
@@ -864,6 +902,9 @@ class QueueTab(ctk.CTkFrame):
             return
 
         self.update_status(task_id, self._running_label(task_id))
+        if row["source_tab"] == _YTDLP:
+            self._start_download(task_id, row, rest)
+            return
         # This job's values become the core.ffmpeg_vars globals and its argv
         # is compiled from them — both here on the Tk thread, so the worker
         # threads only ever see a plain list, never the shared module state.
@@ -892,6 +933,25 @@ class QueueTab(ctk.CTkFrame):
         self._active = {
             "task_id": task_id, "job": job, "rest": rest,
             "paused": False, "fraction": 0.0, "drawn": None,
+        }
+        job.start()
+        self._paint_fraction(self._active)
+        self._schedule_poll()
+
+    def _start_download(self, task_id, row, rest):
+        """_process_next for a Downloader task: a YtDlpJob built from the plan the
+        tab resolved at queue time. Its argv is built here on the Tk thread,
+        same as an ffmpeg job's."""
+        settings = row["settings"]
+        plan = settings.get("download")
+        if not plan or not settings.get("url") or not settings.get("output_path"):
+            self._fail_task(task_id, rest, "This download is missing its link or format choice.")
+            return
+        job = YtDlpJob(settings["url"], plan, settings["output_path"])
+        print("yt-dlp:", subprocess.list2cmdline(job.args))
+        self._active = {
+            "task_id": task_id, "job": job, "rest": rest,
+            "paused": False, "fraction": 0.0, "drawn": None, "stage": _PREPARING,
         }
         job.start()
         self._paint_fraction(self._active)
@@ -935,6 +995,13 @@ class QueueTab(ctk.CTkFrame):
         for event in active["job"].poll_events():
             if event[0] == "progress":
                 active["fraction"] = event[1]
+            elif event[0] == "stage":
+                # A download moved to its next part ("Downloading audio...",
+                # "Merging...") — the row's status follows; the bar doesn't
+                # restart.
+                active["stage"] = event[1]
+                if not active["paused"]:
+                    self.update_status(active["task_id"], event[1])
             else:
                 terminal = event   # "done" or "failed" — nothing follows it
                 break
@@ -1069,8 +1136,9 @@ class QueueTab(ctk.CTkFrame):
         if row:
             row["error"] = reason
             self.update_status(task_id, "Failed")
-            name = os.path.basename((row["settings"].get("input_file") or "").replace("\\", "/"))
-            verb = "encoded" if row["source_tab"] == "Encoding" else "muxed"
+            name = os.path.basename((row["settings"].get("input_file") or "").replace("\\", "/")) \
+                or row["settings"].get("title") or "This download"
+            verb = {"Encoding": "encoded", _YTDLP: "downloaded"}.get(row["source_tab"], "muxed")
             self._error_queue.append(f"“{name}” couldn't be {verb}.\n\n{reason}")
             self.after(0, self._show_errors)
         self._process_next(rest)

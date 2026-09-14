@@ -16,7 +16,7 @@ import os
 
 from PIL import Image, ImageChops, ImageDraw
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 
 SOURCES = {
     "dark": ("dark mode info icon.jpg", "info-icon-dark.png"),

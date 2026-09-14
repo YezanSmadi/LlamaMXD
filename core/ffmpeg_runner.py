@@ -204,7 +204,7 @@ class FfmpegJob:
                 creationflags=_CREATION_FLAGS,
             )
         except FileNotFoundError:
-            self._fail_early("ffmpeg wasn't found. Install it and make sure it's on your PATH.")
+            self._fail_early("ffmpeg wasn't found. Reinstall LlamaMXD, or install ffmpeg and add it to your PATH.")
             return
         except OSError as exc:
             self._fail_early(f"Couldn't start ffmpeg: {exc.strerror or exc}")

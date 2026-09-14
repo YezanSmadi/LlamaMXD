@@ -1,9 +1,9 @@
 # LlamaMXD (LlamaPY GUI)
 
-A Windows desktop GUI for video muxing/encoding, built with CustomTkinter. Wraps
-(eventually) ffmpeg and yt-dlp behind a tabbed interface. Repo:
+A Windows desktop GUI for video muxing/encoding/downloading, built with
+CustomTkinter. Wraps ffmpeg and yt-dlp behind a tabbed interface. Repo:
 `https://github.com/YezanSmadi/LlamaMXD`. Public domain (Unlicense). Currently
-v0.5.0-alpha.5 (see `components/sidebar.py`'s footer).
+v0.5.0-alpha.6 (see `components/sidebar.py`'s footer).
 
 ## Running
 
@@ -12,9 +12,9 @@ python main.py
 ```
 
 Must be launched **from the repo root** — `core/app.py` and `components/sidebar.py`
-load `llama.ico` / `llama.png` by relative path and will crash otherwise.
-(`ThumbnailCarousel`'s `audio-mute.png` / `Wave Loop.json` are loaded
-`__file__`-anchored, so those are launch-dir independent.)
+load `assets/llama.ico` / `assets/llama.png` by relative path and will crash
+otherwise. (`ThumbnailCarousel`'s `audio-mute.png` / `Wave Loop.json` are loaded
+`__file__`-anchored to `assets/`, so those are launch-dir independent.)
 
 Environment: Python 3.13, system interpreter (no venv). Dependencies are pinned
 in `requirements.txt` (`pip install -r requirements.txt`) but still installed
@@ -22,8 +22,18 @@ globally in practice: `customtkinter` 6.0, `tkinterdnd2` 0.6.2, `opencv-python`
 (cv2) 5.0, `Pillow` 11.3, `rlottie-python` 1.3.8 (the stripped-video preview's
 Wave Loop animation — `ThumbnailCarousel`; a missing/broken import degrades to a
 flat gradient wash, never a crash), `ffmpeg-python` 0.2.0 (+ its `future`
-dependency — builds the ffmpeg commands). `ffmpeg` / `ffprobe` must be on PATH:
-the Queue runs real jobs through it (see "Encoding flow" below).
+dependency — builds the ffmpeg commands), `yt-dlp[default]` 2026.08.19 (the
+YT-DLP tab's dev environment; `default` pulls in `yt-dlp-ejs`, the YouTube JS
+challenge solver — the app itself runs the bundled `yt-dlp.exe`, not this
+package). No `deno` extra: pip puts `deno.exe` in the *user* Scripts folder,
+which yt-dlp's own lookup doesn't search.
+
+**External tools are bundled, not pip-installed**: `ffmpeg.exe`, `ffprobe.exe`,
+`ffplay.exe` (unused so far, kept for later), `yt-dlp.exe` and `deno.exe` live
+in `dependables/` at the repo root — **gitignored**, each is far over GitHub's
+100MB file limit — and the release's setup wizard copies them beside the app.
+Every launch goes through `core/tools.py` (see "External tools" below), so
+nothing needs to be on PATH; PATH is only the last fallback.
 
 ## Architecture
 
@@ -36,9 +46,33 @@ core/utilities.py    stateless helpers (thumbnail extraction, ffprobe media prob
 core/ffmpeg_vars.py  one queued job's settings flattened into module globals (raw + ffmpeg-ready *_ARG)
 core/ffmpeg_build.py builds a Mux or Encode job's ffmpeg-python Stream / full argv
 core/ffmpeg_runner.py  runs one ffmpeg job off the Tk thread (progress, suspend/resume, stop)
+core/tools.py        resolves ffmpeg/ffprobe/yt-dlp/deno to absolute paths (bundled first, then PATH)
+core/downloader.py   YT-DLP logic, no Tk: fetch (-J), format model + option lists, resolve, argv
+core/ytdlp_runner.py runs one download off the Tk thread (job object, stages, time-based progress)
 components/          reusable widgets, tab-agnostic
 tabs/                one CTkFrame subclass per tab
 ```
+
+### External tools (`core/tools.py`)
+
+`find_tool(name)` returns an absolute path or None; `tool_path(name)` the path
+or the bare name (so a launch still raises the usual FileNotFoundError every
+caller already turns into a readable message); `tool_dir(name)` the folder
+(what yt-dlp's `--ffmpeg-location` wants). Search order: beside the frozen
+app's exe or in a `dependables/` folder next to it (both installer layouts
+work), then the repo's `dependables/`, then PATH. Cached per process.
+
+**Every** ffmpeg/ffprobe call goes through it — `ffmpeg_build.compile_command`'s
+argv[0], and all eight `subprocess.run`s in `core/utilities.py` (probe,
+duration, HDR metadata/tag checks, the `supports_*` capability checks, the
+HDR preview frames). Verified by running a real Mux and Encode job with every
+ffmpeg folder removed from PATH: both launched `dependables\ffmpeg.exe`.
+
+**Absolute paths are load-bearing for yt-dlp**, not tidiness: a relative
+`--js-runtimes deno:dependables/deno.exe` made yt-dlp report "no JS runtime
+found" (the same path made absolute worked — confirmed), and a bare `ffmpeg`
+is left to Windows' search order, which only hits the app's folder when
+frozen.
 
 There are no `__init__.py` files; the subfolders work as implicit namespace
 packages. Imports are absolute from the repo root (`from components.drop_box import DropBox`).
@@ -204,8 +238,8 @@ instant jump, no slide, no `on_index` re-fire — so it can't loop).
 `on_thumbnail`, since `set_frames` resets every freshly-built carousel to 0.
 
 **When adding a tab that should show the selected file, call `register_tab_ui`.**
-`YtDlpTab` deliberately does not (the call is commented out at
-`tabs/ytdlp_tab.py:23`).
+`YtDlpTab` deliberately does not — it previews a fetched *link*, never the
+selected input file.
 
 **The same worker also probes the file** (`core.utilities.probe_media`, a
 best-effort `ffprobe`), because Encoding's `Select` needs to mean something
@@ -249,7 +283,7 @@ below. The queue carries **tagged messages** (`("info", …)` then
 settle the defaults long before the ten frame-seeks finish; `"frames"` is
 always last and is what clears the pending count. Delivery is broadcast by
 `_broadcast_media_info` to any tab exposing `on_media_info`. Every field may
-be None and every failure path (no ffmpeg on PATH, unreadable file) returns
+be None and every failure path (no ffmpeg found, unreadable file) returns
 Nones rather than raising — nothing here is required for the UI to work, it
 only ever *improves* defaults.
 
@@ -264,8 +298,28 @@ itself and shows the **Wave Loop visualiser** (the same render path as a
 stripped video — it *is* an audio visualiser), navigation disabled.
 `_broadcast_thumbnails` clears the flag (`set_audio_only(False)`) whenever
 real frames arrive, so an audio→video swap flips back. Nothing downstream
-(formats, the settings dict, the fake pipeline) keys off audio-only yet —
-the tabs' video controls stay live but inert.
+(formats, the settings dict, the real ffmpeg pipeline — see "Encoding flow"
+below) keys off audio-only yet — the tabs' video controls stay live but inert.
+
+**The info badge and its hover tooltip** (`ThumbnailCarousel`, bottom-left of
+the preview) surface the probe's raw findings as text, once one lands —
+container, `Video: H.264 · High · L4.0 · 1920x1080 · HDR` (each bit
+conditional on what was actually identified), `Audio: AAC · Stereo · 48000 Hz
+· 192 kbps` (plus `"N tracks"` once `probe_media`'s `audio_streams` has more
+than one), duration, and file size. When the video is HDR, a second line
+(`_mastering_text`) reports whether the source actually carries ST 2086
+mastering-display luminance and MaxCLL/MaxFALL — the same numbers that decide
+whether the BT.2390 tonemap's `peak_detect` runs (see "Encoding flow" below)
+— rather than leaving that decision invisible to the user. The badge itself
+(`info-icon-dark.png`/`info-icon-light.png`, matching the current appearance
+mode, generated from source artwork by `scripts/make_info_badges.py`; falls
+back to a procedurally-drawn disc if the files are missing) sits opposite the
+mute badge's top-left corner and is theme-independent, same reasoning as the
+mute badge always being red. `set_media_info(info)` is the broadcast target
+(`app._broadcast_media_info` → any tab exposing `on_media_info` → the
+carousel), separate from `set_frames`/thumbnails; the tooltip is a borderless
+`Toplevel` (same family as the toast/dropdown popups) that refreshes its text
+live if a probe lands while the user is already hovering.
 
 ### Keybinds
 
@@ -381,9 +435,10 @@ widget that needs to pick it up. Specifically:
 - `Sidebar`, the tab indicator, and the `Muxing`/`Encoding`/`YT-DLP`/
   `Settings` tabs are destroyed and rebuilt from scratch — the only way for
   their default-styled children to actually read the newly-loaded CTk
-  theme. `Muxing`/`Encoding`'s field values are snapshotted via
+  theme. `Muxing`/`Encoding`/`YT-DLP`'s field values are snapshotted via
   `_gather_settings()` first and restored via `load_settings()` after, so
-  the user doesn't lose an in-progress form.
+  the user doesn't lose an in-progress form. YT-DLP restores from the app's
+  cached fetch (`app.ytdlp_cache`) — a theme switch never re-fetches.
 - **`Queue` is deliberately never rebuilt** — destroying it would discard
   its task list (`self._rows`) and any in-flight animation. Instead it gets
   `QueueTab.refresh_theme()`, which re-reads `get_active_theme()` into the
@@ -444,6 +499,37 @@ Encoder/Profile/Level; see "Tabs" below. `short_name()` is a no-op for every
 current codec now but stays as a defensive one rather than being removed,
 in case a future codec name grows a parenthetical again.
 
+**A fourth container, `.mov`, and four mezzanine/archival codecs since
+joined the original four (H.264/H.265/MPEG-4/MPEG-2/VP8/VP9/AV1).**
+`.mov` is the native/canonical delivery container for all three professional
+intermediates below, as well as this app's existing consumer codecs.
+`ProRes` (`prores_ks`) and `DNxHR` (`dnxhd` — the same ffmpeg encoder covers
+classic DNxHD and the modern DNxHR tiers) each model their "quality" as the
+**profile choice itself** rather than a CRF/qscale — a fixed target bitrate
+per tier, not a continuously variable rate control — so `quality_for()`
+returns `None` for both (same as `Select`) and the UI's quality slider
+disables rather than showing a meaningless number under their name (`
+EncodingTab._sync_controls` distinguishes this "genuinely no such knob" case
+from `Select`'s "nothing picked yet, slider stays live"). `CineForm`
+(`cfhd`) follows the identical pattern — its "profile" list
+(`Low`…`Film 3+`) is really `cfhd`'s own named `-quality` ladder
+(`ffmpeg_vars._QUALITY_PRESET_ARGS`/`_NO_PROFILE_FLAG` — CineForm's Profile
+slot must never fall through to a literal `-profile:v`, which `cfhd` doesn't
+have at all). `FFV1` is lossless with no profiles, levels, or quality
+control whatsoever. `_PIX_FMT_ARGS` (`core/ffmpeg_vars.py`) covers the
+fourth wrinkle these three share: unlike H.264/HEVC/etc., which happily
+follow whatever pixel format the source decodes to, `dnxhd` actively
+*refuses to run* without an explicit, profile-legal `-pix_fmt`, and
+`prores_ks`/`cfhd` silently lock in the wrong one without it.
+
+**`PASSTHRU_ONLY_CODECS`** (`{"DTS", "Dolby TrueHD"}`) names two codecs
+`probe_media` can identify but this app will never offer through a dropdown
+— transcoding surround/Atmos codecs is out of scope, so a track holding one
+always passes through untouched. `is_passthru_only(codec)` is what lets
+EncodingTab auto-force its Passthru checkbox and grey the rest of the audio
+controls the instant one is probed, rather than leaving it stranded on
+`Select` the way a codec this app simply doesn't recognize would.
+
 `_ENCODER_SPECS` carries each codec's profiles, levels and rate-control
 spec. Two things it deliberately does *not* do: share profile names between
 codecs (`Main 10` is H.265's, `High`/`Baseline` are H.264's), or assume CRF
@@ -453,6 +539,11 @@ default and slider end-labels together so the UI can re-range the slider
 rather than showing one codec's numbers under another's name. An empty
 `profiles`/`levels` list means the codec genuinely has none, and the UI
 disables that dropdown rather than borrowing H.264's values.
+
+**Speed** (`_SPEED_SPECS`/`speed_values_for`/`speed_kind_for`/
+`speed_default_for`) now covers VP8 too (`cpu-used` + a fixed `-deadline
+good`, same as VP9), not just x264/x265/AV1's named `-preset` ladder.
+MPEG-4/MPEG-2 and `Select` still have no speed knob at all.
 
 **`SELECT` (`"Select"`) is the one "nothing picked/resolved yet" placeholder,
 shared by every derived list in this module** — Encoder, Audio Codec, Audio
@@ -837,7 +928,56 @@ changing anything.
   `EncodingTab.select_save_location` as the starting directory for their
   save dialogs whenever no input file is loaded yet (previously hardcoded
   to `""`).
-- **YT-DLP** (`tabs/ytdlp_tab.py`) — stub. URL entry and a button with no command.
+- **YT-DLP** (`tabs/ytdlp_tab.py`) — downloads a link's video or audio
+  through the Queue. Same bottom-up layout as Muxing/Encoding: top has the
+  Deno warning banner (packed only when the startup check found no usable
+  Deno — warn-only, nothing is blocked), a URL entry + `Paste` (fills from
+  the clipboard *and* fetches) + `Fetch` (primary; Enter in the entry does
+  the same), and a `preview_frame` in the DropBox's bordered look — a
+  placeholder until a fetch lands, then the thumbnail (fit to the frame,
+  debounced `<Configure>` refit) over a `MarqueeLabel` title and an
+  "uploader · length" line. Bottom has a `Mode` `CTkSegmentedButton`
+  (`Video + Audio` / `Video Only` / `Audio Only`), a `Codec` / `Quality` /
+  `Format` dropdown row with an `≈ size` readout — in Video + Audio the
+  Format dropdown is labelled **`Video:`** and a fourth **`Audio:`** dropdown
+  (`audio_menu`, the separate audio stream's codec) sits beside it; the other
+  modes hide it (`_show_audio_picker`) and say `Format:` — the save row, and
+  `Queue Task` / `Download` (queue + start, same toasts pattern as Mux/
+  Encode). Everything below the URL row is disabled until a fetch succeeds.
+
+  **Fetch** is `app.fetch_ytdlp_info(url)`: a daemon worker runs
+  `downloader.fetch_info` (`yt-dlp -J`) plus `download_thumbnail`, and hands
+  back `("ytdlp_info", token, url, (info, error, thumb))` on the app's
+  existing `_thumb_queue` / `_drain_thumbnails` poller (its own
+  `_ytdlp_token` drops a superseded fetch). `on_ytdlp_info` either shows the
+  error (via `after(0)` — never a modal from inside the poll) or adopts the
+  video: every pick resets to its best default and the save path's FILENAME
+  becomes `downloader.safe_stem(title)` + the plan's extension, keeping the
+  folder (same rule as the other tabs). The fetched URL is what's queued;
+  editing the entry after a fetch blocks queueing ("Link Changed") until
+  it's fetched again.
+
+  **`_sync_controls` is the single constraint pass**, same contract as the
+  other tabs: Mode (only modes the video supports) → Codec (`Best
+  Available` + codecs that mode can use) → for video modes Quality
+  (resolutions/fps/HDR of that codec, `Best` first) → Format (containers
+  that exact pick fits *without re-encoding*) → in Video + Audio, Audio
+  (`Best Available` + the audio codecs that can sit beside that video in
+  that container — `downloader.audio_codecs_for`; so `.mp4` offers AAC,
+  `.webm` Opus, `.mkv` both, and it's disabled when the picked stream
+  already carries its own audio). Format decides Audio, never the other way
+  round, same one-directional rule as everywhere. For Audio Only the last two
+  swap — Format (`Original` + `.mp3/.m4a/.opus/.flac/.wav`) → Quality
+  (source bitrates for Original, target bitrates for lossy, empty/disabled
+  for lossless). A snap toasts (`_retarget`) unless it was caused by a Mode
+  switch, whose lists are a different kind. The resolved plan
+  (`downloader.resolve`) drives the size readout and the save path's
+  extension. Settings keys: `url, title, thumbnail_url, output_path,
+  output_format, mode, video_codec, audio_codec, quality, download,
+  url_text` — `audio_codec` only in Video + Audio (absent otherwise, so the
+  details popup skips its "Audio Codec" row); `download`
+  is the resolved plan the queue runs; `url_text` only exists for the theme
+  rebuild.
 
 ### Queue tab
 
@@ -1012,6 +1152,24 @@ click-triggered truncation). `_autohide_scrollbar_in_gutter(self.list_frame)`
 Touches `_parent_frame` / `_scrollbar` / `_parent_canvas` — CTk exposes no
 public hook. Only `list_frame` gets this; `detail_scroll` is fixed-height and
 deliberately scrolls.
+
+**Download rows** (`source_tab="YT-DLP"`). `_process_next` hands them to
+`_start_download`, which builds a `YtDlpJob` from the task's `download` plan
+(argv built on the Tk thread and printed, same as ffmpeg jobs). The job
+shares FfmpegJob's control/event contract plus a `("stage", text)` event:
+`_poll` stores it on `self._active["stage"]` and sets the row's status to it
+("Preparing..." → "Downloading video..." → "Downloading audio..." →
+"Merging..." / "Converting audio..." → "Finishing...") while the fill keeps
+going — **any event other than progress/stage is terminal**, so a new event
+kind needs a branch there. `_running_label(task_id, active)` returns that
+stage, which is how Start after Pause restores "Downloading audio..." rather
+than a generic label. Rows show the video's online thumbnail
+(`thumbnail_url` — the tab's cached one when it's the same link, else fetched
+on the row-thumbnail worker), the details popup titles itself "Download
+Details" with Title/Link/Mode/Video Codec/Audio Codec rows, and a failure reads "“<title>”
+couldn't be downloaded." Verified through the real Queue: stage sequence,
+pause/resume label, a forced-bad format failing with yt-dlp's own reason,
+and an ordinary Mux job still running to Done alongside the changes.
 
 **Overall progress bar** (`self.progress_bar`, top of the tab, replaced an
 earlier plain "Encoding Queue" header label): tracks `(done + the active
@@ -1327,6 +1485,12 @@ its own visible feedback.
   still a stock `CTkSwitch`).
 - **MessageDialog** (`components/dialogs.py`) and **Toast / ToastManager**
   (`components/toast.py`) — see "User feedback: dialogs and toasts" above.
+- **AudioStreamPickerDialog** (`components/audio_stream_dialog.py`) — the
+  "Choose Stream(s)" modal on Encoding's Audio panel; modelled on
+  `MessageDialog`'s own theming/centering/icon conventions but with one
+  checkbox row per probed audio stream instead of a fixed message + button
+  row. See "Multi-stream audio" under "Encoding flow" below for the full
+  picture (what it returns, and how the chosen streams flow into a job).
 - **DropBox** (`components/drop_box.py`) — self-packing (`self.pack()` in
   `__init__`, so callers don't need to). Takes an `on_file_selected` callback
   (in practice always `app.update_global_file`) and an optional `height`
@@ -1407,8 +1571,13 @@ its own visible feedback.
   into the **top-left** corner (`_with_badge`, applied in `_push` for the
   audio-only case; `_wave_frame_rgb` does its own badge paste when the video
   is stripped too). `audio-mute.png` and `Wave Loop.json` sit beside
-  `llama.png` at the repo root; `audio-mute.svg` (the badge's source) is
+  `llama.png` in `assets/`; `audio-mute.svg` (the badge's source) is
   checked in too.
+
+  **The bottom-left info badge and its hover tooltip** are a separate,
+  permanent fixture (not a strip-state indicator) — see "File selection is a
+  broadcast" above for what they show and where the info comes from
+  (`set_media_info` / `app._broadcast_media_info`).
 
   **Two layers, kept separate — the chevrons/dots are their own layer, not
   baked into any frame.** `_base_scaled` is the *pure* fitted video frame;
@@ -1549,7 +1718,7 @@ its own visible feedback.
 - **Sidebar** (`components/sidebar.py`) — title, logo, then the four main
   nav buttons (Muxing/Encoding/Queue/YT-DLP), then a spacer
   (`fill="both", expand=True`) that pushes Settings + the footer
-  (`{year} Yezan Smadi · v0.5.0-alpha.5`) down to the sidebar's bottom edge.
+  (`{year} Yezan Smadi · v0.5.0-alpha.6`) down to the sidebar's bottom edge.
   **Pack call order matters here and is easy to get backwards**: Settings and
   the footer are `side="bottom"` but are packed *before* the spacer in code,
   not after — Tk carves cavity space in `.pack()` call order regardless of
@@ -1577,6 +1746,35 @@ picks the toast. **Only one ffmpeg runs at a time.**
   differ, an ffmpeg-ready `*_ARG` form. Read them through the module
   (`from core import ffmpeg_vars as v`), never `from … import NAME`, which
   copies the value once.
+
+  **`AUDIO_STREAMS` is the one list-shaped variable here, not a scalar** —
+  the direct consequence of Encoding no longer describing "the audio" as one
+  codec/bitrate/channels/rate tuple. `_audio_stream_args(entry)` translates
+  one settings-dict audio-stream entry into its ffmpeg-ready form
+  (`{"src_index", "codec_arg", "bitrate_arg", "channels_arg",
+  "sample_rate_arg"}`); a **Passthru** stream (the checkbox, forced on for
+  `formats.is_passthru_only` codecs — DTS/Dolby TrueHD, which this app has no
+  re-encode path for at all) always comes out `"copy"`/`None`/`None`/`None`
+  regardless of what its display-value fields still say, since
+  `EncodingTab` keeps showing the *source's* real values there purely for
+  display while Passthru is on.
+- **Multi-stream audio** ("Choose Stream(s)" on Encoding's Audio panel,
+  `components/audio_stream_dialog.py`'s `AudioStreamPickerDialog`) — one
+  checkbox per stream `probe_media`'s `audio_streams` reports, pre-checked to
+  match what's currently included; OK returns the chosen index set (refusing
+  to ever return empty — see its `_ok`, since "no audio at all" is Strip
+  Audio's job, not a second door to the same outcome), Cancel/close returns
+  `None` so the caller can tell "nothing changed" apart from "chose zero".
+  The Audio Track dropdown then shows one included stream at a time; its own
+  Codec/Bitrate/Channels/Sample Rate row + Passthru checkbox edit whichever
+  stream is currently selected there, and `EncodingTab._gather_settings`
+  folds the live widget values back into that stream's own saved entry
+  (`_save_active_audio_stream`) before building the final `audio_streams`
+  list — so switching which stream you're looking at never loses an edit to
+  another one. `build_encode_command` (below) then needs one `-map` per
+  *output* audio stream, not ffmpeg's default "one best audio stream" — the
+  same reason `build_mux_command` already needs explicit `-map`s for an
+  external track.
 - **`core/ffmpeg_build.py`** — `build_mux_command` / `build_encode_command`
   turn those into an ffmpeg-python `Stream`. `compile_command(path)` returns
   the full argv, with the runner's global flags
@@ -1612,29 +1810,108 @@ picks the toast. **Only one ffmpeg runs at a time.**
     longer than it should" on a large or HDR source, separate from (and not
     fixed by) the GPU stub above.
   - **HDR→SDR** — when `HDR_TO_SDR` and the video isn't stripped, adds
-    `-vf libplacebo=tonemapping=bt.2390:colorspace=bt709:color_primaries=
-    bt709:color_trc=bt709:format=yuv420p` plus explicit `-color_primaries
-    bt709 -color_trc bt709 -colorspace bt709` output tags (verified:
-    libplacebo's target colorspace doesn't reliably propagate to the output
-    stream's own tags on its own, so a player/editor has no guarantee the
-    result is really BT.709 without these). **BT.2390 (libplacebo) is
-    deliberately the only curve this app will ever use — by request, never a
-    silent lower-accuracy substitute.** The classic `zscale`+`tonemap`
-    filter chain (`tonemap`'s own algorithm list tops out at "hable" —
-    none/linear/gamma/clip/reinhard/hable/mobius, confirmed via `ffmpeg -h
-    filter=tonemap`, no BT.2390 among them) was tried first and removed once
-    a real Vulkan/libplacebo setup was confirmed working (see below) — don't
-    reintroduce it as a fallback. `core.utilities.supports_libplacebo()`
-    (cached, parses `ffmpeg -filters`) gates this two ways instead:
-    `EncodingTab._sync_controls` disables (not force-unchecks) `hdr_switch`
-    when it's False, so the control simply can't be turned on; and
-    `build_encode_command` raises a `ValueError` if `HDR_TO_SDR` somehow
-    reaches it anyway (e.g. a preset saved on a different ffmpeg install) —
-    caught by `EncodingTab._validate_settings` before the job is even
-    queued, and by `QueueTab._process_next`'s existing "couldn't build the
-    ffmpeg command" Failed-task path as a last resort. Verified end-to-end
-    against a real HDR10-tagged synthetic source, producing a correctly
-    BT.709-tagged SDR output.
+    `-vf` from `core.utilities.libplacebo_tonemap_vf(peak_detect=...)`
+    (`libplacebo=apply_dolbyvision=true:peak_detect=<bool>:tonemapping=
+    bt.2390:colorspace=bt709:color_primaries=bt709:color_trc=bt709:
+    format=yuv420p` — moved to `core/utilities.py`, not `ffmpeg_build.py`,
+    specifically so the HDR *preview* thumbnails, below, can share the exact
+    same filter string with the real encode without a circular import) plus
+    explicit `-color_primaries bt709 -color_trc bt709 -colorspace bt709`
+    output tags (verified: libplacebo's target colorspace doesn't reliably
+    propagate to the output stream's own tags on its own, so a player/editor
+    has no guarantee the result is really BT.709 without these).
+    **BT.2390 (libplacebo) is deliberately the only curve this app will ever
+    use — by request, never a silent lower-accuracy substitute.** The
+    classic `zscale`+`tonemap` filter chain (`tonemap`'s own algorithm list
+    tops out at "hable" — none/linear/gamma/clip/reinhard/hable/mobius,
+    confirmed via `ffmpeg -h filter=tonemap`, no BT.2390 among them) was
+    tried first and removed once a real Vulkan/libplacebo setup was
+    confirmed working (see below) — don't reintroduce it as a fallback.
+    `core.utilities.supports_libplacebo()` (cached, parses `ffmpeg
+    -filters`) gates this two ways instead: `EncodingTab._sync_controls`
+    disables (not force-unchecks) `hdr_switch` when it's False, so the
+    control simply can't be turned on; and `build_encode_command` raises a
+    `ValueError` if `HDR_TO_SDR` somehow reaches it anyway (e.g. a preset
+    saved on a different ffmpeg install) — caught by
+    `EncodingTab._validate_settings` before the job is even queued, and by
+    `QueueTab._process_next`'s existing "couldn't build the ffmpeg command"
+    Failed-task path as a last resort. Verified end-to-end against a real
+    HDR10-tagged synthetic source, producing a correctly BT.709-tagged SDR
+    output.
+
+    **`peak_detect` is not a fixed `true`/`false` — it follows the source's
+    own static HDR metadata, and getting this wrong measurably hurts either
+    way.** libplacebo's `peak_detect` (on by default) dynamically estimates
+    each frame's true peak brightness by analysing pixel values over a
+    ~100-frame smoothing window, meant to compensate for a source with no
+    static metadata to trust. `core.utilities._probe_hdr_static_metadata`
+    reads the source's ST 2086 mastering-display luminance and MaxCLL/MaxFALL
+    (a separate, frame-level ffprobe query — confirmed neither value shows up
+    in ffprobe's *stream*-level output, only a full `-show_frames` on the
+    first frame); `libplacebo_tonemap_vf`'s `peak_detect` argument is then
+    `not (mastering_max_nits is not None and max_cll)` — **both** a mastering
+    peak *and* a genuine, nonzero MaxCLL are required, not the peak alone.
+    Confirmed both ways on real commercial sources: a file with a real
+    measured MaxCLL (`Spider-Man 3 Sheriff.mp4`) cut highlight clipping
+    87-98% with `peak_detect` forced off; a file with only a mastering peak
+    and MaxCLL/MaxFALL both `0` (present in the SEI but unset, not a real
+    measurement — the same "zero reads as absent" convention
+    `ThumbnailCarousel._mastering_text` uses) came out measurably *dimmer and
+    lower-contrast*, the opposite of an improvement, when the peak alone was
+    trusted the same way. `EncodingTab._gather_settings` snapshots
+    `mastering_max_nits`/`max_cll` from `app.media_info` into the job's
+    settings dict at queue time — a fact about the input, not a user choice —
+    and `ffmpeg_vars.derive()` carries them through as `MASTERING_MAX_NITS`/
+    `MAX_CLL` for `build_encode_command` to read.
+
+    **A post-encode safety net re-verifies the real output, not just the
+    filter in isolation.** `core.utilities.verify_hdr_sdr_tag(path)` re-probes
+    the finished file's own `color_transfer` after an HDR→SDR job completes;
+    `FfmpegJob` (see `core/ffmpeg_runner.py` below) reports the task **Failed**
+    — file still saved, for inspection, never deleted — rather than Done if
+    it still reads an HDR transfer characteristic (`smpte2084`/`arib-std-b67`)
+    instead of `bt709`. `QueueTab._process_next` only asks for this check when
+    `ffmpeg_build.uses_hdr_tonemap()` says the job's compiled command actually
+    ran the tonemap chain (`FfmpegJob`'s `verify_hdr_tag` kwarg). A `None`
+    result (the verification probe itself failed) is "unknown", not "wrong",
+    and falls through to Done — this guards specifically against a future
+    ffmpeg/libplacebo regression or an unusual muxer silently failing to
+    propagate the requested output tags, which is a real, worse-than-not-
+    tonemapping-at-all failure mode (a file that's still HDR data under an
+    SDR label, trusted and displayed wrong by every consumer with no
+    warning).
+
+    **The HDR preview thumbnails are a second, separate frame source, not
+    the same ten frames re-colored.** cv2's plain decode of a real HDR (PQ/
+    BT.2020) source has no color management at all — it clips/rescales the
+    wide-range values into 8-bit RGB, producing a washed-out picture of the
+    *untouched* HDR data rather than a preview of what the export will look
+    like. `core.utilities.extract_hdr_tonemapped_thumbnails` instead runs one
+    short-lived real ffmpeg + libplacebo process **per frame** (an input-side
+    `-ss` approximate seek, then a single-frame decode through the identical
+    `libplacebo_tonemap_vf` filter the real encode uses), targeting the exact
+    same frame indices `extract_video_thumbnails`'s cv2 seek samples
+    (`_interior_sample_frames`, shared by both) so the two sets stay
+    index-for-index aligned. Ten short seeks measured well under the cost of
+    one full linear decode on a real multi-GB HDR10 source. Empty (no preview
+    change) whenever `supports_libplacebo()` is false or the geometry probe
+    fails — callers must check the former themselves to tell "no HDR to show"
+    apart from "libplacebo isn't available".
+
+    **Encoding's preview carousel actually shows this tonemapped set once
+    HDR→SDR is on**, not just the raw HDR frames with a switch flipped
+    elsewhere. The render/cache/queue machinery (`start_hdr_render`,
+    `hdr_frames`/`hdr_frames_path`, a token + poll loop mirroring
+    `_load_thumbnails`'s own) lives on `LlamaGUI`, not `EncodingTab` —
+    deliberately, so a live theme rebuild (which destroys and reconstructs
+    the tab) doesn't throw the render away and force a several-second
+    re-wait every time the user so much as changes theme; the app survives
+    that rebuild, so the cache does too. `EncodingTab._apply_preview_frames`
+    picks the cached tone-mapped set over the raw one whenever the switch is
+    on, it's ready, and it matches the currently-shown file; flipping the
+    switch off (or switching files) swaps back to the raw set instantly
+    without waiting on a fresh render. This preview path is Encoding-only —
+    Muxing has no HDR control at all.
 
     **Being *listed* as compiled in is not enough to trust libplacebo,
     though.** After updating this app's own dev ffmpeg specifically to get
@@ -1651,18 +1928,46 @@ picks the toast. **Only one ffmpeg runs at a time.**
     same machine), with no device index needed (an index would just be the
     wrong GPU on a different machine's enumeration order). These are
     genuine *global* options and must precede the input/filter graph:
-    `compile_command` threads them through its `cmd` prefix (`_uses_
-    libplacebo()` gates it, mirroring `build_encode_command`'s own HDR_TO_SDR
-    check) rather than ffmpeg-python's `.global_args()`, which places them
+    `compile_command` threads them through its `cmd` prefix (`uses_
+    hdr_tonemap()` gates it — public, not module-private, since
+    `QueueTab._process_next` also reads it to decide whether to ask
+    `FfmpegJob` for the post-encode HDR-tag verification above — mirroring
+    `build_encode_command`'s own HDR_TO_SDR check) rather than
+    ffmpeg-python's `.global_args()`, which places them
     *after* the compiled output spec — confirmed ffmpeg then refuses
     `-filter_hw_device` outright ("Invalid filter device") since
     `-init_hw_device` hasn't been processed yet at that point in its own
     left-to-right option parsing.
-  And `-strict:a -2` (experimental compliance, **scoped to audio only**) is
-  set on every job — it exists for non-standard audio/container pairings
-  (E-AC3/TrueHD carrying Dolby Atmos side data, etc.); it used to be a bare
-  `-strict -2` covering the video codec context too, for no reason tied to
-  that use case. `+faststart` (`_faststart_kwargs`) is only added when the
+  And `-strict -2` (experimental compliance) is set on every job — **global,
+  not audio-scoped (`-strict:a`), and confirmed that distinction matters, not
+  just tidier.** It exists for non-standard audio/container pairings (a real
+  TrueHD-in-MP4 source, Atmos side data, etc.), and audio-scoping it looks
+  like the more surgical choice — but reproduced 5/5 on a real TrueHD-in-MP4
+  file: `-strict:a -2` alone still hard-fails the job outright
+  (`"truehd in MP4 support is experimental, add '-strict -2'"`, then
+  `"Could not write header (incorrect codec parameters?)"`, confirmed
+  independent of everything else in the command — no HDR filter, no Vulkan
+  device, plain `-c:v libx264`). It's the **muxer's own** compliance gate
+  objecting to an experimental codec-in-container pairing, not the audio
+  codec context — `-strict:a` sets the latter, which never reaches the check
+  that's actually failing, so only the bare, unscoped `-strict -2` works. An
+  earlier version scoped it to `-strict:a` on the theory that the video codec
+  context had no business being loosened by an audio-only concern — a
+  reasonable-sounding rule that turned out to be simply wrong for this case.
+
+  **Multi-stream audio needs `i`, the stream's position in the *output*
+  file, not `src_index`, its position in the *source*** — ffmpeg's
+  per-stream option suffixes (`-c:a:0`, `-c:a:1`, …) address the former, and
+  the two only match when every source stream up to that point was
+  included. `-ac`/`-ar` have their own sharper trap on top of that:
+  confirmed directly that a bare `-ac:0`/`-ar:0` (no explicit `a:` type
+  qualifier, unlike `-c:a:0`/`-b:a:0`, which already carry one) counts across
+  **every** output stream, video included — so with a kept video stream at
+  output position 0, an unqualified `-ac:0`/`-ar:0` silently landed on the
+  video stream (a no-op) and every audio stream's actual value shifted onto
+  the *next* stream's slot instead of its own. `build_encode_command` always
+  emits the qualified `-ac:a:{i}`/`-ar:a:{i}` form.
+  `+faststart` (`_faststart_kwargs`) is only added when the
   output is actually `.mp4`/`.mov` — it's a private option of that muxer, a
   purely lossless metadata rewrite (moves the moov atom to the front so
   progressive-download/web playback can start before the whole file
@@ -1777,8 +2082,23 @@ exactly as described.
 
 Encoding settings dict shape (`_gather_settings`):
 `input_file, output_path, output_format, start_secs, duration_secs, av_sync,
-encoder, profile, level, speed, quality, gpu_enabled, hdr_to_sdr, strip_video,
-audio_codec, audio_bitrate, audio_channels, audio_sample_rate, strip_audio`.
+encoder, profile, level, speed, quality, gpu_enabled, hdr_to_sdr,
+mastering_max_nits, max_cll, strip_video, strip_audio, audio_streams`.
+
+**Audio is a list, not four scalar keys**, because an Encoding job can carry
+more than one *output* audio stream (the Audio Track dropdown + "Choose
+Stream(s)" dialog — see "Multi-stream audio" below): `audio_streams` is
+`[{"index": 0, "codec": "AAC", "bitrate": "192 kbps", "channels": "Stereo",
+"sample_rate": "48000 Hz", "passthru": False}, ...]`, one entry per *included*
+source stream, built by `_gather_settings` from `_audio_stream_settings`
+(the per-stream dict last edited through the Audio Codec/Bitrate/Channels/
+Sample Rate row + Passthru checkbox for whichever stream the Audio Track
+dropdown currently shows) plus every other included stream's own
+last-saved values. `mastering_max_nits`/`max_cll` are a fact snapshotted
+from the probed source at queue time (see the HDR→SDR bullet above), not a
+user choice — carried through so a job queued now still tone-maps against
+the source it was actually queued against, even if the user swaps files
+before it runs.
 
 Muxing's shape — **no codec keys at all**, since it never re-encodes:
 `input_file, output_path, output_format, start_secs, duration_secs, av_sync,
@@ -1797,6 +2117,89 @@ the MPEG-era encoders, and `retain_length` is **gone** — `duration_secs == 0`
 means "to the end of the file". A derived dropdown showing the `—`
 placeholder reports `""` rather than the dash (`_menu_value`), so a settings
 dict never carries a placeholder around as if it were a real choice.
+
+## Download flow (YT-DLP)
+
+Two modules, no Tk in either. **Everything runs through the bundled
+`yt-dlp.exe`** — one copy of yt-dlp for fetch *and* download, updatable
+without an app release; a frozen app has no `python -m yt_dlp` anyway.
+
+**`core/downloader.py`**
+- `base_args()` starts every argv: `yt-dlp.exe --ignore-config --no-playlist`
+  plus absolute `--js-runtimes deno:<path>` / `--ffmpeg-location <dir>`.
+  **`--ignore-config` is required**: this dev machine's own
+  `%APPDATA%\yt-dlp\config.txt` forces `-f mp4 -f best` and a fixed output
+  folder, and would silently steer every job without it (confirmed).
+  yt-dlp.exe runs with `PYTHONIOENCODING=utf-8` so titles survive the pipe.
+- `deno_path()` — resolved via `core.tools` and `deno --version` ≥ 2.3.0
+  (yt-dlp's own minimum), cached, behind a lock (the startup check runs on a
+  worker while the Tk thread may already be building an argv). The app runs
+  it at startup (`_deno_check_worker` → `("deno", ...)` on `_thumb_queue`) and
+  sets `app.deno_missing` → `YtDlpTab.set_deno_missing`. **Without Deno,
+  YouTube still worked on the day this was tested** (full format list, a
+  byte-identical download, plus a deprecation warning) — yt-dlp's current
+  player client happens not to need the JS challenge — which is exactly why
+  it's warn-only and why "it works without Deno" must not be trusted.
+- `fetch_info(url)` → `(info, error)`: `yt-dlp --flat-playlist -J`; a
+  playlist URL is refused with a readable message (playlists are a later
+  phase); `error_reason(lines)` turns yt-dlp's last `ERROR:` line into user
+  text.
+- **The option model agrees with yt-dlp's own ranking instead of
+  re-implementing it**: `formats` comes back sorted worst → best by yt-dlp's
+  preference, so "best matching X" is simply the *last* match.
+  `parse_formats` compacts it (drops storyboards and `-drc` duplicates, maps
+  vcodec/acodec strings to this app's codec names, fills a missing size from
+  `tbr × duration`). Containers are judged by **`formats.containers_for`** —
+  the same matrix Muxing uses — so VP9 never offers `.mp4` and `.webm` never
+  takes AAC; for `.mp4`, audio falls to the best AAC stream.
+- `resolve(fmts, mode, codec, quality, container, duration)` → the plan
+  (JSON-safe, it rides in the task): `format` (pinned IDs, then a fallback
+  selector), `ext`, mode `args` (`--merge-output-format` / `--remux-video` /
+  `-x --audio-format --audio-quality`), `parts` (`id`, `kind`
+  video/audio/both, `size`) and `post` (`merge`/`remux`/`convert` with
+  `expected_bytes`, `media_secs`). Its `audio_codec` argument (Video + Audio's
+  Audio dropdown) narrows the separate audio stream — and the fallback's
+  audio selector — to that codec. **The fallback's audio alternatives are
+  parenthesised** — in yt-dlp's selector grammar `/` binds looser than `+`,
+  so `bv+ba[x]/ba[y]` means "(bv+ba[x]) or an audio-only ba[y]". Fallbacks
+  were verified to resolve with the pinned IDs missing.
+
+**`core/ytdlp_runner.py` — `YtDlpJob(url, plan, final_path)`**
+- **Process tree in a Windows Job Object.** yt-dlp.exe is a PyInstaller
+  bundle (bootloader + real child) that starts its *own* ffmpeg; the first
+  process is created `CREATE_SUSPENDED`, assigned to a kill-on-close job,
+  then resumed, so nothing escapes. `stop()` = `TerminateJobObject`;
+  `suspend()`/`resume()` enumerate the job's PIDs and `NtSuspendProcess`
+  each (reusing `ffmpeg_runner._set_suspended`). Verified: pause froze the
+  byte count, ffmpeg appeared inside the job during a merge, Stop mid-
+  download and mid-conversion left no process and no files, and killing the
+  Python process outright took the tree with it (kill-on-close).
+- **Private work folder**: yt-dlp writes only into a hidden
+  `.llamamxd-download-XXXXXXXX` beside the output (`-P`, `-o download.%(ext)s`);
+  on exit 0 the file named by `--print after_move:filepath` is moved onto
+  `final_path` with `ffmpeg_runner._replace_output`'s retrying replace.
+  Stop/failure just deletes the folder — a user's existing file is never
+  touched unless the download succeeded.
+- **One pipe** (`stderr=STDOUT`): yt-dlp prints download progress on stdout
+  but post-processing events and errors on **stderr** (confirmed). Marker
+  lines: `LLAMA_FORMATS` (a merge's chosen formats — prints `[]`, not NA, for
+  a single format; that once wiped the size budget), `LLAMA_FORMAT id size`
+  (single format), `LLAMA_DL <format_id> {json}` per stream,
+  `LLAMA_PP {status, postprocessor}`, `LLAMA_FILE`. If the fallback selector
+  picked different IDs, the byte budget is rebuilt from what was chosen.
+- **Progress is time-based**: `elapsed / (elapsed + remaining)`, computed in
+  `poll_events()` on the Tk thread, never backward, capped at 0.99 until the
+  file is in place, paused time excluded. Remaining = bytes left across all
+  parts ÷ speed, plus the post step — before it starts, guessed from the
+  last measured rate this session (`_learned`); while it runs, from how fast
+  the work folder is growing. Two corrections from real runs:
+  **speed is bytes received over a 20s window**, not yt-dlp's instantaneous
+  figure (one burst after a stall jumped the bar 15% → 78%, where
+  never-backward then pinned it for two minutes), and **the bar eases
+  toward its target** (`_EASE` per poll) so a momentary spike only nudges
+  it. On an unthrottled audio → mp3 job the bar tracked true elapsed time
+  within a few percent throughout.
+- Folder size uses `os.stat(path)`, not `DirEntry.stat()` — see Known issues.
 
 ## Conventions
 
@@ -1820,6 +2223,12 @@ dict never carries a placeholder around as if it were a real choice.
 - Tab classes take `(self, master, app)` and subclass `ctk.CTkFrame`.
 
 ## Known issues / gotchas
+
+- **On Windows, `os.scandir()`'s `DirEntry.stat().st_size` is stale for a
+  file another process still has open** — it's the directory listing's
+  cached size, which isn't updated until the handle closes. A growing
+  download/merge output read as 0 bytes the whole time (confirmed); use
+  `os.stat(entry.path)` for a live size (`ytdlp_runner._folder_bytes`).
 
 - **Trim with an input-side `-ss` plus an output-side `-t`, never an
   output-side `-to`.** Verified by frame-counting real outputs: an input-side

@@ -17,6 +17,7 @@ for the full argv.
 import ffmpeg
 
 from core import ffmpeg_vars as v
+from core.tools import tool_path
 from core.utilities import (
     VULKAN_DEVICE_FLAGS, libplacebo_tonemap_vf, supports_fps_mode, supports_libplacebo,
 )
@@ -288,4 +289,4 @@ def compile_command(output_path=None):
     prefix = list(_RUNNER_FLAGS)
     if uses_hdr_tonemap():
         prefix += VULKAN_DEVICE_FLAGS
-    return ffmpeg.compile(graph, cmd=["ffmpeg", *prefix])
+    return ffmpeg.compile(graph, cmd=[tool_path("ffmpeg"), *prefix])

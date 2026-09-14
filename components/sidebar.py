@@ -21,7 +21,7 @@ class Sidebar(ctk.CTkFrame):
         self.title_label.pack(padx=20, pady=(20, 10))
 
         # Logo
-        self.pil_llama = Image.open("llama.png")
+        self.pil_llama = Image.open("assets/llama.png")
         self.title_llama = ctk.CTkImage(
             light_image=self.pil_llama, dark_image=self.pil_llama, size=(140, 140)
         )
@@ -40,12 +40,12 @@ class Sidebar(ctk.CTkFrame):
         self.btn_tab2.pack(padx=20, pady=10)
 
         self.btn_tab3 = ctk.CTkButton(
-            master=self, text="Queue", command=lambda: self.app.show_tab("Queue")
+            master=self, text="Downloader", command=lambda: self.app.show_tab("Downloader")
         )
         self.btn_tab3.pack(padx=20, pady=10)
 
         self.btn_tab4 = ctk.CTkButton(
-            master=self, text="YT-DLP", command=lambda: self.app.show_tab("YT-DLP")
+            master=self, text="Queue", command=lambda: self.app.show_tab("Queue")
         )
         self.btn_tab4.pack(padx=20, pady=10)
 
@@ -60,7 +60,7 @@ class Sidebar(ctk.CTkFrame):
         # second, landing just above it.
         self.footer_label = ctk.CTkLabel(
             master=self,
-            text=f"{datetime.now().year} Yezan Smadi     v0.5.0-alpha.5",
+            text=f"{datetime.now().year} Yezan Smadi     v0.5.0-alpha.6",
             font=ctk.CTkFont(size=10),
             text_color=theme["primary_text"],
         )
@@ -81,7 +81,7 @@ class Sidebar(ctk.CTkFrame):
         self.buttons = {
             "Muxing": self.btn_tab1,
             "Encoding": self.btn_tab2,
-            "Queue": self.btn_tab3,
-            "YT-DLP": self.btn_tab4,
+            "Downloader": self.btn_tab3,
+            "Queue": self.btn_tab4,
             "Settings": self.btn_settings,
         }

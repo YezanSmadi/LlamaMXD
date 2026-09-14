@@ -29,6 +29,14 @@ _CTK_ACCENT_PRESSED = ["#27577D", "#203A4F"]
 # (secondary) — otherwise a light secondary (e.g. Shire's #DAE2ED) leaves
 # near-white text on a near-white button, i.e. invisible.
 _CTK_ACCENT_TEXT = ["#DCE4EE", "#DCE4EE"]
+# The same three widgets' `text_color_disabled` (CTk never dims a disabled
+# widget's fill, only its text — see disabled_text_on's docstring), so a
+# disabled dropdown/segmented-button/button is still filled with the full
+# accent color. CTkCheckBox/CTkSwitch/CTkRadioButton use a *different* stock
+# pair (["gray60", "gray45"]) for this, left untouched — their disabled text
+# sits on the plain window background, not an accent fill, so CTk's own
+# adaptive grey is fine there.
+_CTK_ACCENT_TEXT_DISABLED = ["gray74", "gray60"]
 
 DEFAULT_THEME_NAME = "Lemon"
 
@@ -95,6 +103,53 @@ def readable_text_on(hex_color):
     return "black" if contrast_black >= contrast_white else "white"
 
 
+def _gray_hex_for_luminance(lum):
+    """Inverse of the WCAG relative-luminance formula for a neutral grey
+    (equal R=G=B), rounded to the nearest hex channel value."""
+    lum = max(0.0, min(1.0, lum))
+    channel = lum * 12.92 if lum <= 0.0031308 else 1.055 * (lum ** (1 / 2.4)) - 0.055
+    value = max(0, min(255, round(channel * 255)))
+    return f"#{value:02x}{value:02x}{value:02x}"
+
+
+def disabled_text_on(hex_color, target_ratio=3.0):
+    """A "greyed out" text color for CTk's disabled state that still stays
+    legible on `hex_color` — needed because CTk's disabled state only dims a
+    widget's *text*, never its fill (`CTkButton`/`CTkOptionMenu`/
+    `CTkSegmentedButton` all keep painting their full accent color when
+    disabled; see CLAUDE.md). CTk's own stock disabled grey (gray74 light /
+    gray60 dark) reads fine against a very dark or very light accent, but on
+    a mid-brightness one — Lemon's `#3B8ED0` secondary, Vaporwave's
+    `#ED72D4` — it sits close enough in brightness to nearly vanish
+    (confirmed: WCAG contrast ~1.1-1.2, verified against every theme).
+
+    Rather than a single fixed grey, this solves for the grey brightness that
+    hits `target_ratio` against this *specific* color, on whichever side
+    (darker or lighter) already has more contrast headroom (the same side
+    `readable_text_on` would pick) — so it's still a genuine desaturated
+    grey, and only pushes as far toward black/white as this background
+    actually needs to stay readable, rather than every theme sharing one
+    compromise value that only fits some of them.
+
+    `target_ratio` defaults to 3.0 — WCAG's own minimum for non-text/UI-
+    component contrast (SC 1.4.11), deliberately looser than the 4.5 used
+    for real body text. 4.5 was tried first and read as too dark/light —
+    on Lemon's blue in particular the disabled dropdown text came out close
+    enough to solid black to look like ordinary enabled text rather than a
+    greyed-out control, i.e. readable but no longer visibly *disabled*. 3.0
+    is enough to fix the original near-invisible gray74/gray60 (~1.1:1 on
+    Lemon/Vaporwave) while keeping a genuine mid-grey, disabled-looking
+    result rather than one that reads as full-contrast text."""
+    lum = _relative_luminance(hex_color)
+    contrast_black = (lum + 0.05) / 0.05
+    contrast_white = 1.05 / (lum + 0.05)
+    if contrast_black >= contrast_white:
+        target_lum = (lum + 0.05) / target_ratio - 0.05
+    else:
+        target_lum = target_ratio * (lum + 0.05) - 0.05
+    return _gray_hex_for_luminance(target_lum)
+
+
 def get_theme(name=None):
     """Returns the full color palette for a theme name — primary/
     primary_hover/primary_text/secondary/secondary_hover/secondary_text —
@@ -106,9 +161,11 @@ def get_theme(name=None):
         "primary": colors["primary"],
         "primary_hover": colors.get("primary_hover") or _darken(colors["primary"]),
         "primary_text": readable_text_on(colors["primary"]),
+        "primary_disabled_text": disabled_text_on(colors["primary"]),
         "secondary": colors["secondary"],
         "secondary_hover": colors.get("secondary_hover") or _darken(colors["secondary"]),
         "secondary_text": readable_text_on(colors["secondary"]),
+        "secondary_disabled_text": disabled_text_on(colors["secondary"]),
     }
 
 
@@ -155,20 +212,23 @@ def get_active_theme():
     return get_theme(load_settings().get("theme"))
 
 
-def _substitute_ctk_accents(node, secondary, secondary_hover, secondary_pressed, secondary_text):
+def _substitute_ctk_accents(node, secondary, secondary_hover, secondary_pressed, secondary_text,
+                             secondary_disabled_text):
     """Recursively walks a CTk theme JSON structure, replacing every
     occurrence of CTk's own hardcoded accent-blue value pairs with the
     given theme's secondary colors (flattened to a single shade repeated
     for both the light and dark slots, so appearance mode never changes
-    them), and CTk's on-accent label color with `secondary_text` (the
-    adaptive black/white for that secondary) — everything else
-    (backgrounds, borders, neutral greys, corner radii, and the separate
+    them), CTk's on-accent label color with `secondary_text` (the adaptive
+    black/white for that secondary), and CTk's on-accent *disabled* label
+    color with `secondary_disabled_text` (see disabled_text_on) — everything
+    else (backgrounds, borders, neutral greys, corner radii, and the separate
     text-on-window-background color) is left exactly as CTk's own bundled
     theme defines it, since only the accent color role is part of "the
     theme" here."""
     if isinstance(node, dict):
         return {
-            key: _substitute_ctk_accents(value, secondary, secondary_hover, secondary_pressed, secondary_text)
+            key: _substitute_ctk_accents(value, secondary, secondary_hover, secondary_pressed,
+                                          secondary_text, secondary_disabled_text)
             for key, value in node.items()
         }
     if isinstance(node, list):
@@ -180,6 +240,8 @@ def _substitute_ctk_accents(node, secondary, secondary_hover, secondary_pressed,
             return [secondary_pressed, secondary_pressed]
         if node == _CTK_ACCENT_TEXT:
             return [secondary_text, secondary_text]
+        if node == _CTK_ACCENT_TEXT_DISABLED:
+            return [secondary_disabled_text, secondary_disabled_text]
         return node
     return node
 
@@ -203,7 +265,7 @@ def _ctk_theme_path(theme_name):
     secondary_pressed = _darken(palette["secondary_hover"])
     generated_theme = _substitute_ctk_accents(
         base_theme, palette["secondary"], palette["secondary_hover"],
-        secondary_pressed, palette["secondary_text"],
+        secondary_pressed, palette["secondary_text"], palette["secondary_disabled_text"],
     )
 
     with open(generated_path, "w") as f:

@@ -10,6 +10,7 @@ import cv2
 from PIL import Image
 
 from core import formats
+from core.tools import tool_path
 
 # Windows-only flag that keeps ffprobe from flashing a console window over
 # the GUI. Absent on other platforms, hence the getattr default.
@@ -318,7 +319,7 @@ def _probe_hdr_static_metadata(path):
              "max_cll": None, "max_fall": None}
     try:
         completed = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+            [tool_path("ffprobe"), "-v", "error", "-select_streams", "v:0",
              "-read_intervals", "0%+#1", "-show_frames", "-of", "json", path],
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
         )
@@ -461,7 +462,7 @@ def probe_media(path):
 
     try:
         completed = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries",
+            [tool_path("ffprobe"), "-v", "error", "-show_entries",
              "stream=codec_type,codec_name,profile,level,channels,sample_rate,"
              "bit_rate,width,height,color_transfer,color_primaries:"
              "stream_tags=language:format=duration",
@@ -545,7 +546,7 @@ def probe_duration(path):
         return None
     try:
         completed = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+            [tool_path("ffprobe"), "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", path],
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
         )
@@ -579,7 +580,7 @@ def verify_hdr_sdr_tag(path):
     three-state convention as every other probe result in this module)."""
     try:
         completed = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+            [tool_path("ffprobe"), "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=color_transfer",
              "-of", "default=noprint_wrappers=1:nokey=1", path],
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
@@ -603,7 +604,7 @@ def supports_fps_mode():
     if _fps_mode_supported is None:
         try:
             completed = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-h", "full"],
+                [tool_path("ffmpeg"), "-hide_banner", "-h", "full"],
                 capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
             )
             _fps_mode_supported = "-fps_mode" in (completed.stdout or "")
@@ -629,7 +630,7 @@ def supports_libplacebo():
     if _libplacebo_supported is None:
         try:
             completed = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-filters"],
+                [tool_path("ffmpeg"), "-hide_banner", "-filters"],
                 capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
             )
             _libplacebo_supported = "libplacebo" in (completed.stdout or "")
@@ -655,7 +656,7 @@ def av1_preset_range():
         _av1_preset_range = (0, 8)
         try:
             completed = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-h", "encoder=libsvtav1"],
+                [tool_path("ffmpeg"), "-hide_banner", "-h", "encoder=libsvtav1"],
                 capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
             )
             match = re.search(r"-preset\s+<int>.*?\(from (-?\d+) to (-?\d+)\)", completed.stdout or "")
@@ -799,7 +800,7 @@ def extract_hdr_tonemapped_thumbnails(video_path, count=10):
             out_path = os.path.join(tmp_dir, f"frame_{i:03d}.png")
             try:
                 subprocess.run(
-                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                    [tool_path("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
                      *VULKAN_DEVICE_FLAGS,
                      "-ss", f"{frame_index / fps:.3f}", "-i", video_path,
                      "-vf", vf,

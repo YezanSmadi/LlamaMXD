@@ -7,7 +7,7 @@ import customtkinter as ctk
 from tkinterdnd2 import TkinterDnD
 from PIL import Image
 
-from core import formats
+from core import downloader, formats
 from core.utilities import extract_hdr_tonemapped_thumbnails, extract_video_thumbnails, probe_media
 from core.theme import get_active_theme, load_settings, apply_ctk_theme
 from components.dialogs import ask_yes_no
@@ -37,7 +37,7 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         y_center = (height - scaled_h) // 2
         self.geometry(f"{scaled_w}x{scaled_h}+{x_center}+{y_center}")
         self.title("LlamaMXD")
-        self.iconbitmap("llama.ico")
+        self.iconbitmap("assets/llama.ico")
         self.resizable(False, False)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -87,6 +87,20 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         # thread-safe. _drain_thumbnails polls it on the main thread.
         self._thumb_queue = queue.Queue()
         self._thumb_pending = 0
+        # Downloader: the last successful fetch (`{"url", "info", "thumb"}`), kept
+        # here rather than on the tab so a live theme rebuild restores the
+        # form without fetching again; and a token so a slow fetch of a link
+        # the user has since replaced is dropped on arrival. Both ride the
+        # same worker queue/poller as the thumbnails above.
+        self.ytdlp_cache = None
+        self._ytdlp_token = 0
+        # Whether the startup check found no usable Deno (YouTube's JS
+        # challenge solver). False until the check says otherwise — warn-only,
+        # so "unknown" must never show the banner.
+        self.deno_missing = False
+        self._thumb_pending += 1
+        threading.Thread(target=self._deno_check_worker, daemon=True).start()
+        self.after(80, self._drain_thumbnails)
         # HDR->SDR preview (EncodingTab's hdr_switch — Muxing has no HDR
         # toggle). Lives here, not on EncodingTab, specifically so a live
         # theme rebuild (which destroys and reconstructs Muxing/Encoding
@@ -163,7 +177,7 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
             "Muxing": MuxingTab(master=self, app=self),
             "Encoding": EncodingTab(master=self, app=self),
             "Queue": QueueTab(master=self, app=self),
-            "YT-DLP": YtDlpTab(master=self, app=self),
+            "Downloader": YtDlpTab(master=self, app=self),
             "Settings": SettingsTab(master=self, app=self),
         }
         self.show_tab("Muxing")
@@ -315,11 +329,59 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
             if kind == "info":
                 self._deliver_media_info(token, path, payload)
                 continue
+            if kind == "ytdlp_info":
+                self._thumb_pending = max(0, self._thumb_pending - 1)
+                self._deliver_ytdlp_info(token, path, *payload)
+                continue
+            if kind == "deno":
+                self._thumb_pending = max(0, self._thumb_pending - 1)
+                self._deliver_deno_check(payload)
+                continue
             # "frames" is the worker's last message — clear its pending slot.
             self._thumb_pending = max(0, self._thumb_pending - 1)
             self._deliver_thumbnails(token, path, payload)
         if self._thumb_pending > 0:
             self.after(80, self._drain_thumbnails)
+
+    def _deno_check_worker(self):
+        """Off-thread: whether a usable Deno exists (a `deno --version`
+        subprocess, cached by core.downloader for every later yt-dlp call)."""
+        self._thumb_queue.put(("deno", 0, None, downloader.deno_path()))
+
+    def _deliver_deno_check(self, deno_path):
+        """Records the Deno check and tells the Downloader tab."""
+        self.deno_missing = deno_path is None
+        tab = self.tabs.get("Downloader") if hasattr(self, "tabs") else None
+        if tab is not None and tab.winfo_exists():
+            tab.set_deno_missing(self.deno_missing)
+
+    def fetch_ytdlp_info(self, url):
+        """Fetches a link's yt-dlp info + thumbnail on a daemon thread and
+        hands the result to the Downloader tab's `on_ytdlp_info` when it lands."""
+        self._ytdlp_token += 1
+        self._thumb_pending += 1
+        threading.Thread(
+            target=self._ytdlp_worker, args=(self._ytdlp_token, url), daemon=True
+        ).start()
+        if self._thumb_pending == 1:
+            self.after(80, self._drain_thumbnails)
+
+    def _ytdlp_worker(self, token, url):
+        """Off-thread fetch. Must not touch a widget — queue only."""
+        info, error = downloader.fetch_info(url)
+        thumb = downloader.download_thumbnail(info.get("thumbnail")) if info else None
+        self._thumb_queue.put(("ytdlp_info", token, url, (info, error, thumb)))
+
+    def _deliver_ytdlp_info(self, token, url, info, error, thumb):
+        """Caches a successful fetch and passes the result to the tab,
+        dropping it if another fetch has started since (stale token)."""
+        if token != self._ytdlp_token or not self.winfo_exists():
+            return
+        if info is not None:
+            self.ytdlp_cache = {"url": url, "info": info, "thumb": thumb}
+        tab = self.tabs.get("Downloader")
+        if tab is not None and tab.winfo_exists():
+            tab.on_ytdlp_info(url, info, error, thumb)
 
     def _deliver_media_info(self, token, path, info):
         """Caches and broadcasts a probe result, dropping it if the user has
@@ -567,10 +629,11 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
         change color live is to reload the theme and then rebuild the
         widgets that read it.
 
-        Muxing/Encoding/YT-DLP/Settings are destroyed and rebuilt from
+        Muxing/Encoding/Downloader/Settings are destroyed and rebuilt from
         scratch; Muxing/Encoding's field values are snapshotted first and
         restored via load_settings() so the user doesn't lose an in-progress
-        form. The Queue tab is deliberately *not* rebuilt — destroying it
+        form (Downloader restores from the app's cached fetch — no re-fetch).
+        The Queue tab is deliberately *not* rebuilt — destroying it
         would discard its task list — it instead gets its own in-place
         QueueTab.refresh_theme() call, recoloring its already-built widgets
         without touching self._rows or any in-flight animation."""
@@ -583,12 +646,13 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
 
         muxing_settings = self.tabs["Muxing"]._gather_settings()
         encoding_settings = self.tabs["Encoding"]._gather_settings()
+        ytdlp_settings = self.tabs["Downloader"]._gather_settings()
         active_tab_name = self._current_tab_name
 
         self.sidebar.destroy()
         self.tab_indicator.destroy()
         self.tab_indicator_line.destroy()
-        for name in ("Muxing", "Encoding", "YT-DLP", "Settings"):
+        for name in ("Muxing", "Encoding", "Downloader", "Settings"):
             self.tabs[name].destroy()
         self.tab_ui_registry = []  # entries above pointed at widgets just destroyed
 
@@ -619,11 +683,12 @@ class LlamaGUI(ctk.CTk, TkinterDnD.DnDWrapper):
 
         self.tabs["Muxing"] = MuxingTab(master=self, app=self)
         self.tabs["Encoding"] = EncodingTab(master=self, app=self)
-        self.tabs["YT-DLP"] = YtDlpTab(master=self, app=self)
+        self.tabs["Downloader"] = YtDlpTab(master=self, app=self)
         self.tabs["Settings"] = SettingsTab(master=self, app=self)
 
         self.tabs["Muxing"].load_settings(muxing_settings)
         self.tabs["Encoding"].load_settings(encoding_settings)
+        self.tabs["Downloader"].load_settings(ytdlp_settings)
         self.tabs["Queue"].refresh_theme()
 
         self.show_tab(active_tab_name)

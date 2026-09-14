@@ -15,19 +15,34 @@ LlamaPY GUI/
 ├── .gitignore
 ├── .vscode/
 │   └── settings.json
-├── llama.ico
-├── llama.png
+├── assets/
+│   ├── llama.ico
+│   ├── llama.png
+│   ├── audio-mute.png
+│   ├── audio-mute.svg
+│   ├── Wave Loop.json
+│   ├── info-icon-dark.png
+│   ├── info-icon-light.png
+│   └── (source design files: dark/light mode info icon .eps/.jpg, not read by code)
+├── scripts/
+│   └── make_info_badges.py
 ├── core/
 │   ├── app.py
+│   ├── downloader.py
+│   ├── ffmpeg_build.py
+│   ├── ffmpeg_runner.py
+│   ├── ffmpeg_vars.py
 │   ├── formats.py
 │   ├── presets.py
 │   ├── theme.py
 │   └── utilities.py
 ├── components/
 │   ├── animated_switch.py
+│   ├── audio_stream_dialog.py
 │   ├── dialogs.py
 │   ├── drop_box.py
 │   ├── dropdown.py
+│   ├── marquee_label.py
 │   ├── sidebar.py
 │   ├── sub_tab_bar.py
 │   ├── summary_panel.py
@@ -41,6 +56,11 @@ LlamaPY GUI/
     ├── settings_tab.py
     └── ytdlp_tab.py
 ```
+
+Not shown: `settings.json`, `presets.json`, and `_generated_themes/` are all
+gitignored runtime artifacts, created on first use rather than checked in —
+see "Files referenced in `.gitignore` but not present in a checkout" at the
+end of this document.
 
 There are no `__init__.py` files anywhere — `core`, `components`, and `tabs`
 work as Python implicit namespace packages, and every import in the project
@@ -116,18 +136,51 @@ VS Code Python extension to use the system Python interpreter rather than
 prompting to create/select a virtual environment, consistent with the
 project's "installed globally, no venv" setup described in `CLAUDE.md`.
 
-### `llama.ico`
+### `assets/`
 
-The Windows application icon (used by `LlamaGUI.iconbitmap("llama.ico")` in
-`core/app.py`). Binary `.ico` asset — must exist in the repo root at launch
-time since it's loaded by a relative path.
+Every binary/media asset the app loads at runtime lives here (moved out of
+the repo root so the root only holds source and project files).
 
-### `llama.png`
+- **`llama.ico`** — the Windows application icon, loaded by
+  `LlamaGUI.iconbitmap("assets/llama.ico")` in `core/app.py`, and identically
+  by `components/dialogs.py`'s `MessageDialog` and
+  `components/audio_stream_dialog.py`'s `AudioStreamPickerDialog` (both
+  wrapped in a bare `except` — a missing icon must never take a dialog
+  down). Loaded by a path relative to the process's current working
+  directory, which is why the app must be launched from the repo root.
+- **`llama.png`** — the llama logo shown in the sidebar, loaded via
+  `PIL.Image.open("assets/llama.png")` in `components/sidebar.py` and
+  rendered at 140×140 as a `CTkImage`. Also a cwd-relative path.
+- **`audio-mute.png`** / **`audio-mute.svg`** — the red speaker-with-X badge
+  composited into a preview's top-left corner while audio is stripped
+  (`components/thumbnail_carousel.py`). The `.svg` is the badge's source
+  artwork, not itself loaded by any code. Loaded `__file__`-anchored (see
+  `components/thumbnail_carousel.py` below), so unlike `llama.ico`/`.png`
+  this one is launch-directory independent.
+- **`Wave Loop.json`** — the Bodymovin/Lottie export of the dot-wave
+  animation shown in place of a stripped or audio-only preview, rendered by
+  `rlottie-python` (`components/thumbnail_carousel.py`). Also
+  `__file__`-anchored.
+- **`info-icon-dark.png`** / **`info-icon-light.png`** — the bottom-left
+  info badge shown once a file's been probed (see `components/
+  thumbnail_carousel.py` below), one per CTk appearance mode. Generated from
+  the checked-in `dark mode info icon.jpg` / `light mode info icon vector.jpg`
+  source art by `scripts/make_info_badges.py` (crops to the drawn circle and
+  clips it to a transparent-cornered circular mask). The `.eps` files beside
+  them are original vector source art, not read by any code.
 
-The llama logo image shown in the sidebar (loaded via `PIL.Image.open` in
-`components/sidebar.py` and rendered at 140×140 as a `CTkImage`). Also
-loaded by relative path — this is the other reason the app must be run from
-the repo root.
+### `scripts/make_info_badges.py`
+
+A one-off conversion script, not imported by the app: turns the two source
+JPGs (`dark mode info icon.jpg` / `light mode info icon vector.jpg`) into the
+transparent-cornered `info-icon-dark.png`/`info-icon-light.png` badges
+`ThumbnailCarousel` actually loads. `content_bbox` finds the drawn circle's
+bounding box (everything that isn't near-white), crops to a square around its
+center, then clips to a supersampled circular alpha mask sized to that same
+box — preserving each icon's own interior fill exactly as drawn rather than
+chroma-keying out white (which would also hollow out the light badge's white
+interior). Run manually (`python scripts/make_info_badges.py`) only when a
+source `.jpg` is replaced.
 
 ---
 
@@ -155,9 +208,9 @@ interpreter instance.
   both an overly-square window (at 0.5) and a window too short for its
   content, which used to let the packer silently compress the DropBox below
   its configured size.
-- Sets the window title to `"LlamaMXD"`, loads `llama.ico` as the taskbar/
-  title-bar icon, and calls `self.resizable(False, False)` — the window is
-  permanently fixed-size.
+- Sets the window title to `"LlamaMXD"`, loads `assets/llama.ico` as the
+  taskbar/title-bar icon, and calls `self.resizable(False, False)` — the
+  window is permanently fixed-size.
 - Binds `WM_DELETE_WINDOW` (the OS close button) to `self.on_close`.
 - Configures a 1-column-of-two, 1-row grid: column 0 (the sidebar) is
   fixed-width by default, column 1 (whichever tab is showing) has
@@ -270,12 +323,32 @@ resets each freshly-built carousel to 0).
 `_deliver_media_info(self, token, path, info)`: same stale-token guard as
 the thumbnails; otherwise stores `self.media_info` / `self._media_info_path`
 and calls `_broadcast_media_info()`, which hands the probe to every tab
-exposing an `on_media_info` method (Muxing and Encoding). `media_info` is
-`{"container", "video", "audio"}` and any field may be `None` — it only ever
-*improves* defaults, so nothing depends on it succeeding.
-`update_global_file` clears it the moment the selected path changes, so a
-tab can never render the previous input's codecs against the new one while
-a fresh probe is still in flight.
+exposing an `on_media_info` method (Muxing and Encoding). `media_info` is the
+full dict `core.utilities.probe_media` returns — container, video/audio
+codec + profile/level/HDR flag/resolution, per-stream `has_video`/
+`has_audio`, `audio_streams` (every audio stream, for the multi-track
+picker), duration/file size, and (HDR sources only) the probed ST 2086
+mastering peak / MaxCLL / MaxFALL — see `core/utilities.py` below for the
+full shape. Any field may be `None` — it only ever *improves* defaults, so
+nothing depends on it succeeding. `update_global_file` clears it the moment
+the selected path changes, so a tab can never render the previous input's
+codecs against the new one while a fresh probe is still in flight.
+
+`start_hdr_render(self, path)` / `_hdr_render_worker` / `_poll_hdr_queue`:
+a second, on-demand cache/decode pipeline, parallel to the thumbnail one
+above but for the HDR→SDR tone-mapped preview `EncodingTab` shows once its
+HDR→SDR switch is on. `start_hdr_render` is a no-op if `path` is already
+cached (`self.hdr_frames_path`) or already rendering; otherwise it bumps a
+token, starts a daemon thread running `core.utilities.
+extract_hdr_tonemapped_thumbnails` (real ffmpeg + libplacebo decodes, far
+slower than the plain cv2 thumbnails), and arms `_poll_hdr_queue` (every
+120ms) to deliver the result — same worker/queue/poll shape as
+`_decode_worker`/`_drain_thumbnails`, and the same stale-token discard. The
+result broadcasts to every tab exposing `on_hdr_frames_ready` (today, only
+`EncodingTab`). This lives on `LlamaGUI` rather than the tab itself
+specifically so the render survives a live theme rebuild (which destroys and
+reconstructs `EncodingTab`) instead of being thrown away and re-rendered
+from scratch — a render can take several seconds on a real HDR source.
 
 `sync_preview_index(self, index)`: a carousel was scrubbed to `index` (via its
 `on_index` callback); mirrors it onto every other registered carousel with
@@ -431,7 +504,7 @@ except `Noir` (white); white on every secondary except `Lemon`'s brighter
 `settings.json` file at the repo root (derived from this file's own
 location via `os.path.dirname(os.path.dirname(...))`, not a bare relative
 path, so it doesn't depend on the process's current working directory the
-way `llama.ico`/`llama.png` do). `settings.json` is `.gitignore`d — it's a
+way `assets/llama.ico`/`assets/llama.png` do). `settings.json` is `.gitignore`d — it's a
 local user preference file, not shared repository state, and is created on
 first save rather than checked in. `load_settings()` returns defaults
 (`{"theme": "Lemon", "appearance_mode": "System", "default_save_location":
@@ -497,23 +570,55 @@ then decides which profiles/levels exist and what kind of rate control
 applies. Nothing flows the other way, which is what makes an illegal
 combination unrepresentable rather than something a dialog has to catch.
 
-- `SOURCE` (`"Source"`) — a first-class value in every codec list meaning
-  "whatever the input already has", i.e. stream-copy. The default
-  everywhere, so an untouched form is a passthrough.
-- `VIDEO_ENCODERS` / `AUDIO_ENCODERS` — display name → ffmpeg encoder id.
-  The ids aren't called yet (no pipeline), but the mapping lives here so the
-  eventual subprocess builder has one lookup instead of scattered if/elif.
-- `_CONTAINERS` — the matrix. Exists because of **WebM**, which shares no
-  video codec with mp4/mov: before this, picking `.webm` left every encoder
-  in the list illegal. Read by `containers()`, `video_codecs_for(container)`
-  and `audio_codecs_for(container)` (both SOURCE-first).
+- `SELECT` (`"Select"`) — the one "nothing picked/resolved yet" placeholder,
+  shared by every derived list in this module (Encoder, Audio Codec, Audio
+  Channels, Audio Sample Rate, Audio Bitrate). It's the default until a file
+  is probed, at which point `EncodingTab` auto-resolves each of those
+  controls to whatever the source already has (`core.utilities.probe_media`)
+  — never a silent stream copy; that's Muxing's job. Encoder/Audio Codec
+  additionally block the job in `_validate_settings` while left on `Select`
+  with the stream actually present; Channels/Sample Rate/Bitrate don't need
+  that, since omitting `-ac`/`-ar`/`-b:a` is always a valid "follow the
+  source" outcome.
+- `VIDEO_ENCODERS` / `AUDIO_ENCODERS` — display name → ffmpeg encoder id,
+  read by `core/ffmpeg_vars.py` when building a real job's argv. Video:
+  H.264/H.265/MPEG-4/MPEG-2/VP8/VP9/AV1 plus three mezzanine/archival
+  intermediates — **ProRes** (`prores_ks`), **DNxHR** (`dnxhd` — the same
+  ffmpeg encoder covers classic DNxHD and the modern DNxHR tiers), and
+  **CineForm** (`cfhd`) — and lossless **FFV1**. Audio: AAC/AC3/E-AC-3/MP3/
+  FLAC/Opus/Vorbis/ALAC/PCM.
+- `PASSTHRU_ONLY_CODECS` (`{"DTS", "Dolby TrueHD"}`) / `is_passthru_only
+  (codec)` — codecs `probe_media` can identify but this app has no re-encode
+  path for at all (surround/Atmos transcoding is out of scope); a track
+  holding one always passes through untouched. `EncodingTab` auto-forces its
+  Passthru checkbox and greys the rest of the audio controls the moment one
+  of these is probed, rather than leaving it stranded on `SELECT`.
+- `_CONTAINERS` — the matrix, now four containers: `.mp4`, `.mkv` (the
+  permissive catch-all — every codec this app has), `.mov` (the native
+  container for the three professional intermediates above, alongside
+  H.264/H.265/MPEG-4), and `.webm` (VP8/VP9/AV1 + Opus/Vorbis only — it
+  shares no video codec with mp4/mov, which is why this table exists at
+  all: before it, picking `.webm` left every encoder in the list illegal).
+  Read by `containers()`, `video_codecs_for(container)` and
+  `audio_codecs_for(container)` (both `SELECT`-first).
 - `_ENCODER_SPECS` — per-codec `profiles`, `levels` and `quality`. Profile
   names are deliberately *not* shared between codecs, and CRF is not assumed
   universal: MPEG-4/MPEG-2 take a **qscale on 1-31**, VP8/VP9/AV1 use 0-63,
   H.264/H.265 use 0-51. `quality_for(encoder)` returns kind/label/range/
-  default/end-labels together so the UI can re-range its slider. An empty
-  `profiles`/`levels` list means the codec has none and the UI disables that
-  dropdown rather than borrowing H.264's values.
+  default/end-labels together so the UI can re-range its slider — `None` for
+  `SELECT` (nothing picked yet) *and* for ProRes/DNxHR/FFV1/CineForm, which
+  genuinely have no CRF/qscale knob at all: ProRes/DNxHR's "quality" is a
+  fixed-bitrate profile tier, CineForm's is its own `-quality` preset ladder
+  riding the Profile dropdown slot instead (see `core/ffmpeg_vars.py`'s
+  `_QUALITY_PRESET_ARGS`/`_NO_PROFILE_FLAG` below), and FFV1 is lossless. An
+  empty `profiles`/`levels` list means the codec has none and the UI
+  disables that dropdown rather than borrowing H.264's values.
+- `_SPEED_SPECS` / `speed_values_for` / `speed_kind_for` / `speed_default_for`
+  — per-encoder speed control: a named `-preset` ladder for H.264/H.265/AV1,
+  or libvpx's numeric `-cpu-used` (+ a fixed `-deadline good`) for VP8/VP9.
+  AV1's static fallback list is overridden by the installed ffmpeg's own
+  reported preset range when available (`core.utilities.av1_preset_range` —
+  SVT-AV1's ceiling varies a lot by build). Absent for MPEG-2/MPEG-4/`SELECT`.
 - `audio_bitrates_for(codec)` — empty for copy/lossless codecs, whose rate
   isn't ours to set. `AUDIO_BITRATES`' own entries are display text, not
   raw numbers — `"96 kbps"` … `"768 kbps"`, then `"1 Mbps"`/`"1.5 Mbps"`
@@ -527,10 +632,15 @@ combination unrepresentable rather than something a dialog has to catch.
   without re-encoding. A `None` codec constrains nothing, so an unprobed
   file still offers everything.
 - `FFPROBE_VIDEO` / `FFPROBE_AUDIO` — ffprobe `codec_name` → display name,
-  consumed by `utilities.probe_media`.
+  consumed by `utilities.probe_media`. Includes the two passthru-only codecs
+  above (`"dts"` → `"DTS"`, `"truehd"` → `"Dolby TrueHD"`).
+- `AUDIO_EXTENSIONS` — file extensions treated as audio-only when no probe
+  can run; only decides whether the preview shows the Wave Loop visualiser
+  instead of video thumbnails.
 - `short_name(codec)` — `"H.264 (x264)"` → `"H.264"`, for the width-starved
-  Overview rundown. `coerce(value, allowed, fallback)` snaps a value into a
-  list and reports whether it changed.
+  Overview rundown (a no-op for every current codec, kept defensively).
+  `coerce(value, allowed, fallback)` snaps a value into a list and reports
+  whether it changed.
 
 ### `core/presets.py`
 
@@ -553,43 +663,297 @@ failed write can't take the app down mid-interaction.
 
 ### `core/utilities.py`
 
-A small, stateless helper module: preview-frame extraction and a media
-probe.
+A stateless helper module: preview-frame extraction, ffprobe-based media
+probing, HDR tone-mapping helpers, and a few one-per-process ffmpeg
+capability checks. No Tk.
+
+**Thumbnails**
 
 `extract_video_thumbnails(video_path, count=10)`: Opens `video_path` with
 `cv2.VideoCapture` and reads `count` frames spread evenly across the video's
-*interior* — sample points are the fractions `(i+1)/(count+1)` of the frame
-count (i.e. 1/11, 2/11 … 10/11 for the default), deliberately avoiding a
-black/blank first frame and an end-credits or fade-out last frame. For each
-point it `cap.set(cv2.CAP_PROP_POS_FRAMES, target)` then `cap.read()`,
-converts BGR→RGB, and wraps the frame in a `PIL.Image` via
-`Image.fromarray`. Returns a list of raw, unsized images:
-- 1–`count` long — shorter if the clip is too short to yield that many
-  distinct frame indices (the target set is deduped) or some seeks fail;
-- a single first-frame read when `CAP_PROP_FRAME_COUNT` is `<= 0` (some
-  webm / streamed sources report no usable count);
-- an empty list if nothing decodes at all (not a video, missing codec).
+*interior* (`_interior_sample_frames` — the fractions `(i+1)/(count+1)`,
+deliberately avoiding a black/blank first frame and an end-credits/fade-out
+last frame). For each point it seeks, reads, converts BGR→RGB, and wraps the
+frame in a `PIL.Image`. Returns 1–`count` images (shorter if the clip is too
+short or some seeks fail), a single first-frame read when the container
+reports no usable frame count, or `[]` if nothing decodes at all.
 
-The capture handle is released in a `finally`. Callers scale each frame
-themselves (see `ThumbnailCarousel`).
+`extract_video_thumbnail(video_path)`: back-compat single-frame shim, still
+used by the Queue tab's per-row thumbnail.
 
-`extract_video_thumbnail(video_path)`: Back-compat shim — returns
-`extract_video_thumbnails(video_path, count=1)[0]`, or `None` if the list is
-empty. Still used by the Queue tab's per-row thumbnail.
+`extract_hdr_tonemapped_thumbnails(video_path, count=10)`: like the above,
+but for a real HDR source — cv2's plain decode has no color management and
+just clips/rescales the wide-range PQ/BT.2020 values into a washed-out 8-bit
+picture, not a preview of the actual export. This instead runs one real
+short-lived ffmpeg process **per frame** (an approximate input-side `-ss`
+seek, then a single-frame decode through the exact same `libplacebo_tonemap_vf`
+chain `core/ffmpeg_build.py` uses for the real encode), targeting the same
+frame indices `extract_video_thumbnails` samples so the two sets stay
+index-aligned. Returns `[]` if `supports_libplacebo()` is false or the
+geometry probe fails — callers must check the former to tell "no HDR" apart
+from "libplacebo unavailable". Runs subprocesses; keep off the Tk thread
+(`LlamaGUI.start_hdr_render` does).
 
-`probe_media(path)`: Best-effort `ffprobe` returning
-`{"container": ".mp4", "video": "H.264 (x264)", "audio": "AAC"}` — codec
-names mapped through `formats.FFPROBE_*`, container taken from the file
-extension, first stream of each kind winning (the app models one video and
-one audio stream). This is what gives `SOURCE` a concrete meaning: it lets
-the tabs default the output container to the input's own, name a copied
-stream in the Overview rundown, and drive Muxing's `containers_for` filter.
-Entirely optional — **every** failure path (no ffmpeg on PATH, unreadable
-file, odd JSON, a >10s probe) returns a dict of `None`s rather than raising,
-because nothing here is required for the UI to function; it only improves
-defaults. Runs a subprocess with `CREATE_NO_WINDOW` (so no console flashes
-over the GUI), which means callers must keep it off the Tk thread —
-`LlamaGUI` runs it on the same worker as the thumbnails.
+**Media probing**
+
+`probe_media(path)`: best-effort `ffprobe`, returning a dict with —
+`container`, `video`/`audio` (display codec names via `formats.FFPROBE_*`),
+`video_profile`/`video_level` (codec-aware conversions — see
+`_normalize_video_profile`/`_ffprobe_level` below), `hdr` (bool, from the
+stream's `color_transfer` tag — `smpte2084`/`arib-std-b67`), `width`/
+`height`/`duration`/`file_size`, `audio_channels`/`audio_sample_rate`/
+`audio_bitrate` (display values for the first audio stream, via
+`formats.channels_display_for`/`sample_rate_display_for`/
+`bitrate_display_for`), `has_video`/`has_audio` (whether a stream of that
+kind exists *at all* — `False` only once the probe ran and found none,
+`None` while unknown, never conflated with "unrecognized codec"),
+`audio_streams` (every audio stream, each described by
+`_describe_audio_stream` — codec/channels/rate/bitrate/language — for the
+Encoding tab's multi-track picker), and, only for HDR content,
+`mastering_max_nits`/`mastering_min_nits`/`max_cll`/`max_fall` (a separate
+frame-level probe, `_probe_hdr_static_metadata` — ffprobe only exposes this
+on a decoded *frame*'s side data, not the stream-level query the rest of
+this dict comes from).
+
+This is what gives `SELECT` a concrete meaning: `EncodingTab` auto-resolves
+Encoder/Audio Codec/Profile/Level/Channels/Sample Rate/Bitrate from it, lets
+both tabs default the output container to the input's own, and (Muxing,
+which never re-encodes) drives `formats.containers_for`. Entirely optional —
+every failure path returns an all-`None`/`[]` "unknown" shape rather than
+raising. Runs a subprocess with `CREATE_NO_WINDOW`; keep off the Tk thread
+(`LlamaGUI` runs it on the same worker as the thumbnails).
+
+`_normalize_video_profile(codec_name, profile)`: ffprobe's raw `profile`
+string already matches this app's own display names for H.264/HEVC/etc., but
+not for ProRes (`"standard"` → `"422"`, `"hq"` → `"422 HQ"`, …) or DNxHR
+(`"DNXHR HQX"` → `"HQX"`); classic legacy DNxHD's bare `"DNxHD"` profile has
+no DNxHR-tier equivalent and is deliberately left unmatched.
+
+`_ffprobe_level(codec_name, level)`: **not one universal formula** — H.264's
+raw `level` is 10× the display value, HEVC's is 30× (confirmed empirically:
+raw `120` is really "4.0", not "12.0"), AV1's is a `seq_level_idx` table
+lookup (`_AV1_LEVELS`), and MPEG-2's is a named-level code
+(`_MPEG2_LEVEL_NAMES`, mirroring `ffmpeg_vars._LEVEL_ARGS["MPEG-2"]` in
+reverse) rather than a major.minor number at all.
+
+`probe_duration(path)`: best-effort length in seconds, used as the Queue's
+progress denominator for an untrimmed job (`FfmpegJob` calls it off the Tk
+thread). Same all-`None`-on-failure contract.
+
+**HDR tone-mapping**
+
+`libplacebo_tonemap_vf(peak_detect=True)`: builds the BT.2390 `-vf
+libplacebo=...` filter string shared by the real encode
+(`core/ffmpeg_build.py`) and the HDR preview thumbnails above — kept here
+rather than in `ffmpeg_build.py` specifically so both can read the identical
+string without a circular import. `peak_detect` isn't a fixed default:
+callers should pass `False` only when the source has *both* a mastering peak
+**and** a genuine nonzero MaxCLL (confirmed empirically both ways — trusting
+a real MaxCLL cuts highlight clipping 87-98% on one real HDR source, while
+trusting a mastering peak alone with no real MaxCLL measurement makes
+another real source's output measurably dimmer/lower-contrast). `apply_
+dolbyvision=true` is explicit (Profile 5/8.x sources embed their own dynamic
+RPU metadata on top of the BT.2390 base layer). `VULKAN_DEVICE_FLAGS`
+(`-init_hw_device vulkan=vk -filter_hw_device vk`) lives alongside it — the
+bare filter segfaults outright on a real hybrid dual-vendor GPU with several
+Vulkan overlay layers installed unless the device is created explicitly.
+
+`verify_hdr_sdr_tag(path)`: best-effort post-encode check — does `path`'s
+video stream actually read as SDR now? `True`/`False`/`None` (probe failed —
+"unknown", not "wrong"). Used by `FfmpegJob` right after an HDR→SDR job
+finishes as a safety net on top of the filter already being verified to work
+at development time — catches a future ffmpeg/libplacebo regression or an
+unusual muxer that doesn't propagate the requested color tags.
+
+**Capability checks** — each is a lazy, process-lifetime cache (`None` means
+"not checked yet"), since re-running the underlying `ffmpeg`/`ffprobe`
+subprocess every job would be wasted work for an answer that can't change
+mid-run:
+
+- `supports_fps_mode()` — whether the installed ffmpeg has `-fps_mode`
+  (5.1+); parses `ffmpeg -h full`. Any failure caches `False`, the safe
+  fallback (an older `-vsync cfr` still runs).
+- `supports_libplacebo()` — whether `libplacebo` is compiled in; parses
+  `ffmpeg -filters`. A filter merely *listed* but failing at runtime (no
+  usable Vulkan device) still surfaces as a normal Failed job.
+- `av1_preset_range()` — `(lo, hi)` for SVT-AV1's `-preset`, parsed from
+  `ffmpeg -h encoder=libsvtav1` (confirmed to swing wildly by build — `(0,
+  8)` on one install, `(-2, 13)` after updating ffmpeg on the same machine).
+  Falls back to `(0, 8)` if parsing fails.
+
+### `core/ffmpeg_vars.py`
+
+Flattens one queued job's settings dict into module-level globals
+(`INPUT_FILE`, `START_TIME`, `VIDEO_CODEC_ARG`, …) — `load(settings,
+source_tab)` populates them; `derive(settings, source_tab)` is the pure
+version returning the same values as a plain dict. Always read through the
+module (`from core import ffmpeg_vars as v`), never `from ... import NAME`
+(which copies the value once and misses a later `load()`).
+
+Most variables come in a raw UI-display form and, where they differ, an
+ffmpeg-ready `*_ARG`/`*_KWARGS` form — the translation tables at the top of
+the file (`_PROFILE_ARGS`, `_PIX_FMT_ARGS`, `_QUALITY_PRESET_ARGS`,
+`_LEVEL_ARGS`, `_CHANNEL_COUNTS`) cover the encoders whose ffmpeg option
+values don't just match their display name: ProRes/DNxHR/CineForm each need
+an explicit `-pix_fmt` (H.264/HEVC/etc. happily follow whatever the source
+decodes to; `dnxhd` outright refuses to run without one), CineForm's
+"profile" slot is really its own `-quality` preset name
+(`_QUALITY_PRESET_ARGS`/`_NO_PROFILE_FLAG` — it must never fall through to a
+literal `-profile:v`, which `cfhd` doesn't have), and MPEG-2's levels are
+named codes rather than numbers.
+
+**`AUDIO_STREAMS` is the one list-shaped variable, not a scalar** — an
+Encoding job can include more than one *output* audio stream (see "Multi-
+stream audio" below), each with its own codec/bitrate/channels/sample-rate.
+`_audio_stream_args(entry)` turns one settings-dict stream entry into its
+ffmpeg-ready form; a Passthru stream (forced on for `formats.
+is_passthru_only` codecs, or a deliberate pick) always comes out
+`"copy"`/`None`/`None`/`None` regardless of its other display fields.
+
+`MASTERING_MAX_NITS`/`MAX_CLL` carry the source's probed HDR static
+metadata through (snapshotted at queue time by `EncodingTab._gather_
+settings`, not read live) — both together decide `build_encode_command`'s
+`peak_detect` argument; see `core/utilities.py`'s `libplacebo_tonemap_vf`
+above.
+
+A key belonging to the other tab keeps a default that happens to be
+correct for it too — e.g. a Mux job's `VIDEO_CODEC_ARG` comes out `"copy"`,
+exactly right since Muxing always is. Muxing never touches `AUDIO_STREAMS`
+at all; it maps its single `AUDIO_TRACK`/`AUDIO_TRACK_INDEX` straight
+through `build_mux_command`.
+
+**Trim gotcha, verified against real ffmpeg output**: an input-side `-ss`
+rebases the output timeline to 0, so an output-side `-to` then behaves as a
+raw *duration* equal to its own value, not "stop at this timestamp" — never
+pass `END_TIME`/`END_SECS` as an output-side `-to` paired with an
+output-side (or absent) `-ss`. `core/ffmpeg_build.py`'s `_trim_kwargs`
+always uses input-side `-ss` + output-side `-t` (`DURATION_TIME`), which
+sidesteps the whole issue.
+
+### `core/ffmpeg_build.py`
+
+Builds an ffmpeg-python `Stream` from whatever's currently loaded in
+`core/ffmpeg_vars.py`. Two separate builders — `build_mux_command()` (always
+`-c copy`; maps whichever tracks/external files the Muxing tab's track
+pickers selected) and `build_encode_command()` (re-encodes whichever stream
+isn't stripped) — rather than one function covering both, mirroring the
+Muxing/Encoding split described under `tabs/muxing_tab.py`/
+`tabs/encoding_tab.py` below. `build_command()` dispatches on
+`ffmpeg_vars.SOURCE_TAB`.
+
+`build_encode_command` assembles one `-map`-able stream per kept
+video/audio track — a bare `ffmpeg.output(stream, ...)` with no explicit
+`-map` only ever gets ffmpeg's own "one best video + one best audio"
+default, which breaks the moment more than one output audio stream is
+possible. **Per-stream option suffixes (`-c:a:0`, `-b:a:0`, …) address the
+stream's position in the *output* file, not its source index** — confirmed
+directly that an unqualified `-ac:0`/`-ar:0` (unlike `-c:a:0`/`-b:a:0`,
+which already carry the `a:` type qualifier) counts across every output
+stream including video, silently landing on the kept video stream instead
+and shifting every audio value onto the next stream's slot; the code always
+emits the qualified `-ac:a:{i}`/`-ar:a:{i}` form.
+
+HDR→SDR (`uses_hdr_tonemap()` gates it) adds `core.utilities.
+libplacebo_tonemap_vf(peak_detect=...)` as `-vf`, plus explicit
+`-color_primaries/-color_trc/-colorspace bt709` output tags (libplacebo's
+target colorspace doesn't reliably propagate to the output stream's own tags
+on its own). Raises `ValueError` if `HDR_TO_SDR` is set but
+`supports_libplacebo()` is false — should be unreachable in practice
+(`EncodingTab._validate_settings` blocks it first), but this is the last
+line of defense, caught by `QueueTab._process_next`'s "couldn't build the
+ffmpeg command" Failed-task path.
+
+`-strict -2` (experimental compliance) is set **globally, not audio-scoped**
+— confirmed a real TrueHD-in-MP4 source still hard-fails with `-strict:a -2`
+alone (the muxer's own compliance gate, not the audio codec context, is what
+objects). `+faststart` is added only for `.mp4`/`.mov` output (a private,
+purely cosmetic mp4/mov-muxer option; this build happens to ignore it
+silently elsewhere, but that's not a documented guarantee).
+
+`compile_command(output_path)` returns the full argv `core/ffmpeg_runner.py`
+launches — the runner's global flags (`-hide_banner -nostdin -loglevel error
+-nostats -progress pipe:1`) plus, when `uses_hdr_tonemap()`, the Vulkan
+device-init flags — all placed in the `cmd` prefix (via ffmpeg-python's
+`compile(cmd=...)`), never `.global_args()`, which appends *after* the
+compiled output spec and would make ffmpeg reject `-filter_hw_device`
+outright.
+
+### `core/ffmpeg_runner.py`
+
+`FfmpegJob` — one real ffmpeg process plus the two daemon threads that watch
+it, no Tk in the module. `start()` launches the compiled argv via a plain
+`subprocess.Popen` (not ffmpeg-python's `run_async()`, which can't pass
+`creationflags` — `CREATE_NO_WINDOW` matters, or every job flashes a console
+window), at the OS's normal process priority (profiled: throttling it bought
+no protection and only slowed encodes down, so a `BELOW_NORMAL_PRIORITY_
+CLASS` attempt was removed).
+
+Two threads per job: one drains stderr continuously (mandatory — a full
+pipe blocks ffmpeg forever, and the tail becomes the failure reason), one
+parses `-progress pipe:1` off stdout (`out_time_us` — `out_time_ms` is
+*also* microseconds despite its name) and settles the job once ffmpeg exits.
+Windows' `select()` only works on sockets, not arbitrary pipe handles, so
+reading two blocking pipes without stalling needs one thread apiece.
+Everything reaches the Tk thread only via `poll_events()` (non-blocking,
+drains a `queue.Queue` of `("progress", fraction)` / `("done",)` /
+`("failed", reason)` tuples) — the Tk-thread caller (`QueueTab._poll`) drains
+it on its own `after` tick.
+
+The progress denominator starts as the job's own `duration_secs`, else the
+input's probed duration minus `start_secs` (`probe_duration`, off-thread);
+if the actual encode runs past that estimate, `_watch` stretches it upward
+(`total = seconds * 1.05`) rather than clamping to 1.0 and freezing the bar
+at "done" while ffmpeg keeps working — confirmed real-world trigger: a VFR
+source whose container-reported duration undersold its true playable length
+over 10x.
+
+`suspend()`/`resume()` freeze/thaw the whole process via ntdll's
+`NtSuspendProcess`/`NtResumeProcess` (no psutil) — verified zero progress
+lines over a 3s suspend, then resuming from the exact frame. `stop()` kills
+the process (works while suspended too), waits, and deletes the partial
+output.
+
+Output goes to `<stem>.partial<ext>` (`partial_path`) first, replaced onto
+the real path only on a clean exit, via `_replace_output` rather than a bare
+`os.replace` — confirmed two real Windows "Access is denied" causes: the
+destination is read-only (cleared first, best-effort), or something else
+transiently has it open (a short retry loop, `_REPLACE_ATTEMPTS` ×
+`_REPLACE_DELAY_SECS`, clears this without bothering the user). A stopped or
+failed job only ever deletes the temp file it created, never a file the user
+already had at the final path.
+
+If the job's compiled command actually ran the HDR tonemap
+(`verify_hdr_tag=True`, set by the caller from `ffmpeg_build.
+uses_hdr_tonemap()`), a clean exit is followed by `core.utilities.
+verify_hdr_sdr_tag` — if that comes back `False` (still reads HDR), the
+event is `("failed", ...)` even though the file is real and playable and is
+left in place (not deleted) for inspection; a `None` result (probe itself
+failed) is "unknown" and falls through to `("done",)`.
+
+### `core/downloader.py`
+
+Not a real module yet — entirely commented-out scratch code sketching a
+future `yt_dlp` download call. Not imported by anything (`tabs/ytdlp_tab.py`
+doesn't reference it), and the YT-DLP tab's own "Download Video" button has
+no `command` wired up at all. A placeholder for future work, not part of the
+app's current architecture.
+
+### `components/audio_stream_dialog.py`
+
+Defines `AudioStreamPickerDialog(ctk.CTkToplevel)` — the "Choose Stream(s)"
+modal on Encoding's Audio panel, opened via the module-level
+`choose_audio_streams(app, streams, included)`. Modelled on
+`components.dialogs.MessageDialog`'s theming/centering/icon conventions, but
+with one `CTkCheckBox` row per entry in `probe_media`'s `audio_streams` list
+(each pre-checked to match `included`) instead of a fixed message + button
+row. `_describe(stream)` builds each row's label conditionally
+(`"Track 1  ·  AAC  ·  Stereo  ·  48000 Hz  ·  eng"` — every bit optional).
+
+`.result` is the chosen index `set` on OK, or `None` if cancelled/closed —
+letting the caller tell "nothing changed" apart from "chose zero streams".
+`_ok` deliberately refuses to ever return an empty set: if every box ends up
+unchecked, it snaps the first stream back on instead, since "no audio at
+all" is Strip Audio's job, not a second door to the same outcome.
 
 ---
 
@@ -645,8 +1009,12 @@ delete prompts on both tabs' Overview panel.
 ### `components/dropdown.py`
 
 Defines **`ThemedDropdown(ctk.CTkOptionMenu)`**, which every dropdown in the
-app uses — Theme and Appearance Mode on Settings, Encoder / Format / Profile /
-Level on Encoding, and Output Format on Muxing. Don't add a bare
+app uses — Theme and Appearance Mode on Settings; Output Format and Preset on
+both tabs' Overview panel; Encoder / Profile / Level / Speed and the four
+audio-detail dropdowns (Codec/Bitrate/Channels/Sample Rate) plus Audio Track
+on Encoding; the video/audio track pickers on Muxing. Most of these are
+**derived** — their option lists are rewritten by each tab's `_sync_controls`
+via `set_values`, not fixed at construction. Don't add a bare
 `CTkOptionMenu`.
 
 It subclasses `CTkOptionMenu` for its button appearance but reassigns
@@ -1131,8 +1499,30 @@ Internals:
   **Audio stripped** → `_with_badge` composites `audio-mute.png` into the
   **top-left** corner (in `_push` for the audio-only case; `_wave_frame_rgb`
   does its own paste when the video is stripped too). `audio-mute.png` and
-  `Wave Loop.json` are loaded `__file__`-anchored from the repo root, where
+  `Wave Loop.json` are loaded `__file__`-anchored from `assets/`, where
   `audio-mute.svg` is also checked in.
+
+**The bottom-left info badge and its hover tooltip** are a separate,
+permanent fixture (unlike the strip-state visuals above, always shown once a
+file's been probed). `set_media_info(info)` (the `on_media_info` broadcast
+target, distinct from `set_frames`/thumbnails) caches `probe_media`'s result
+and redraws; `_with_info_badge` composites `info-icon-dark.png`/
+`info-icon-light.png` (matching `ctk.get_appearance_mode()`, generated by
+`scripts/make_info_badges.py`, falling back to a procedurally-drawn disc if
+missing) into the frame's bottom-left corner, opposite the mute badge.
+Hovering it (`_hit_info_badge`, a bit more generous than the drawn radius,
+same reasoning as the chevron discs' hit box) opens a borderless-`Toplevel`
+tooltip (`_show_info_tooltip`, same family as the toast/dropdown popups)
+whose text (`_info_text`) lists whatever `probe_media` identified —
+container, `Video: H.264 · High · L4.0 · 1920x1080 · HDR` (every bit
+conditional), `Audio: AAC · Stereo · 48000 Hz · 192 kbps` (plus `"N tracks"`
+past one audio stream), duration, file size — and, for HDR video, a second
+line (`_mastering_text`) reporting whether the source actually carries ST
+2086 mastering-display luminance / MaxCLL / MaxFALL, the same values that
+decide whether the real encode's tonemap runs with `peak_detect` on or off
+(see `core/utilities.py`'s `libplacebo_tonemap_vf` above). The tooltip
+refreshes its text live (`_update_info_tooltip`) if a probe lands while it's
+already open.
 
 ### `components/sidebar.py`
 
@@ -1145,7 +1535,7 @@ grabbed once as `theme` at the top so `title_label` and `footer_label` can
 use `theme["primary_text"]` (the adaptive black/white label color for that
 primary). From top to bottom:
 1. `title_label` — bold "LlamaMXD" text in `theme["primary_text"]`.
-2. `image_label` — the llama logo (`llama.png`, loaded via `PIL.Image.open`
+2. `image_label` — the llama logo (`assets/llama.png`, loaded via `PIL.Image.open`
    and wrapped as a 140×140 `CTkImage`).
 3. Four navigation buttons (`btn_tab1`–`btn_tab4`, labeled Muxing /
    Encoding / Queue / YT-DLP), each wired to `lambda:
@@ -1157,7 +1547,7 @@ primary). From top to bottom:
    the moment it's packed*, so packing the spacer first would starve
    anything packed after it of space regardless of its own `side`.
    `footer_label` (copyright/version text, `"{year} Yezan Smadi
-   v0.5.0-alpha.5"`, in `theme["primary_text"]`) is packed first so it
+   v0.5.0-alpha.6"`, in `theme["primary_text"]`) is packed first so it
    claims the literal bottom edge; `btn_settings` packs second, landing
    just above it.
 5. `self.spacer` — a transparent, `fill="both", expand=True` frame packed
@@ -1262,7 +1652,11 @@ Defines `MuxingTab` — **remuxing only: nothing here ever re-encodes.** Its
 job is to change a file's container and/or choose which streams go into it,
 everything `-c copy`. That's what separates it from `EncodingTab` rather
 than making it a weaker version of one; "copy video, re-encode audio" is not
-a Muxing job, it's an Encoding job with the video codec left on `Source`.
+a Muxing job, it's an Encoding job with the video codec auto-resolved to the
+source's own (Encoding always re-encodes; it never falls back to a bare
+copy the way the tab's earlier `Source` placeholder — since renamed
+`SELECT`, meaning "nothing picked yet" rather than "stream-copy" — used to
+suggest).
 
 Two consequences fall out of copy-only:
 - **There are no codec controls at all** — no encoder, no audio codec, no
@@ -1424,12 +1818,39 @@ and the Strip checkboxes get their disabled *look* from `_set_hdr_enabled`/
 knob/track or the destructive fill/border fully bright otherwise (see
 CLAUDE.md's Known Issues).
 
-**Audio panel** — `audio_codec_menu` / `audio_bitrate_menu` /
-`audio_channels_menu` / `audio_samplerate_menu` on one row, mirroring the
-codec row, with `strip_audio_check` on the right. `passthru_check`'s own
-label reads "Passthru" (no colon) and both it and the checkbox are packed
-`anchor="center"` rather than `anchor="w"`, so the (much narrower) checkbox
-mark centers under the word instead of sitting under its leading edge.
+**Audio panel** — row one: `audio_track_menu` (which *included* source
+stream the row-two controls below are currently editing) + `choose_streams_
+btn` ("Choose Stream(s)…", opens `components.audio_stream_dialog.
+choose_audio_streams` — see that file's own section above). Row two:
+`audio_codec_menu` / `audio_bitrate_menu` / `audio_channels_menu` /
+`audio_samplerate_menu`, mirroring the codec row, plus `passthru_check`
+between codec and bitrate. `strip_audio_check` sits alone on the right.
+`passthru_check`'s own label reads "Passthru" (no colon) and both it and the
+checkbox are packed `anchor="center"` rather than `anchor="w"`, so the (much
+narrower) checkbox mark centers under the word instead of sitting under its
+leading edge. Every dropdown on this row is sized to its own longest
+*possible* value via `_measure_dropdown_width` (built/torn-down off-screen at
+panel-build time) rather than an eyeballed guess — what keeps five controls
+affordable on one row.
+
+**Multi-stream audio.** `self._audio_streams` holds the probed
+`audio_streams` list verbatim (`core.utilities.probe_media`); `self.
+_audio_stream_settings` (a `{index: {codec, bitrate, channels, sample_rate,
+passthru}}` dict) is the per-stream state the Audio Codec/Bitrate/Channels/
+Sample Rate row + Passthru checkbox actually edit, one stream at a time,
+selected via `audio_track_menu`. `_auto_select_audio_streams(info)` seeds
+that dict the moment a file's probed — auto-forcing Passthru for any
+`formats.is_passthru_only` stream (DTS/Dolby TrueHD) — guarded on `self.
+_audio_streams_source` so it only runs once per file. Switching
+`audio_track_menu` calls `_save_active_audio_stream()` first (folds the
+live widget values into whichever stream was previously selected) before
+loading the newly-selected stream's own saved values into the row —
+otherwise an edit to one stream would silently leak onto whatever the
+dropdown switches to next. `_gather_settings` does the same save first, then
+builds the final `audio_streams` list from `_audio_stream_settings` for
+every index in `self._included_audio_indices` (what `choose_audio_streams`'
+result set actually is), each entry keeping its own `index` so
+`ffmpeg_vars` knows which source stream (`-map 0:a:<index>`) it describes.
 
 **`_sync_controls()` — the only place derived UI state is decided.** Every
 control's `command` calls `_on_control_change`, which just re-runs it; it
@@ -1442,55 +1863,81 @@ guards to stop fighting. **Add a rule here, never a new pairwise handler.**
 Its rules, in dependency order:
 1. stream presence (mutual Strip exclusion + the red tab markers);
 2. container → legal video/audio codec lists;
-3. video codec → profile/level lists *and* the rate-control kind and range
-   (`_apply_quality` re-ranges the slider, because CRF is not universal —
-   MPEG-4/MPEG-2 take a qscale on 1-31; `Source` has no spec, so it falls
-   back to `_FALLBACK_QUALITY`, a plain 0-51 CRF);
-4. audio codec → whether a bitrate is ours to set at all (and, for audio
-   only, copy state still disables channels / sample-rate);
+3. video codec → profile/level/speed lists *and* the rate-control kind and
+   range (`_apply_quality` re-ranges the slider, because CRF is not
+   universal — MPEG-4/MPEG-2 take a qscale on 1-31; ProRes/DNxHR/CineForm/
+   FFV1 have no rate control at all — their "quality" is the profile choice
+   itself, or nothing; `SELECT` has no spec either, so the slider falls
+   back to `_FALLBACK_QUALITY`, a plain 0-51 CRF, without disabling — see
+   rule 5);
+4. audio codec → whether a bitrate is ours to set at all (Passthru or a
+   lossless codec disables it; unresolved/copy state still disables
+   channels/sample-rate too);
 5. everything a *removed* stream makes meaningless — Strip Video greys the
    whole Video panel. **HDR→SDR and the quality slider deliberately stay
-   live on `Source`** (dial them in, let the encoder follow); only Strip
+   live on `SELECT`** (dial them in, let the encoder follow); only Strip
    Video greys them, and when it does, `_set_quality_enabled` greys the
    slider's knob + fill too (not just the labels — `state="disabled"` alone
-   leaves a CTk slider looking active);
+   leaves a CTk slider looking active). ProRes/DNxHR/FFV1/CineForm's
+   "genuinely no such knob" case (quality_for returns `None` for a real
+   codec, not `SELECT`) *does* disable the slider, distinct from the
+   `SELECT` case above;
 6. the rundown.
 
 `_retarget(menu, values, what)` calls `ThemedDropdown.set_values` and, when
 the current pick had to snap, posts a toast naming the reason ("Encoder
-switched to VP9 — .webm can't carry H.265 (x265)"). `_set_enabled(widget,
+switched to VP9 — .webm can't carry H.265"). `_set_enabled(widget,
 label, enabled)` dims a control's label in step with the control so a dead
 option never looks live; `_set_quality_enabled(enabled)` is the slider's
 richer version (state + knob/fill colour + all three labels).
 
 **`_apply_settings(settings)`** writes a dict into the form **in dependency
-order** — container, sync, codecs, sync, codec-detail leaves — so every list
-is legal before the next tier's value is written into it. An absent key
-leaves its control alone, which is how a preset (recipe keys only) shares
-this path with a full restore; snap-toasts are muted throughout via
-`_ready`. `load_settings` is a thin wrapper for the live-theme-rebuild
-snapshot.
+order** — container, sync, codecs, sync, codec-detail leaves, then
+multi-stream audio — so every list is legal before the next tier's value is
+written into it. An absent key leaves its control alone, which is how a
+preset (recipe keys only) shares this path with a full restore; snap-toasts
+are muted throughout via `_ready`. `load_settings` is a thin wrapper for the
+live-theme-rebuild snapshot.
 
 **Settings shape**: `input_file, output_path, output_format, start_secs,
-duration_secs, av_sync, encoder, profile, level, quality, gpu_enabled,
-hdr_to_sdr, strip_video, audio_codec, audio_bitrate, audio_channels,
-audio_sample_rate, strip_audio`. Note `quality` rather than `crf` (the number is a qscale under
-the MPEG-era encoders), and `_menu_value` reports `""` instead of the `—`
-placeholder so a settings dict never carries a placeholder as if it were a
-real choice. `gpu_enabled` is the global Settings-tab preference, read as
-`self.app.gpu_enabled`.
+duration_secs, av_sync, encoder, profile, level, speed, quality,
+gpu_enabled, hdr_to_sdr, mastering_max_nits, max_cll, strip_video,
+strip_audio, audio_streams`. `quality` (not `crf`) since the number is a
+qscale under the MPEG-era encoders; `_menu_value` reports `""` instead of
+the `—` placeholder so a settings dict never carries a placeholder as if it
+were a real choice. `gpu_enabled` is the global Settings-tab preference,
+read as `self.app.gpu_enabled` — still an unused stub (see `core/
+ffmpeg_build.py`, nothing acts on it yet). `mastering_max_nits`/`max_cll` are
+a snapshot of the probed source's HDR static metadata at queue time (`app.
+media_info`), not a user choice — what decides the real encode's
+`peak_detect` argument (see `core/utilities.py`'s `libplacebo_tonemap_vf`).
+`audio_streams` is the list described under "Multi-stream audio" above —
+**not** the four scalar `audio_codec`/`audio_bitrate`/`audio_channels`/
+`audio_sample_rate` keys an earlier, single-track version of this tab used.
 
 `encode_now()` / `add_to_queue()` mirror Muxing's exactly but pass
 `source_tab="Encoding"`, build `"Direct Encode"` descriptions, and say
 "Encoding job …" in their toasts.
 
+**HDR→SDR preview.** Turning the `hdr_switch` on doesn't just flip a flag —
+the preview carousel itself swaps to a real tone-mapped frame set once one's
+ready. `_on_hdr_toggle`/`_on_thumbnails` kick off `self.app.start_hdr_render`
+(see `core/app.py` above) the first time HDR→SDR is turned on for a file
+that hasn't been rendered yet; `on_hdr_frames_ready` (the app's broadcast
+target) and `_apply_preview_frames` pick the cached tone-mapped set over the
+raw one whenever it's ready and matches the file currently shown, preserving
+scrub position across the swap. The render/cache lives on the app, not this
+tab, specifically so a live theme rebuild (which destroys and reconstructs
+this whole tab) doesn't throw an already-rendered result away.
+
 ### `tabs/queue_tab.py`
 
 Defines `QueueTab` — by far the most complex tab, responsible for tracking,
-displaying, animating, and (eventually) actually running every
-encode/mux job. See the "Queue tab" and "Encoding flow" sections of
-`CLAUDE.md` for the full design rationale and history of visual bugs found
-and fixed here; this section summarizes what the file currently contains.
+displaying, and actually **running** every encode/mux job as a real ffmpeg
+process (via `core/ffmpeg_runner.py`'s `FfmpegJob` — no simulation). See the
+"Queue tab" and "Encoding flow" sections of `CLAUDE.md` for the full design
+rationale and history of visual bugs found and fixed here; this section
+summarizes what the file currently contains.
 
 **Module-level constants**:
 - `_THEME = get_active_theme()`: read once at import time, and reassigned
@@ -1498,19 +1945,26 @@ and fixed here; this section summarizes what the file currently contains.
   construction and style lookup reads this module-level name at call time
   rather than a value captured once, so a reassignment here is picked up
   everywhere without needing to touch any other code.
-- `_QUEUED_STYLE` / `_GREY_STYLE`: two style dicts (`bg`, `text`,
-  `remove_text`, `remove_hover`) describing how a row looks while queued
-  (solid theme primary color, with `text`/`remove_text` set to the theme's
-  adaptive `primary_text`) versus running/done (grey, default theme text
-  color). `refresh_theme()` rewrites the `_QUEUED_STYLE` color keys in place
-  on a live theme switch.
+- `_QUEUED_STYLE` / `_GREY_STYLE` / `_FAILED_STYLE`: three style dicts (`bg`,
+  `text`, `remove_text`, `remove_hover`) describing how a row looks while
+  queued (solid theme primary color, `text`/`remove_text` the theme's
+  adaptive `primary_text`), running/done (grey, default theme text color),
+  or failed (solid `_STOP_RED`, `_STOP_TEXT` label). `_FINISHED = ("Done",
+  "Failed")` is the set of terminal statuses — used to decide what counts as
+  "nothing left to lose" (`pending_task_count`, `claims_output`) and what
+  `clear_completed` sweeps up. `refresh_theme()` rewrites `_QUEUED_STYLE`'s
+  color keys in place on a live theme switch (`_FAILED_STYLE`/`_STOP_RED`
+  never change with the theme).
 - `_STOP_RED` / `_STOP_RED_HOVER` / `_STOP_TEXT`: the Stop Queue button's
-  permanently-red fill/hover (never theme-driven), plus `_STOP_TEXT =
-  readable_text_on(_STOP_RED)` — the label still picks black/white for
-  contrast against that fixed red the same way themed colors do.
+  (and a Failed row's) permanently-red fill/hover (never theme-driven), plus
+  `_STOP_TEXT = readable_text_on(_STOP_RED)` — the label still picks
+  black/white for contrast against that fixed red the same way themed
+  colors do.
 - `_THUMB_SIZE = (60, 40)`: the small per-row thumbnail size.
-- `_PROGRESS_STEPS = 15`, `_PROGRESS_INTERVAL_MS = 100`: the simulated
-  per-task animation runs 15 ticks at 100ms each (1.5s total).
+- `_POLL_INTERVAL_MS = 100`: how often the Tk thread drains the active
+  job's events (`FfmpegJob.poll_events()`) — ffmpeg itself only reports
+  progress about twice a second, so this is plenty smooth for negligible
+  cost.
 - `_DETAIL_SCROLL_HEIGHT = 140`: fixed height of the scrollable area inside
   the job-details popup.
 - `_DETAIL_FIELDS`: an ordered list of `(settings_key, display_label,
@@ -1521,14 +1975,26 @@ and fixed here; this section summarizes what the file currently contains.
   is how each task kind naturally omits the other's fields.
   The current fields, in order: `input_file` (Input File), `output_path`
   (Output Path), `encoder` (Encoder), `output_format` (Format),
-  `start_secs`/`duration_secs` (`"time"`), then the Encode-only
-  `strip_video`/`gpu_enabled`/`hdr_to_sdr` (`"bool"`), `quality`, `profile`,
-  `level`; the Mux-only `video_track` / `video_track_file` (Video From) and
-  `audio_track` / `audio_track_file` (Audio From); then the audio fields
-  `audio_codec`, `audio_bitrate`, `audio_channels`/`audio_sample_rate`
-  (Encode-only), and `strip_audio` (`"bool"`). An Encode task's list is long
-  enough to scroll inside the fixed-height box — that's the design intent
-  (see `_DETAIL_SCROLL_HEIGHT`).
+  `start_secs`/`duration_secs` (`"time"`), `av_sync` (`"bool"`), then the
+  Encode-only `strip_video`/`gpu_enabled`/`hdr_to_sdr` (`"bool"`), `quality`,
+  `profile`, `level`, `speed`; the Mux-only `video_track` /
+  `video_track_file` (Video From); then `audio_track`/`audio_track_file`
+  (Mux only, Audio From) and `strip_audio` (`"bool"`, shared).
+  **There is no `audio_codec`/`audio_bitrate`/`audio_channels`/
+  `audio_sample_rate` row any more** — Encoding's audio is a list
+  (`audio_streams`, one entry per included stream) now, not four scalars, so
+  `_show_details` renders it separately: one `"Audio Stream"`/`"Audio Stream
+  N"` row per entry (`codec · copy-if-passthru · bitrate · channels ·
+  sample_rate`, skipping `SELECT`/absent bits), right after the
+  `_DETAIL_FIELDS` loop, skipped entirely when `strip_audio` is set.
+  `_VIDEO_DETAIL_KEYS`/`_AUDIO_DETAIL_KEYS` name which `_DETAIL_FIELDS` rows
+  a stripped stream hides (its codec/track detail is noise once it's not in
+  the output — the `strip_video`/`strip_audio` row itself is *never* hidden
+  by this, since "Strip Video: Yes" is exactly the fact worth keeping). An
+  Encode task's list is long enough to scroll inside the fixed-height box —
+  that's the design intent (see `_DETAIL_SCROLL_HEIGHT`). A Failed row's
+  popup also gets an `"Error:"` row (`row["error"]`, in `_STOP_RED`,
+  wrapped) appended by hand, not driven by `_DETAIL_FIELDS`.
 - `_format_seconds(total_seconds)`: a small helper converting an int
   seconds count into `"HH:MM:SS"`.
 - `_SCROLLBAR_GUTTER` (18) / `_autohide_scrollbar_in_gutter(scroll_frame)`: a
@@ -1551,7 +2017,8 @@ and fixed here; this section summarizes what the file currently contains.
 **`QueueTab.__init__`**: builds, top to bottom:
 1. `self.progress_bar` — an overall `CTkProgressBar` (`corner_radius=0`, to
    avoid a stray dot of color at value 0 from its rounded end-caps)
-   tracking `done / total` across all current rows.
+   tracking `(done + the active job's live fraction) / total` across all
+   current rows (see `_update_overall_progress` below).
 2. `self.list_frame` — a `CTkScrollableFrame` holding one row per task, plus
    `self.empty_label` ("No tasks queued yet."), shown/hidden as tasks are
    added/removed. Packed `padx=(20, 3)` (trimmed on the right) and run
@@ -1607,8 +2074,8 @@ Each row (a `CTkFrame`, `corner_radius=8`) contains:
 - `thumb_label` — a 60×40 `CTkLabel`, filled in by `_load_thumbnail` if the
   task's settings include an `input_file` (reuses
   `core.utilities.extract_video_thumbnail`).
-- `status_label` — fixed-width (80px) text (`"Queued"`, `"Encoding..."`/
-  `"Muxing..."`, or `"Done"`).
+- `status_label` — fixed-width (80px) text: `"Queued"`, `"Encoding..."`/
+  `"Muxing..."` while running, `"Paused"`, `"Done"`, or `"Failed"`.
 - `remove_btn` — a transparent "✕" `CTkButton` calling `remove_task`.
 
 These are deliberately **constructed** in the order `description_label`,
@@ -1639,12 +2106,13 @@ progress bar.
 fails.
 
 **`_apply_row_style(task_id)`**: reads the row's current status text and
-applies either `_QUEUED_STYLE` (solid theme primary color) or `_GREY_STYLE`
-(grey), and
-hides **both** canvases outright whenever the status is `"Queued"` or
-`"Done"` — which hands the description back to `description_label`'s own
-rendering. Any other status is treated as "mid-run", and their geometry is
-left alone for `_animate_progress` to own.
+applies `_QUEUED_STYLE` ("Queued", solid theme primary), `_FAILED_STYLE`
+("Failed", solid `_STOP_RED`), or `_GREY_STYLE` (anything else — "Done", an
+in-progress label, or "Paused"), and hides **both** canvases outright
+whenever the status is `"Queued"`, `"Done"`, or `"Failed"` — which hands the
+description back to `description_label`'s own rendering. Any other status
+(an in-progress label, or "Paused") is treated as "mid-run", and their
+geometry is left alone for `_paint_fraction`/`_paint_progress` to own.
 
 **`refresh_theme()`**: the counterpart to `LlamaGUI.apply_theme`'s live
 theme switch — called on this tab specifically *instead of* destroying and
@@ -1663,66 +2131,136 @@ every one of this tab's themed elements was already explicitly colored to
 begin with — there was never a CTk-default accent color here that needed a
 fresh widget construction to pick up.
 
-**`_show_details(task_id)`**: populates `detail_scroll` by destroying any
-previous children and rebuilding one row per entry in `_DETAIL_FIELDS`
-present in this task's settings dict (formatted per that field's `kind`),
-sets the popup's title to `"Encode Details"` or `"Mux Details"` based on
-`source_tab`, then packs `detail_frame` in immediately above
-`controls_frame` (via `before=self.controls_frame`, so it always lands in
-the same place regardless of call order).
+**`_show_details(task_id)`**: populates `detail_scroll` (via the shared
+`_add_detail_row(label, value)` helper) by destroying any previous children
+and rebuilding one row per entry in `_DETAIL_FIELDS` present in this task's
+settings dict (formatted per that field's `kind`, skipping a stripped
+stream's own detail rows), then the multi-stream audio rows (see
+`_DETAIL_FIELDS` above), then a by-hand `"Error:"` row if the task failed.
+Also enables/disables `detail_goto_btn` ("Go to File", next to the popup's
+close button) based on whether `output_path` still exists on disk. Sets the
+popup's title to `"Encode Details"` or `"Mux Details"` based on `source_tab`,
+then packs `detail_frame` in immediately above `controls_frame` (via
+`before=self.controls_frame`, so it always lands in the same place
+regardless of call order).
+
+**`_go_to_detail_file()`** (`detail_goto_btn`'s command): opens Windows
+Explorer with the currently-shown task's output file selected
+(`explorer /select,"<path>"`, run as a single command-line *string* rather
+than an argv list — `subprocess`'s list-to-command-line quoting would quote
+the whole `/select,...` token as one unit whenever the path has a space,
+breaking Explorer's own parsing of where the flag ends and the path begins).
+Re-checks the file still exists even though the button is only enabled once
+`_show_details` already confirmed it — the popup can sit open for a while,
+and the file could be moved/deleted in the meantime — disabling the button
+and showing a "File Not Found" message instead if it's gone.
 
 **`update_status(task_id, status)`**: updates a row's status text, re-runs
-`_apply_row_style`, and recalculates the overall progress bar. Used both by
-the simulated animation and (eventually) by whatever real backend replaces
-it.
+`_apply_row_style`, and recalculates the overall progress bar.
 
-**`_update_overall_progress()`**: sets `self.progress_bar` to
-`done_count / total_count` across current rows (0 if there are none).
+**`_update_overall_progress()`**: sets `self.progress_bar` to `(done_count +
+the active job's own live fraction) / total_count` across current rows (0 if
+there are none) — recalculated on every status change *and* every `_poll`
+tick, so it moves continuously with whatever's actually encoding rather than
+only jumping at Queued/Done/Failed transitions. A Failed task counts as
+finished (nothing more will happen to it).
+
+**`claims_output(path)`**: whether some unfinished job (queued, running, or
+paused) will write to `path` — checked alongside a plain disk-existence
+check by both tabs' overwrite confirmation, since two *queued* jobs aimed at
+the same output path wouldn't otherwise be caught by a disk check at queue
+time.
 
 **`_on_hide()`**: bound to `<Unmap>`; resets the overall progress bar to 0
 if it was showing 100% when the tab was switched away from, so returning
 later (or starting a fresh batch) doesn't show a stale "done" bar.
 
 **`remove_task(task_id)` / `clear_completed()` / `clear_all()`**:
-`remove_task` pops the row from `self._rows` and destroys its frame,
-re-showing the empty-state label if nothing's left. `clear_completed` calls
-`remove_task` for every row currently showing `"Done"`. `clear_all` empties
-the queue outright: it confirms first via `ask_yes_no` **only when something
-unfinished would be thrown away** (an all-`Done` or already-empty queue
-clears with no prompt), then calls `stop_queue()` *before* removing rows so
-no pending animation tick can fire against a row that no longer exists. Its
-button sits to the right of Clear Completed at the bottom-left.
+`remove_task` pops the row from `self._rows` and destroys its frame; if it
+was the *active* job's row, its ffmpeg process is killed first
+(`_halt_active` — a process must never outlive its row) and, if the queue
+was running, processing continues with whatever was left behind it.
+Re-shows the empty-state label if nothing's left. `clear_completed` removes
+every row showing `"Done"` **or** `"Failed"`. `clear_all` empties the queue
+outright: confirms first via `ask_yes_no` **only when something unfinished
+would be thrown away** (an all-finished or already-empty queue clears with
+no prompt), then calls `stop_queue()` *before* removing rows so no pending
+poll tick can fire against a row that no longer exists. Its button sits to
+the right of Clear Completed at the bottom-left.
 
 **`is_running()` / `pending_task_count()`**: small read-only accessors used
-from outside the tab. `pending_task_count` counts every row not yet `"Done"`
-— in-flight *and* still queued, i.e. everything that would be lost — and is
-read by both `LlamaGUI.on_close` and `clear_all` to decide whether to
-confirm. `is_running` reports whether processing is active; `on_close` uses
-it to know whether to resume the queue after a declined close prompt.
+from outside the tab. `pending_task_count` counts every row not yet
+finished (`"Done"` or `"Failed"`) — in-flight, paused, *and* still queued,
+i.e. everything that would be lost on quit — and is read by both
+`LlamaGUI.on_close` and `clear_all` to decide whether to confirm.
+`is_running` reports whether processing is active; `on_close` uses it to
+know whether to resume the queue after a declined close prompt.
 
-**Queue playback controls**:
+**Queue playback controls — real ffmpeg processes, not a simulation.**
+`self._active` is the one job with a process: `None`, or `{"task_id",
+"job" (an `FfmpegJob`), "rest" (remaining queued ids), "paused", "fraction",
+"drawn"}`. Only one job ever runs at a time.
 - `_set_running(is_running)`: flips `start_all_btn` between "Start Queue"/
   `start_queue` and "Pause Queue"/`pause_queue`.
 - `toggle_queue()`: pause if running, else start/resume — the **Space-bar**
   shortcut (`LlamaGUI._toggle_queue`, Queue tab only, ignored when a control
   that Space already acts on has focus).
-- `start_queue()`: if a paused job exists (`self._paused_state`), resumes
-  it exactly where it left off via `_animate_progress(task_id, step,
-  rest)`; otherwise collects every row still `"Queued"` and starts
-  processing them in order via `_process_next`.
-- `pause_queue()`: cancels the pending `after()` animation job but
-  preserves `self._paused_state`, so a later `start_queue()` call resumes
-  from that exact tick.
-- `stop_queue()`: cancels the pending animation job *and* discards
-  progress — if a job was paused, its status is reverted back to
-  `"Queued"`.
-- `start_task(task_id)`: runs a single task immediately, independent of the
-  rest of the queue (used by Encoding/Muxing's "do it now" buttons).
-- `_process_next(remaining_ids)`: pops the next task id off the list,
-  sets its status to `"Encoding..."`/`"Muxing..."` (based on
-  `source_tab`), prints a debug line with its settings (the seam where a
-  real ffmpeg call will eventually go), and kicks off
-  `_animate_progress(task_id, 0, rest)`.
+- `start_queue()`: if the active job is paused, calls `job.resume()` (a real
+  OS-level thaw, `core.ffmpeg_runner`'s `NtResumeProcess`) so it carries on
+  from the exact frame it froze on; otherwise collects every row still
+  `"Queued"` and starts processing them in order via `_process_next`.
+- `pause_queue()`: calls the active job's `suspend()` (`NtSuspendProcess` —
+  genuinely freezes the OS process, not just the poll) and cancels the
+  pending poll tick; nothing encodes while paused.
+- `stop_queue()`: kills the active job (`_halt_active` — works whether
+  running or suspended), deletes its `.partial` output, and reverts its row
+  to `"Queued"`.
+- `shutdown()`: called by `LlamaGUI.on_close` right before the window
+  closes — kills any active ffmpeg and deletes its partial output. Windows
+  doesn't take a child process down with its parent, so without this an
+  encode would keep running (or sit frozen forever, if paused) after the
+  app itself is gone.
+- `start_task(task_id)`: the tabs' "do it now" path (Encode/Mux). Starts
+  immediately if nothing's active; otherwise jumps the line and runs as
+  soon as the active job finishes. Returns `"started"`/`"next"`/`"paused"`
+  so the calling tab can word its toast.
+- `_process_next(remaining_ids)`: pops the next queued id, loads its
+  settings into `core.ffmpeg_vars` (`ffmpeg_vars.load(row["settings"],
+  row["source_tab"])` — right here on the Tk thread, so worker threads only
+  ever see a plain compiled argv, never the shared module globals),
+  compiles the argv (`core.ffmpeg_build.compile_command`, into `<output>
+  .partial<ext>` via `core.ffmpeg_runner.partial_path`), constructs an
+  `FfmpegJob` (passing `verify_hdr_tag=core.ffmpeg_build.uses_hdr_tonemap()`
+  — whether this specific job's compiled command actually runs the BT.2390
+  tonemap, so only those jobs get the post-encode HDR-tag safety check),
+  calls `job.start()`, and arms `_schedule_poll()`. A settings combination
+  the builder can't express (e.g. an ffmpeg install that's since lost
+  libplacebo) fails the task immediately with the exception message rather
+  than starting a job. Prints the compiled command line for debugging. If
+  `remaining_ids` is empty, ends the batch and posts "All queued jobs
+  finished." via `app.notify`.
+- `_schedule_poll()` / `_cancel_poll()`: arm/cancel the one `after()` job
+  driving `_poll`; every path that halts processing goes through
+  `_cancel_poll` so a stray tick can never fire later.
+- `_poll()`: drains the active job's `poll_events()` (non-blocking),
+  updating `active["fraction"]` on every `("progress", …)` event and
+  remembering the first `("done",)`/`("failed", reason)` as `terminal`.
+  Paints the latest fraction (`_paint_fraction`) and recalculates the
+  overall progress bar **unconditionally, before acting on a terminal
+  event** — the worker always queues a final `("progress", 1.0)`
+  immediately before `("done",)`, and an earlier version returned the
+  instant it saw a terminal event without painting that last progress
+  update, so the fill visibly jumped from wherever it last was straight to
+  the flat "Done" grey rather than ever reaching full width.
+  `update_idletasks()` runs before flipping the row's status so that last
+  paint actually reaches the screen rather than being coalesced away by the
+  very next redraw. Re-arms itself while nothing terminal happened; on
+  `"done"` calls `_finish_task`, on `"failed"` calls `_fail_task`.
+- `_halt_active()`: kills the active job (`job.stop()` — works on a
+  suspended process too, since `kill()` doesn't care), cancels the poll,
+  and forgets `self._active`. The row's own status is the caller's
+  responsibility (`stop_queue` reverts to `"Queued"`; `remove_task`
+  destroys the row outright).
 
 **`_flatten_color(color)` / `_grey_row_text()` / `_row_backdrop_bg(row)`**:
 small colour helpers. A raw `tkinter.Canvas` can only take a single Tk
@@ -1766,36 +2304,30 @@ dimensions (unlike `CTkLabel`, confirmed by testing to silently ignore a
 `width` smaller than its natural text size and always render unclipped), the
 clip edge is hard and pixel-exact.
 
-**`_animate_progress(task_id, step, rest)`**: the simulated per-task
-progress loop, and the intended seam for a real ffmpeg/yt-dlp backend
-later. Each tick:
-1. Records `self._paused_state = (task_id, step, rest)` so pausing/resuming
-   always know exactly where to pick back up.
-2. Computes `fraction = step / _PROGRESS_STEPS` and a `max_fill_width`
-   capped at `status_label`'s own left edge — **not** the full row width.
-   This cap exists because `status_label` and `remove_btn` are
-   `fg_color="transparent"`, which (per the `CLAUDE.md` gotcha on
-   "transparent" not being real per-pixel transparency) is a frozen
-   snapshot of the row's pre-style color; letting the fill grow underneath
-   either widget used to show as a solid grey box cut into the fill, since
-   their own stale background would occlude it.
-3. Computes `fill_width = round(fraction * max_fill_width)` and passes it,
-   along with `max_fill_width`, straight to `_paint_progress`.
-4. If this was the final step, calls `_finish_task`; otherwise reschedules
-   itself via `self.after(_PROGRESS_INTERVAL_MS, ...)`, storing the job id
-   in `self._animation_job` so pause/stop can cancel it.
+**`_paint_fraction(active)`**: paints the active row's fill at its latest
+reported fraction. `max_fill_width` is capped at `status_label`'s own left
+edge — **not** the full row width — because `status_label` and `remove_btn`
+are `fg_color="transparent"`, which (per the `CLAUDE.md` gotcha on
+"transparent" not being real per-pixel transparency) is a frozen snapshot of
+the row's pre-style color; letting the fill grow underneath either widget
+would show as a solid grey box cut into the fill, since their own stale
+background would occlude it. `fill_width = round(fraction * max_fill_
+width)` is computed once and passed straight to `_paint_progress`.
 
-**`_finish_task(task_id, rest)`**: marks the task `"Done"` (if it still
-exists — it may have been removed mid-run) and immediately continues to the
-next queued task via `_process_next`.
+**`_finish_task(task_id, rest)`**: the active job exited cleanly and its
+file is in place — marks the task `"Done"` (if the row still exists — it
+may have been removed mid-run) and continues to the next queued task via
+`_process_next`.
 
-There is currently no real encoding/muxing pipeline — `_process_next` only
-prints the settings dict, and `_animate_progress` purely simulates elapsed
-work with a fixed-duration fill animation. Replacing that simulated loop
-with a real, non-blocking (off the Tk main thread) subprocess call that
-reports genuine progress, feeding it through the same `update_status`/
-fill-width plumbing, is the designated integration point for actual
-ffmpeg/yt-dlp support.
+**`_fail_task(task_id, rest, reason)`**: the active job failed — turns the
+row `"Failed"` (red), records `reason` on `row["error"]` (shown as the
+details popup's Error row), queues a "Job Failed" notice
+(`self._error_queue`, drained one at a time by `_show_errors` via a
+`self.after(0, ...)` — never opened directly from `_poll`, since
+`show_message`'s modal `wait_window` re-enters the Tk event loop and a
+recurring `_poll` tick firing inside it would stack dialogs; `_error_dialog_
+open` guards against showing two at once), and continues the queue via
+`_process_next` regardless.
 
 ### `tabs/settings_tab.py`
 
@@ -1870,7 +2402,8 @@ wired up at all. The call to `self.app.register_tab_ui(self.label,
 self.img_label)` — which would opt this tab into the global file-selection
 broadcast like every other tab — is present but commented out, meaning this
 tab deliberately does *not* update when a file is selected elsewhere in the
-app.
+app. `core/downloader.py` (see its own entry under `core/` above) is inert
+scratch code, not referenced by this file or anything else.
 
 ---
 

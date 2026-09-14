@@ -8,9 +8,9 @@ from tkinterdnd2 import DND_FILES
 
 from core.theme import get_active_theme, readable_text_on
 
-# Repo root — the strip-state assets (mute badge, Wave Loop.json) sit beside
-# llama.png.
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The assets/ folder — the strip-state assets (mute badge, Wave Loop.json,
+# info badges) live there, beside llama.png.
+_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 _ASSET_CACHE = {}
 
 

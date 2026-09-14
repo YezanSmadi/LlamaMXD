@@ -93,7 +93,7 @@ class MessageDialog(ctk.CTkToplevel):
 
     def _apply_icon(self):
         try:
-            self.iconbitmap("llama.ico")
+            self.iconbitmap("assets/llama.ico")
         except Exception:
             pass
 
