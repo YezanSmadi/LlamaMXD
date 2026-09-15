@@ -436,8 +436,8 @@ def probe_media(path):
     than raising, because nothing here is required for the UI to function —
     it only ever *improves* defaults.
 
-    Runs a subprocess, so callers must keep it off the Tk thread (LlamaGUI
-    does it on the same decode worker as the thumbnails)."""
+    Runs a subprocess, so callers must keep it off the GUI thread (MainWindow
+    runs it on the same worker as the thumbnail decode)."""
     unknown = {
         "container": None, "video": None, "audio": None,
         "video_profile": None, "video_level": None, "hdr": None,
@@ -539,7 +539,7 @@ def probe_duration(path):
     unreadable file, a container that reports no duration) returns None
     rather than raising. The queue's job runner uses it as the progress
     denominator for an untrimmed job. Runs a subprocess, so keep it off the
-    Tk thread (`FfmpegJob` calls it from its worker)."""
+    GUI thread (`FfmpegJob` calls it from its worker)."""
     if not path or not os.path.exists(path):
         return None
     try:
@@ -776,7 +776,7 @@ def extract_hdr_tonemapped_thumbnails(video_path, count=10):
     raising — this only ever replaces a preview, never blocks the app.
     Callers must check `supports_libplacebo()` themselves before treating an
     empty result as "no HDR to show" vs. "libplacebo isn't available".
-    Runs subprocesses, so keep this off the Tk thread."""
+    Runs subprocesses, so keep this off the GUI thread."""
     if not supports_libplacebo():
         return []
     total, fps = _probe_frame_geometry(video_path)

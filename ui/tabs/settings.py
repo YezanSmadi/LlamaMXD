@@ -1,9 +1,7 @@
 """Settings: theme (with a live hover preview), appearance mode, default save
 location, and hardware acceleration — all persisted to settings.json.
 
-A theme change is live **without a rebuild**. The CTk version had to destroy
-and reconstruct the sidebar and three tabs (snapshotting each form first)
-because CTk never recolours a built widget; here `ThemeManager.changed`
+A theme change is live **without a rebuild**: `ThemeManager.changed`
 repaints everything in place, which is also why hovering the list can
 preview a palette across the whole window."""
 from PySide6.QtCore import QRectF, Qt, QTimer

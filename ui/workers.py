@@ -1,10 +1,9 @@
 """Off-thread work with results delivered back on the GUI thread.
 
-The CTk app needed a `queue.Queue` plus a self-re-arming `after()` poller for
-every kind of background job (thumbnails, probes, HDR renders, yt-dlp fetches,
-the Deno check), because Tkinter isn't thread-safe. In Qt a signal emitted from
-a worker thread is delivered as a *queued* call on the receiver's thread, so
-each job is just "run this, then call that" — no poll loop, no pending count.
+A signal emitted from a worker thread is delivered as a *queued* call on the
+receiver's thread, so each background job (thumbnails, probes, HDR renders,
+yt-dlp fetches, the Deno check) is just "run this, then call that" — no poll
+loop, no pending count.
 
 Worker functions must never touch a widget; everything they return crosses
 back through `run_async`'s callback."""

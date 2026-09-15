@@ -3,14 +3,17 @@ chevrons, a sliding transition, a re-flowing dot row, the info badge + its
 tooltip, the mute badge, and the Wave Loop visualiser for stripped video /
 audio-only input.
 
-Everything the CTk version had to fake with PIL is native here: the chevron
-discs and dots are antialiased QPainter shapes (no 4x supersample +
-premultiplied downscale), the hover fade is painter opacity (no Image.blend
-per tick), the slide draws two cached pixmaps at an offset (no [a|b] strip
-crop per tick), and the Wave Loop paints through QPainter onto a plain widget
-(CTkImage's ~150ms-per-frame DPI pass is simply not a thing). The dot-row
-layout logic — three screen-stationary large dots, the highlight riding
-toward the edge it's heading for — is ported verbatim."""
+The chevron discs and dots are antialiased QPainter shapes, the hover fade
+is painter opacity, the slide draws two cached pixmaps at an offset, and the
+Wave Loop paints straight onto a widget.
+
+The dot row: the centre three dots are large and screen-stationary; beyond
+them two per side taper medium-then-small, and only frames that exist get a
+dot (7 wide in the interior, 5 at the ends). The current-frame highlight
+rides toward the cluster edge it's heading for and the row only scrolls once
+it's already there, so a direction change walks the highlight back across
+the middle slot first. The row re-flows on the same eased clock as the
+picture slide."""
 import json
 import os
 import time
@@ -30,7 +33,7 @@ from PySide6.QtWidgets import QLabel, QWidget
 from ui import theme as T
 from ui.widgets.panels import ASSETS, local_paths
 
-# Dot indicators (see the CTk module's long comment for the design).
+# Dot indicators (see the module docstring for the design).
 _DOT_R_LARGE = 4.0
 _DOT_R_MED = 3.0
 _DOT_R_SMALL = 2.0

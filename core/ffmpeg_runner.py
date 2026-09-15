@@ -1,4 +1,4 @@
-"""Runs one ffmpeg job off the Tk thread: start, real pause/resume, stop,
+"""Runs one ffmpeg job off the GUI thread: start, real pause/resume, stop,
 progress, and a readable failure reason — without ever touching a widget.
 
 The command itself is built with ffmpeg-python (`core.ffmpeg_build`), but it
@@ -9,10 +9,8 @@ normal process priority (profiled: event-loop lateness during a full-speed
 x264 encode came back the same as idle, so there was nothing to protect the
 UI from by throttling it — see _CREATION_FLAGS).
 
-Threads here follow the same rule as `LlamaGUI._decode_worker`: they never
-touch a widget or call `after()` (Tkinter isn't thread-safe). Everything
-reaches the Tk thread through `poll_events()`, which the Queue tab drains on
-its own `after` tick.
+Threads here never touch a widget. Everything reaches the GUI thread
+through `poll_events()`, which the Queue tab drains on its own timer tick.
 
 **Pause is real.** `suspend()` freezes the whole ffmpeg process
 (`NtSuspendProcess`) and `resume()` thaws it, so a paused job picks up from
@@ -178,7 +176,7 @@ class FfmpegJob:
         self._stopped = False
 
     # ------------------------------------------------------------------ #
-    #  Control (all called from the Tk thread)
+    #  Control (all called from the GUI thread)
     # ------------------------------------------------------------------ #
     def start(self):
         """Launches ffmpeg and its watcher threads. Never raises — a job
@@ -256,7 +254,7 @@ class FfmpegJob:
                 return events
 
     # ------------------------------------------------------------------ #
-    #  Worker threads — never touch Tk from here
+    #  Worker threads — never touch a widget from here
     # ------------------------------------------------------------------ #
     def _drain_stderr(self):
         """Keeps the tail of stderr for the failure message."""

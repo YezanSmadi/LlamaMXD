@@ -1,4 +1,4 @@
-"""The Downloader tab's logic, with no Tk: fetching a URL's info, turning its
+"""The Downloader tab's logic, with no UI code: fetching a URL's info, turning its
 format list into the tab's Codec / Quality / Format options, resolving a
 choice to the exact streams yt-dlp should fetch, and building the argv.
 
@@ -96,7 +96,7 @@ _MAX_STEM = 120
 # ---------------------------------------------------------------------- #
 _deno_checked = False
 _deno_path = None
-# The startup check runs on a worker thread while the Tk thread may already be
+# The startup check runs on a worker thread while the GUI thread may already be
 # building an argv — without the lock a second caller would see "checked,
 # nothing found" mid-check and quietly omit Deno.
 _deno_lock = threading.Lock()
@@ -105,7 +105,7 @@ _deno_lock = threading.Lock()
 def deno_path():
     """Absolute path to a usable Deno (bundled, else PATH), or None when it's
     missing or too old for yt-dlp. Checked once per process (a `deno
-    --version` subprocess) — call it off the Tk thread the first time."""
+    --version` subprocess) — call it off the GUI thread the first time."""
     global _deno_checked, _deno_path
     with _deno_lock:
         if not _deno_checked:
@@ -162,7 +162,7 @@ def subprocess_env():
 def fetch_info(url):
     """`(info, error)` for `url` — yt-dlp's full `-J` JSON, or None plus a
     short, user-readable reason. Blocking (several seconds on YouTube while
-    Deno solves its challenge): call it off the Tk thread."""
+    Deno solves its challenge): call it off the GUI thread."""
     url = (url or "").strip()
     if not url:
         return None, "Paste a video link first."

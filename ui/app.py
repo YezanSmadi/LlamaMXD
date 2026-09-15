@@ -119,7 +119,7 @@ class MainWindow(QWidget):
         self.media_tabs = []
         self.current_tab = "Muxing"
 
-        # Same proportions as the CTk window (35% x 37.5% of the screen), centred.
+        # 35% x 37.5% of the screen, fixed-size and centred.
         screen = self.screen().geometry()
         width, height = round(screen.width() * 0.35), round(screen.height() * 0.375)
         self.setFixedSize(width, height)

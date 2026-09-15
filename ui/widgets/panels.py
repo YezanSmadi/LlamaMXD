@@ -161,9 +161,9 @@ class SubTabBar(QWidget):
 # --------------------------------------------------------------------------- #
 class DropBox(QWidget):
     """The primary-bordered drop target: drop a file, double-click, or Browse.
-    Drag-over lights it up. `collapse()` is CTk's `hide_drop_text` — once a
-    file's been picked the prompt and border go, leaving just Browse, until
-    the preview carousel takes over."""
+    Drag-over lights it up. `collapse()` — once a file's been picked the
+    prompt and border go, leaving just Browse, until the preview carousel
+    takes over."""
 
     fileSelected = Signal(str)
 
@@ -290,7 +290,7 @@ class SummaryPanel(QWidget):
 # --------------------------------------------------------------------------- #
 class Sidebar(QWidget):
     """Title, logo, the four nav buttons, then Settings + footer pinned to the
-    bottom. A layout stretch replaces the CTk pack() call-order dance."""
+    bottom via a layout stretch."""
 
     navigate = Signal(str)
     WIDTH = 200
@@ -352,8 +352,8 @@ class Sidebar(QWidget):
 class TabIndicator(QWidget):
     """The flat `primary` pipe from the active nav button to the tab frame,
     with the 12px `secondary` band through its middle. It *glides* to the new
-    button instead of jumping. Square corners and exact geometry, but none of
-    the CTk seam workarounds — Qt paints the rectangles exactly."""
+    button instead of jumping. Square corners, so it meets the button's
+    rounded edge flush at mid-height."""
 
     _LINE_H = 12
 

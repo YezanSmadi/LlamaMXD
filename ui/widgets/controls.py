@@ -1,19 +1,14 @@
 """Small themed controls, each painting itself from `ui.theme.theme`.
 
-These are the Qt translations of the CTk components. The big difference in
-*how* they work: every widget here paints in one QPainter pass into Qt's
-backing store, and Qt presents the whole window at once — so there's no
-per-widget flicker to engineer around, no corner-nook colours to pin, no
-`fg_color="transparent"` snapshot, and a disabled control can simply *look*
-disabled. Animations run on `QVariantAnimation`, which Qt drives off one
-timer and repaints in step with the frame.
+Every widget paints in one QPainter pass into Qt's backing store and Qt
+presents the whole window at once, so a disabled control can simply *look*
+disabled and nothing fills in piece by piece. Animations run on
+`QVariantAnimation`, driven off one timer and repainted in step.
 
-**Signals follow CTk's `command` contract**: a control's user-action signal
-(`Dropdown.picked`, `CheckBox.clicked`, `Switch.clicked`, `SegmentedButton.
-changed`) fires only when the *user* changes it — never when code sets a
-value. That's what lets the tabs write a settings dict into the form without
-tripping their own handlers, exactly as `select()`/`set()` never fired
-`command` in CTk."""
+**User-action signals fire only on user changes**: `Dropdown.picked`,
+`CheckBox.clicked`, `Switch.clicked`, `SegmentedButton.changed` never fire
+when code sets a value. That's what lets the tabs write a settings dict into
+the form without tripping their own handlers."""
 import math
 import time
 
@@ -45,7 +40,7 @@ NO_OPTION = "—"
 
 
 def ui_font(px, bold=False, family=None):
-    """A pixel-sized font — Roboto (the CTk look) unless `family` is given."""
+    """A pixel-sized font — Roboto unless `family` is given."""
     f = QFont()
     f.setFamilies([family] if family else ["Roboto", "Segoe UI"])
     f.setPixelSize(px)
@@ -75,8 +70,8 @@ def labeled(label_text, widget, role="field", spacing=1, align=Qt.AlignLeft):
 
 def button(text, role=None, width=None, height=None):
     """A stylesheet-driven push button (secondary unless `role` says otherwise).
-    NoFocus, like every clickable here: CTk buttons never showed a focus ring,
-    and a focused button would swallow the global Space keybind."""
+    NoFocus, like every clickable here: no focus rings, and a focused button
+    would swallow the global Space keybind."""
     btn = QPushButton(text)
     if role:
         btn.setProperty("role", role)
@@ -183,13 +178,12 @@ class ClickableLabel(QLabel):
 #  Dropdown
 # --------------------------------------------------------------------------- #
 class Dropdown(QComboBox):
-    """CTkOptionMenu look (secondary fill, darker arrow section) with
-    ThemedDropdown's behaviour: opens straight down below the button, unrolls
+    """A secondary-filled dropdown with a darker arrow section. Opens
+    straight down below the button, unrolls
     + fades in, and reports row hover through `hovered(str)` for live
     previews.
 
-    `set(value)` mirrors ThemedDropdown.set(): it does **not** require the
-    value to be in the list — a value that isn't is shown as a display-only
+    `set(value)` does **not** require the value to be in the list — a value that isn't is shown as a display-only
     override (Passthru uses this to mirror a source's real bitrate/channels,
     which are rarely one of the offered options). `value()` reads it back.
 
@@ -232,8 +226,8 @@ class Dropdown(QComboBox):
 
     @classmethod
     def width_for(cls, values, min_width=60):
-        """The width that fits the longest of `values` — replaces the CTk
-        version's off-screen dynamic-resizing probe."""
+        """The width that fits the longest of `values`, so a dropdown never
+        resizes when a longer option is picked."""
         fm = QFontMetricsF(ui_font(13))
         widest = max((fm.horizontalAdvance(v) for v in values), default=0)
         return max(min_width, math.ceil(widest + 8 + 6 + cls._ARROW_W))
@@ -341,7 +335,7 @@ class Dropdown(QComboBox):
         body = QPainterPath()
         body.addRoundedRect(r, 6, 6)
         p.fillPath(body, th.color("secondary"))
-        # Arrow section: CTk paints it one shade darker, and darker again on hover.
+        # Arrow section: one shade darker, and darker again on hover.
         p.save()
         p.setClipRect(QRectF(r.right() - self._ARROW_W, r.top(), self._ARROW_W, r.height()))
         hover = self._hover and enabled
@@ -367,11 +361,10 @@ class Dropdown(QComboBox):
 #  CheckBox
 # --------------------------------------------------------------------------- #
 class CheckBox(QAbstractButton):
-    """CTkCheckBox: 24px rounded box, 3px border, filled + checkmark when on.
+    """A 24px rounded box, 3px border, filled + checkmark when on.
     `color_key` picks the fill ("secondary", or "stop" for the destructive
     Strip checkboxes). The fill fades rather than snapping, and disabled
-    greys the *box* too — the thing a CTk checkbox never did on its own (see
-    CLAUDE.md's `state="disabled"` gotcha)."""
+    greys the *box* too, not just the label."""
 
     def __init__(self, text="", color_key="secondary", checked=False, parent=None):
         super().__init__(parent)
@@ -457,7 +450,7 @@ class CheckBox(QAbstractButton):
 # --------------------------------------------------------------------------- #
 class Switch(QAbstractButton):
     """The AnimatedSwitch: a pill track whose knob slides between off/on.
-    Disabled greys the knob and track (CTkSwitch never did)."""
+    Disabled greys the knob and track."""
 
     def __init__(self, checked=False, parent=None):
         super().__init__(parent)
@@ -509,7 +502,7 @@ class Switch(QAbstractButton):
 #  SegmentedButton
 # --------------------------------------------------------------------------- #
 class SegmentedButton(QWidget):
-    """CTkSegmentedButton, but the selection pill *slides* between segments.
+    """A segmented selector whose selection pill *slides* between segments.
     `changed` fires on a user click only; `set` is silent."""
 
     changed = Signal(str)
@@ -618,7 +611,7 @@ class SegmentedButton(QWidget):
 class _TimeField(QWidget):
     """The HH:MM:SS field itself, fully self-painted. Internal state is a
     6-digit list and `cursor_pos` indexes straight into it — the single source
-    of truth for the block cursor, same model as the CTk TimeSpinner. Typing
+    of truth for the block cursor. Typing
     overwrites the digit under the cursor and advances; Backspace steps back
     then clears (typing in reverse); Delete clears in place. Minutes/seconds
     clamp to 59."""
@@ -686,7 +679,7 @@ class _TimeField(QWidget):
         elif key == Qt.Key_End:
             self.cursor_pos = 5
         self.update()
-        e.accept()   # every other key is swallowed, like the CTk "break"
+        e.accept()   # every other key is swallowed
 
     def mousePressEvent(self, e):
         self.setFocus(Qt.MouseFocusReason)
@@ -796,7 +789,7 @@ class TimeSpinner(QWidget):
 
     def _tick(self):
         if self._held is None or not self._held.isDown():
-            return   # dragged off the button — CTk stopped on <Leave> too
+            return   # dragged off the button — stop repeating
         self.set_seconds(self.seconds() + self._delta)
         self._schedule()
 

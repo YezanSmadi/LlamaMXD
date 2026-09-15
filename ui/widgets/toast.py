@@ -1,13 +1,10 @@
 """Transient notifications that drop in at the current tab frame's top-right.
 
-In CTk a toast had to be a borderless *Toplevel* with a colour-key punched
-out of it, drawn on an aliased canvas, and glued to the main window by hand
-on every drag/minimize — all because Tk has no per-pixel transparency for an
-in-window widget. Here a toast is just a child widget painted with real alpha
-and antialiased corners; it moves and minimizes with the window for free.
-
-The cap of `_MAX_VISIBLE` concurrent toasts is kept: every toast runs its own
-animation, and an uncapped stack under button-mashing is wasted work."""
+A toast is a child widget painted with real alpha and antialiased corners,
+so it moves and minimizes with the window. At most `_MAX_VISIBLE` hold a slot
+at once: every toast runs its own animation, and an uncapped stack under
+button-mashing is wasted work — a new arrival retires the oldest into a fast
+fade."""
 from PySide6.QtCore import QEasingCurve, QPoint, QRectF, Qt, QTimer, QVariantAnimation
 from PySide6.QtGui import QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget

@@ -158,8 +158,8 @@ class MuxingTab(MediaTab):
         self.format_menu.set_values(allowed)
         after = self.format_menu.value()
         if before != after:
-            # Keep the save path's extension in step with a forced snap (the
-            # CTk version left e.g. "_muxed.mp4" beside a snapped .mkv).
+            # Keep the save path's extension in step with a forced snap, so
+            # a snapped .mkv never sits beside "_muxed.mp4".
             stem, extension = os.path.splitext(self.save_entry.text().strip())
             if extension:
                 set_line_text(self.save_entry, stem + after)

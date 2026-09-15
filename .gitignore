@@ -5,7 +5,6 @@ __pycache__/
 .venv/
 venv/
 settings.json
-_generated_themes/
 
 # Local preset recipes — a user preference file, not shared repo state
 presets.json

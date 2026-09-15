@@ -26,7 +26,7 @@ container as far as the UI can tell -- only a probe of the actual input
 (`core.utilities.probe_media`) can say otherwise, which is what feeds
 `containers_for`.
 
-Pure data + lookups; no Tk in here.
+Pure data + lookups; no UI code in here.
 """
 
 # The one "nothing picked/resolved yet" placeholder, shared by every derived

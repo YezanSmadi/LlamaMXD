@@ -43,7 +43,7 @@ bitrate/channels/sample-rate, so there's no single `AUDIO_CODEC_ARG` to
 speak of any more -- see `_audio_stream_args` and `core.ffmpeg_build.
 build_encode_command`.
 
-Pure data; no Tk in here.
+Pure data; no UI code in here.
 """
 
 import os
@@ -408,7 +408,7 @@ def load(settings, source_tab=""):
     """Points every module variable at one job's values. `load({})` resets
     them all to the "no job loaded" defaults.
 
-    Called on the Tk thread as each job starts. The queue runs one job at a
+    Called on the GUI thread as each job starts. The queue runs one job at a
     time, so a single set of globals is enough; if jobs ever run
     concurrently, give each worker its own `derive()` dict instead."""
     globals().update(derive(settings, source_tab))

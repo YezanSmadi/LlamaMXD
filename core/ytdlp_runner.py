@@ -1,4 +1,4 @@
-"""Runs one YT-DLP download off the Tk thread, with the same contract as
+"""Runs one YT-DLP download off the GUI thread, with the same contract as
 `core.ffmpeg_runner.FfmpegJob` so the Queue tab drives both identically:
 `start()` / `suspend()` / `resume()` / `stop()` / `poll_events()`, emitting
 ("progress", fraction), then ("done",) or ("failed", reason) — plus one extra
@@ -32,11 +32,11 @@ speed; the merge (or conversion) before it starts is estimated from the last
 one this session measured, and once it's running, from how fast its output
 is actually growing on disk. The fraction never moves backward — a slower
 estimate holds the bar still rather than dropping it — and it's computed in
-`poll_events()` on the Tk thread (a cheap folder stat), so it keeps moving
+`poll_events()` on the GUI thread (a cheap folder stat), so it keeps moving
 through a merge that prints nothing at all. Paused time doesn't count.
 
 The reader thread follows the same rule as FfmpegJob's: it never touches a
-widget; everything reaches the Tk thread through `poll_events()`.
+widget; everything reaches the GUI thread through `poll_events()`.
 """
 
 import collections
@@ -175,7 +175,7 @@ class YtDlpJob:
         self._paused_since = None
 
     # ------------------------------------------------------------------ #
-    #  Control (all called from the Tk thread)
+    #  Control (all called from the GUI thread)
     # ------------------------------------------------------------------ #
     def start(self):
         """Launches yt-dlp inside its job object. Never raises — a job that
@@ -269,7 +269,7 @@ class YtDlpJob:
         return events
 
     # ------------------------------------------------------------------ #
-    #  Progress estimate (Tk thread, via poll_events)
+    #  Progress estimate (GUI thread, via poll_events)
     # ------------------------------------------------------------------ #
     def _active_elapsed(self, now=None):
         """Seconds since start, minus time spent paused."""
@@ -349,7 +349,7 @@ class YtDlpJob:
         return expected / max(1.0, _learned["copy_bytes_per_sec"])
 
     # ------------------------------------------------------------------ #
-    #  Reader thread — never touch Tk from here
+    #  Reader thread — never touch a widget from here
     # ------------------------------------------------------------------ #
     def _watch(self):
         """Parses yt-dlp's marker lines until it exits, then settles the job."""

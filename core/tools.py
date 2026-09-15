@@ -16,7 +16,7 @@ relative `--js-runtimes deno:dependables/deno.exe` (reported "no JS runtime
 found"; the same path made absolute worked -- confirmed directly), and a bare
 `ffmpeg` handed to yt-dlp or subprocess is left to Windows' own search order,
 which only happens to hit the app's folder when frozen. Nothing here touches
-Tk. Results are cached per process -- the tools don't move mid-run.
+the UI. Results are cached per process -- the tools don't move mid-run.
 """
 
 import functools

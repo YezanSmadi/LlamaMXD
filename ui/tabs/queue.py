@@ -1,12 +1,9 @@
 """The Queue: task rows, one real ffmpeg / yt-dlp job at a time, pause (a real
 OS suspend), stop, failures, the details popup and the overall progress bar.
 
-The job logic is a straight port. The rows are not: the CTk row needed a
-CTkFrame, a label, two stacked raw Canvases (so the fill edge could cut a
-glyph without two renderers disagreeing), a backdrop-colour lookup for the
-rounded-corner nooks and construction-order z-stacking. Here a row is one
-widget with one paintEvent — draw the row, then clip to the fill width and
-draw it again in `primary`. Same renderer, same coordinates, by construction.
+A row is one widget with one paintEvent: draw the row, then clip to the
+fill width and draw it again in `primary` — so the fill edge cuts a glyph
+cleanly, both halves coming from the same renderer at the same coordinates.
 
 Progress arrives in coarse jumps (ffmpeg reports ~2 Hz); the painted fill
 eases toward the latest value every frame so it glides rather than steps."""

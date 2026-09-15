@@ -1,14 +1,10 @@
-"""Live theme state for the Qt UI.
+"""Live theme state for the UI.
 
-The brand palettes still come from `core.theme` (THEMES / get_theme /
-readable_text_on), so both front ends read the same colours. What's new is
-that a theme or appearance switch is *live without a rebuild*: `ThemeManager.
-changed` fires, the app re-applies one stylesheet, and every custom-painted
-widget calls `update()`. Nothing is destroyed, so no form state has to be
-snapshotted and restored the way the CTk version's `apply_theme` needed.
-
-Neutral colours (window, frame, entry, …) mirror CustomTkinter's own
-`blue.json` values for each appearance mode, so the translation is 1:1."""
+The brand palettes come from `core.theme` (THEMES / get_theme /
+readable_text_on). A theme or appearance switch is *live without a rebuild*:
+`ThemeManager.changed` fires, the app re-applies one stylesheet, and every
+custom-painted widget calls `update()`. Nothing is destroyed, so no form
+state is lost."""
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication
 
@@ -22,7 +18,7 @@ from core.theme import (
     readable_text_on,
 )
 
-# CustomTkinter's neutral greys, per appearance mode (gray14 = #242424, etc.).
+# Neutral greys per appearance mode (X11 names noted: gray14 = #242424, etc.).
 _NEUTRALS = {
     "Dark": {
         "window": "#242424",        # gray14
@@ -144,10 +140,9 @@ class ThemeManager(QObject):
             self._rebuilding = False
 
     def _rebuild_colors(self):
-        # The native title bar follows the colour scheme (Qt 6.8+), which is
-        # what CTk's DWM tweak did. "System" must hand the scheme back to the
-        # OS *before* resolving it, or an earlier explicit Light/Dark would
-        # read back as the system's own.
+        # The native title bar follows the colour scheme (Qt 6.8+). "System"
+        # must hand the scheme back to the OS *before* resolving it, or an
+        # earlier explicit Light/Dark would read back as the system's own.
         hints = QGuiApplication.styleHints()
         if self.mode == "System":
             hints.unsetColorScheme()

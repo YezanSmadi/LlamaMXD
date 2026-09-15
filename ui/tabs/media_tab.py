@@ -1,18 +1,12 @@
 """The shared Muxing/Encoding frame.
 
-In CTk these two tabs were near-verbatim copies (see CLAUDE.md's Known
-issues — "if a third tab needs the same pattern, that's the point to
-extract it"). The port is that point: the header, preview area, sub-tab
-panels, save row, action buttons, presets, output-path logic and queue
-hand-off live here once; each tab supplies its own panels and its own
-`_sync_controls` (the two rulesets genuinely differ — Encoding cascades
-container → codec, Muxing inverts it).
+The header, preview area, sub-tab panels, save row, action buttons, presets,
+output-path logic and queue hand-off live here once; each tab supplies its
+own panels and its own `_sync_controls` (the two rulesets genuinely differ —
+Encoding cascades container → codec, Muxing inverts it).
 
-The hardest part of the old layout, `_pin_options_height` + `_prewarm_
-subtabs` (pinning three stacked panels to one height so the drop box didn't
-jump, and pre-painting them so the first switch didn't fill in), is simply
-a `QStackedWidget`: it sizes to its tallest page and a page switch is one
-double-buffered frame."""
+The three sub-tab panels sit in a `QStackedWidget`, which sizes itself to the
+tallest page — so the preview above never changes height on a switch."""
 import os
 
 from PySide6.QtCore import Qt

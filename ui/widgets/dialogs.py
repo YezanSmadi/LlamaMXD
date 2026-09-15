@@ -1,8 +1,8 @@
 """Themed modal dialogs: blocking problems get one of these; things that just
 happened get a toast (ui/widgets/toast.py) instead.
 
-A QDialog's `exec()` spins a nested event loop, same as CTk's `wait_window`,
-so timers keep firing underneath it. Never open one from inside a recurring
+A QDialog's `exec()` spins a nested event loop, so timers keep firing
+underneath it. Never open one from inside a recurring
 tick — post it with `QTimer.singleShot(0, ...)` (see QueueTab._show_errors)."""
 import os
 

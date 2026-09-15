@@ -1,8 +1,7 @@
-"""LlamaMXD entry point (PySide6 UI).
+"""LlamaMXD entry point.
 
     python main.py
-
-The legacy CustomTkinter UI still runs via `python main_ctk.py`."""
+"""
 import os
 import sys
 
@@ -17,7 +16,7 @@ from ui.workers import init_workers  # noqa: E402
 
 
 def _load_fonts():
-    """Roboto — the typeface the CTk UI used — bundled in assets/fonts."""
+    """Register the bundled Roboto (assets/fonts) — the app's typeface."""
     folder = os.path.join(_ROOT, "assets", "fonts")
     if os.path.isdir(folder):
         for name in os.listdir(folder):
