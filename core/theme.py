@@ -1,7 +1,9 @@
 import json
 import os
 
-import customtkinter as ctk
+# customtkinter is imported lazily, inside the two CTk-only helpers at the
+# bottom — the palettes and settings here are shared with the PySide6 UI,
+# which must not need customtkinter installed just to read a theme.
 
 # Repo root, derived from this file's own location rather than a bare
 # relative path — settings.json always lands next to main.py regardless of
@@ -254,6 +256,8 @@ def _ctk_theme_path(theme_name):
     two-color combo as the widgets this app colors explicitly, instead of
     always showing CTk's stock blue regardless of theme. Returns a file
     path suitable for ctk.set_default_color_theme()."""
+    import customtkinter as ctk
+
     palette = get_theme(theme_name)
     os.makedirs(_GENERATED_THEME_DIR, exist_ok=True)
     generated_path = os.path.join(_GENERATED_THEME_DIR, f"{theme_name.lower()}.json")
@@ -280,4 +284,6 @@ def apply_ctk_theme(theme_name):
     already-built widgets, which is why a live theme switch (see
     LlamaGUI.apply_theme) has to rebuild the affected widget tree after
     calling this, not just call it on its own."""
+    import customtkinter as ctk
+
     ctk.set_default_color_theme(_ctk_theme_path(theme_name))

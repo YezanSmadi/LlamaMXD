@@ -1,9 +1,20 @@
 # LlamaMXD (LlamaPY GUI)
 
-A Windows desktop GUI for video muxing/encoding/downloading, built with
-CustomTkinter. Wraps ffmpeg and yt-dlp behind a tabbed interface. Repo:
-`https://github.com/YezanSmadi/LlamaMXD`. Public domain (Unlicense). Currently
-v0.5.0-alpha.6 (see `components/sidebar.py`'s footer).
+A Windows desktop GUI for video muxing/encoding/downloading. Wraps ffmpeg and
+yt-dlp behind a tabbed interface. Repo: `https://github.com/YezanSmadi/LlamaMXD`.
+Public domain (Unlicense). Currently v0.5.0-alpha.6 (see the sidebar footer —
+`ui/widgets/panels.py`'s `VERSION`).
+
+**The UI is PySide6 (`ui/`) as of the `revampedConstruction` branch.** It is a
+full port of the CustomTkinter UI (`core/app.py`, `components/`, `tabs/`),
+which is kept runnable via `main_ctk.py` for side-by-side review until the
+port is signed off. Everything in `core/` except `core/app.py` has no UI code
+and is shared by both. **Most of this file below the "PySide6 UI" section
+still documents the CTk UI**; its behavioural rules (the `_sync_controls`
+rulesets, the queue's job control, the file-selection broadcast, presets,
+HDR→SDR, the Downloader cascade) were ported 1:1 and still describe what the
+Qt UI does — but its Tk/CTk rendering gotchas (canvases, colour snapshots,
+`after()` delays, Toplevel toasts, pack order) do not apply to `ui/`.
 
 ## Running
 
@@ -11,14 +22,71 @@ v0.5.0-alpha.6 (see `components/sidebar.py`'s footer).
 python main.py
 ```
 
-Must be launched **from the repo root** — `core/app.py` and `components/sidebar.py`
-load `assets/llama.ico` / `assets/llama.png` by relative path and will crash
-otherwise. (`ThumbnailCarousel`'s `audio-mute.png` / `Wave Loop.json` are loaded
-`__file__`-anchored to `assets/`, so those are launch-dir independent.)
+(`python main_ctk.py` for the legacy CTk UI — must be launched from the repo
+root, since `core/app.py` loads `assets/llama.ico` by relative path. The Qt UI
+resolves every asset `__file__`-anchored.)
 
+## PySide6 UI (`ui/`)
+
+```
+main.py                   QApplication, Fusion style, bundled Roboto (assets/fonts), theme, MainWindow
+ui/app.py                 MainWindow — the hub: shared state, file-selection broadcast, background
+                          work (probe + frames, HDR renders, yt-dlp fetch, Deno check), tab routing,
+                          keybinds (app-level event filter), toasts, close prompt
+ui/theme.py               ThemeManager (live theme + System/Light/Dark) + the generated stylesheet;
+                          palettes from core/theme.py, neutrals mirror CTk's blue.json
+ui/workers.py             run_async(fn, on_done): daemon thread, result delivered on the GUI thread
+                          via a queued signal (replaces every CTk queue + after() poller); pil_to_qimage
+ui/widgets/controls.py    Dropdown, CheckBox, Switch, SegmentedButton, TimeSpinner, MarqueeLabel,
+                          IconButton, helpers (button, labeled, set_enabled)
+ui/widgets/panels.py      SubTabBar, DropBox, BorderedFrame, SummaryPanel, Sidebar, TabIndicator
+ui/widgets/carousel.py    ThumbnailCarousel + WaveLayer (rlottie Wave Loop) + info tooltip
+ui/widgets/dialogs.py     MessageDialog, show_message / ask_yes_no / ask_text, confirm_output_path,
+                          AudioStreamPickerDialog
+ui/widgets/toast.py       Toast / ToastManager (child widgets, real alpha)
+ui/tabs/media_tab.py      MediaTab — the shared Muxing/Encoding frame (header, preview, sub-tab
+                          panels, save row, actions, presets, output path, queue hand-off)
+ui/tabs/muxing.py, encoding.py, downloader.py, queue.py, settings.py
+```
+
+Conventions that differ from the CTk UI:
+- **User-action signals fire only on user changes**, mirroring CTk's
+  `command`: `Dropdown.picked`, `CheckBox.clicked`, `Switch.clicked`,
+  `SegmentedButton.changed`. Setting a value in code (`set`, `setChecked`)
+  never fires them, which is what lets `_apply_settings` write a form without
+  tripping handlers.
+- `Dropdown.set(value)` doesn't require the value to be in the list (shown as
+  a display override — Passthru mirrors a source's real bitrate this way);
+  read with `value()`, never `currentText()`.
+- Clickables are `Qt.NoFocus` (no focus rings; Space stays the Queue
+  keybind). Only text fields take focus.
+- **A theme / appearance switch rebuilds nothing.** `ThemeManager.changed` →
+  `MainWindow._restyle` re-applies the stylesheet (~140ms, all re-polish) and
+  every custom-painted widget reads `T.theme` at paint time. So there's no
+  form snapshot/restore, and Settings' hover preview recolours the whole app.
+- A disabled control actually looks disabled (checkbox box, switch knob,
+  slider handle) — no colour-swap helpers needed.
+- Muxing/Encoding share `MediaTab`; the sub-tab panels are a
+  `QStackedWidget` (sized to its tallest page), replacing
+  `_pin_options_height` / `_prewarm_subtabs`.
+- `Dropdown.hidePopup` is also called by Qt on style changes, so
+  `popupClosed` only fires for a popup that was genuinely open.
+- `MainWindow.closeEvent` sets `_closing` before accepting: `quit()` re-sends
+  a close event, which would otherwise prompt a second time.
+
+Verified off-screen (`QT_QPA_PLATFORM=offscreen` — note that platform's
+virtual screen is tiny, so pin the window to 896x540 when grabbing): tab
+switch + full repaint ~1ms median; probe auto-resolve (H.264/Main/4.1, AAC
+320k/Stereo/48k); strip rules; carousel scrub mirrored across tabs; a real
+Mux and Encode through the queue; pause (no progress while suspended),
+resume, stop mid-run (reverts to Queued, no partial left); close prompt with
+pending work; audio-only input → Wave Loop + "no video stream"; toast cap;
+Downloader fetch success (formats, cascade, size, save path) and failure.
+Not yet verified on a real display: dropdown popup unroll at 175% DPI,
+drag-and-drop from Explorer, HDR→SDR preview on an HDR source.
 Environment: Python 3.13, system interpreter (no venv). Dependencies are pinned
 in `requirements.txt` (`pip install -r requirements.txt`) but still installed
-globally in practice: `customtkinter` 6.0, `tkinterdnd2` 0.6.2, `opencv-python`
+globally in practice: `PySide6` 6.11.2 (the UI), `customtkinter` 6.0 (legacy UI only), `tkinterdnd2` 0.6.2, `opencv-python`
 (cv2) 5.0, `Pillow` 11.3, `rlottie-python` 1.3.8 (the stripped-video preview's
 Wave Loop animation — `ThumbnailCarousel`; a missing/broken import degrades to a
 flat gradient wash, never a crash), `ffmpeg-python` 0.2.0 (+ its `future`
@@ -38,7 +106,7 @@ nothing needs to be on PATH; PATH is only the last fallback.
 ## Architecture
 
 ```
-main.py              entry point: sets appearance mode, constructs LlamaGUI, mainloop
+main_ctk.py          legacy CTk entry point: sets appearance mode, constructs LlamaGUI, mainloop
 core/app.py          LlamaGUI — the root window, owns shared state, tab routing, active-tab indicator
 core/formats.py      container/codec compatibility + the option cascade (pure data, no Tk)
 core/presets.py      named codec/quality recipes, persisted to presets.json
@@ -49,8 +117,9 @@ core/ffmpeg_runner.py  runs one ffmpeg job off the Tk thread (progress, suspend/
 core/tools.py        resolves ffmpeg/ffprobe/yt-dlp/deno to absolute paths (bundled first, then PATH)
 core/downloader.py   YT-DLP logic, no Tk: fetch (-J), format model + option lists, resolve, argv
 core/ytdlp_runner.py runs one download off the Tk thread (job object, stages, time-based progress)
-components/          reusable widgets, tab-agnostic
-tabs/                one CTkFrame subclass per tab
+components/          reusable CTk widgets, tab-agnostic (legacy CTk UI)
+tabs/                one CTkFrame subclass per tab (legacy CTk UI)
+ui/                  the PySide6 UI — see "PySide6 UI" above
 ```
 
 ### External tools (`core/tools.py`)

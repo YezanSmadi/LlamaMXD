@@ -4,8 +4,6 @@ import re
 import subprocess
 import tempfile
 
-import customtkinter as ctk
-from tkinterdnd2 import DND_FILES, TkinterDnD
 import cv2
 from PIL import Image
 
