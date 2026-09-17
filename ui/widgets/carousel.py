@@ -18,9 +18,10 @@ import json
 import os
 import time
 
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QByteArray, QEasingCurve, QPointF, QRectF, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import (
     QColor,
+    QCursor,
     QImage,
     QLinearGradient,
     QPainter,
@@ -28,6 +29,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
 )
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QLabel, QWidget
 
 from ui import theme as T
@@ -94,34 +96,80 @@ def _wave():
     return _CACHE["wave"]
 
 
-def _asset_image(name):
-    key = f"img:{name}"
+def _svg_renderer(name, color=None):
+    """A cached `QSvgRenderer` for `assets/<name>`, optionally with every
+    `fill="currentColor"` in the file swapped for a literal `color` hex
+    string before parsing — how the info badge gets a runtime, appearance-
+    aware recolor without touching the SVG asset itself (see
+    `_paint_info_badge`). `color=None` renders the file exactly as authored
+    (the mute badge's own fixed red/white never changes with the theme)."""
+    key = f"svg:{name}:{color}"
     if key not in _CACHE:
-        _CACHE[key] = QImage(os.path.join(ASSETS, name))
+        with open(os.path.join(ASSETS, name), "r", encoding="utf-8") as fh:
+            data = fh.read()
+        if color:
+            data = data.replace('fill="currentColor"', f'fill="{color}"')
+        _CACHE[key] = QSvgRenderer(QByteArray(data.encode("utf-8")))
     return _CACHE[key]
 
 
-def _info_badge_image():
-    """The info badge for the current appearance mode (theme-independent)."""
-    name = "info-icon-light.png" if T.theme.resolved_mode() == "Light" else "info-icon-dark.png"
-    image = _asset_image(name)
-    if image.isNull():
-        key = "img:info-fallback"
-        if key not in _CACHE:
-            fallback = QImage(96, 96, QImage.Format_ARGB32_Premultiplied)
-            fallback.fill(Qt.transparent)
-            p = QPainter(fallback)
-            p.setRenderHint(QPainter.Antialiasing)
-            p.setBrush(QColor(32, 32, 32, 220))
-            p.setPen(Qt.NoPen)
-            p.drawEllipse(1, 1, 94, 94)
-            p.setBrush(Qt.white)
-            p.drawEllipse(QPointF(48, 30), 6, 6)
-            p.drawRoundedRect(QRectF(42, 47, 12, 31), 6, 6)
-            p.end()
-            _CACHE[key] = fallback
-        image = _CACHE[key]
-    return image
+def _paint_info_badge(painter, rect):
+    """The info badge, rendered from `assets/info.svg` rather than hand-drawn
+    primitives. That SVG is a single solid disc with the "i" glyph cut out
+    as a hole (confirmed by rendering it over a contrasting backdrop, where
+    the hole never reaches past ~70% of the circle's own radius) — so the
+    two-tone, appearance-aware look comes from painting a plain circle in
+    the glyph colour first and the SVG, recoloured to the disc colour, on
+    top of it: everywhere the SVG is solid it covers that circle with the
+    disc colour, and everywhere it's the letter-shaped hole, the glyph-
+    coloured circle underneath shows through as the "i". Dark mode gets a
+    dark disc with a white glyph, light mode a white disc with a dark glyph
+    — deliberately colour-neutral in every theme rather than the theme's own
+    accent colour, matching the artwork this replaces.
+
+    The backdrop circle is drawn noticeably smaller than `rect`, not the
+    same size — the SVG's own circle touches `rect`'s edge exactly, and a
+    same-size backdrop's antialiased edge doesn't quite land on the same
+    pixels as the SVG renderer's own, leaving a faint ring of the glyph
+    colour peeking past the disc's outer edge (confirmed: visible as a thin
+    white outline around the dark-mode disc). Shrinking it to 80% comfortably
+    clears the hole's ~70%-of-radius reach while staying well clear of that
+    seam."""
+    light = T.theme.resolved_mode() == "Light"
+    disc_color = "#FFFFFF" if light else "#2B2B2B"
+    glyph_color = "#2B2B2B" if light else "#FFFFFF"
+    painter.save()
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(glyph_color))
+    inset = rect.width() * 0.1
+    painter.drawEllipse(rect.adjusted(inset, inset, -inset, -inset))
+    _svg_renderer("info.svg", disc_color).render(painter, rect)
+    painter.restore()
+
+
+def _paint_info_badge_faded(painter, rect, alpha, dpr=1.0):
+    """`_paint_info_badge`, fading as one flattened unit instead of each of
+    its two layers separately. The hole-punch trick above only reads
+    correctly (glyph showing only through the "i"-shaped hole) when the SVG
+    disc layer is fully opaque relative to the glyph circle beneath it —
+    applying a single `QPainter.setOpacity()` around both draw calls fades
+    the disc too, which lets the glyph colour bleed through the *entire*
+    disc rather than just the hole (confirmed: the two theme colours
+    visibly blend into each other partway through the fade instead of the
+    badge just dimming). Composited at full opacity onto an offscreen
+    buffer first, then that flattened result is drawn once at `alpha`."""
+    w, h = max(1, round(rect.width() * dpr)), max(1, round(rect.height() * dpr))
+    buf = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+    buf.fill(Qt.transparent)
+    buf.setDevicePixelRatio(dpr)
+    bp = QPainter(buf)
+    _paint_info_badge(bp, QRectF(0, 0, rect.width(), rect.height()))
+    bp.end()
+    painter.save()
+    painter.setOpacity(alpha)
+    painter.drawImage(rect.topLeft(), buf)
+    painter.restore()
 
 
 class WaveLayer(QWidget):
@@ -220,6 +268,15 @@ class _InfoTooltip(QLabel):
     def __init__(self):
         super().__init__(None, Qt.ToolTip | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        # Without this, the tooltip — a real top-level window — can end up
+        # sitting directly under the cursor once shown (worse the bigger the
+        # info icon renders, i.e. the expanded preview): the OS then routes
+        # the next move to *it* instead of the carousel, which reads as the
+        # carousel's mouse having left, fading the whole hover overlay out
+        # and hiding the tooltip, which puts the carousel back under the
+        # cursor and re-triggers everything — a rapid flicker loop. Same
+        # fix WaveLayer already uses for the same class of problem.
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setTextFormat(Qt.PlainText)
         self._restyle()
         T.theme.changed.connect(self._restyle)
@@ -239,6 +296,7 @@ class ThumbnailCarousel(QWidget):
     populated = Signal()
     indexChanged = Signal(int)
     fileDropped = Signal(str)
+    expandToggled = Signal(bool)
 
     def __init__(self, host, parent=None):
         super().__init__(parent)
@@ -259,6 +317,7 @@ class ThumbnailCarousel(QWidget):
         self._scaled = {}            # (index, w, h, dpr) -> QPixmap
         self._prev_press_central = False
         self._tooltip = None
+        self._expanded = False
 
         self._arrow_alpha = 0.0
         self._fade = QVariantAnimation(self)
@@ -280,6 +339,25 @@ class ThumbnailCarousel(QWidget):
     # ------------------------------------------------------------------ #
     #  Public API
     # ------------------------------------------------------------------ #
+    def clear_preview(self):
+        """Drop the current frames immediately, so the previous file's
+        preview never lingers on screen while the newly-selected one is
+        still probing/decoding on a worker (`_frames` empty short-circuits
+        `paintEvent`, same as before anything was ever loaded). Called right
+        when the global file selection changes -- see `app.update_global_file`
+        -- so a cache-hit re-selection that rebroadcasts synchronously never
+        even shows the blank frame; only a genuine decode does."""
+        self._frames = []
+        self._index = 0
+        self._dot_start = 0
+        self._dot_anim = None
+        self._scaled.clear()
+        self._cancel_anim()
+        self._arrow_alpha = 0.0
+        self._audio_only = False
+        self._sync_wave()
+        self.update()
+
     def set_frames(self, frames):
         """New frame list (QImages). Resets to the first frame; the first
         non-empty set fires `populated` so the tab can reveal the carousel."""
@@ -353,6 +431,11 @@ class ThumbnailCarousel(QWidget):
 
     def _sync_wave(self):
         if self._wave_mode() and self.isVisible():
+            # The Wave Loop layer positions itself relative to the tab
+            # hosting this carousel (`_place_wave`'s `mapTo(host, ...)`),
+            # which is meaningless while detached into the expanded overlay
+            # -- drop back to the embedded view first.
+            self.force_collapse()
             self._place_wave()
             self.wave.start()
         else:
@@ -409,13 +492,50 @@ class ThumbnailCarousel(QWidget):
             self._scaled[key] = pix
         return pix
 
+    def _icon_scale(self):
+        """The mute badge's own scale — half size once expanded, mirroring
+        the expand icon's baseline. Moot in practice: the mute badge is
+        never painted while expanded at all (see `paint_badges`), kept here
+        only so the size stays sane if that ever changes."""
+        return 0.5 if self._expanded else 1.0
+
+    def _info_badge_scale(self):
+        """The info badge, unlike the mute badge, stays visible while
+        expanded. It's already proportionally bigger in absolute terms
+        purely because the expanded frame itself is so much bigger — an
+        extra 2x multiplier on top of that read as comically huge, so this
+        stays at the same proportional size as the embedded preview's."""
+        return 1.0
+
+    def _expand_icon_scale(self):
+        """The expand/shrink icon's own multiplier on top of the plain
+        percentage-of-frame formula — one constant for both the embedded
+        expand icon and the expanded shrink icon, like the chevrons'
+        single 0.75, rather than two different multipliers fighting the
+        frame-size difference between them. 1.125 is the shrink icon's own
+        settled size; giving the embedded expand icon anything else made
+        the two feel inconsistent rather than like the same button."""
+        return 1.125
+
+    def _dot_scale(self):
+        """The dot row grows instead of shrinking — it's the primary
+        at-a-glance cue for which frame you're on, and needs to stay
+        legible at a much bigger size rather than shrinking with everything
+        else. 1.5x embedded once expanded (25% smaller than a plain 2x,
+        which crowded the frame)."""
+        return 1.5 if self._expanded else 1.0
+
     def _disc_centers(self, w, h):
         """`(left_center, right_center, radius)` in frame-local pixels — None
-        for a chevron that isn't drawn. Shared by drawing and hit-testing."""
+        for a chevron that isn't drawn. Shared by drawing and hit-testing.
+        Chevrons are 75% their old proportional size everywhere — both the
+        small embedded preview and the expanded one — unlike badges/the
+        expand icon, which only shrink once expanded."""
         if w <= 0 or h <= 0:
             return None, None, 0.0
         disc_r = max(14.0, min(w, h) * 0.12)
         disc_r = min(disc_r, w * 0.16, h * 0.42)
+        disc_r *= 0.75
         margin = max(4.0, disc_r * 0.14)
         cy = h / 2
         last = len(self._frames) - 1
@@ -424,6 +544,7 @@ class ThumbnailCarousel(QWidget):
         return left, right, disc_r
 
     def _dot_geometry(self, w, h, dot_start):
+        scale = self._dot_scale()
         n = len(self._frames)
         cluster_lo, cluster_hi = dot_start, dot_start + _DOT_CLUSTER - 1
         lo = max(0, cluster_lo - _DOT_LOOK)
@@ -432,9 +553,9 @@ class ThumbnailCarousel(QWidget):
         geo = {}
         for f in range(lo, hi + 1):
             dist = cluster_lo - f if f < cluster_lo else f - cluster_hi if f > cluster_hi else 0
-            r = _DOT_R_LARGE if dist == 0 else _DOT_R_MED if dist == 1 else _DOT_R_SMALL
-            geo[f] = (w / 2 + (f - cluster_mid) * _DOT_GAP, r)
-        return geo, h - 18
+            r = (_DOT_R_LARGE if dist == 0 else _DOT_R_MED if dist == 1 else _DOT_R_SMALL) * scale
+            geo[f] = (w / 2 + (f - cluster_mid) * _DOT_GAP * scale, r)
+        return geo, h - 18 * scale
 
     def _resolve_dot_start(self, new_index, delta, prev_index, prev_start):
         n = len(self._frames)
@@ -490,6 +611,11 @@ class ThumbnailCarousel(QWidget):
             self._paint_dots(p, rect.width(), rect.height())
             self._paint_chevrons(p, rect.width(), rect.height())
             p.restore()
+
+        # Not gated to len(frames) > 1 like the chevrons/dots above — even a
+        # single-frame preview can still be expanded.
+        if self._arrow_alpha > 0.01:
+            self._paint_expand_icon(p, rect)
 
         self.paint_badges(p, rect)
 
@@ -551,26 +677,61 @@ class ThumbnailCarousel(QWidget):
 
     def _badge_sizes(self, rect):
         short = min(rect.width(), rect.height())
-        return max(18, round(short * 0.14)), max(18, round(short * 0.09))
+        mute_size = max(18, round(short * 0.14 * self._icon_scale()))
+        info_size = max(18, round(short * 0.09 * self._info_badge_scale()))
+        return mute_size, info_size
 
     def _info_badge_rect(self, rect):
         _, info_size = self._badge_sizes(rect)
         margin = max(4, round(info_size * 0.35))
         return QRectF(rect.left() + margin, rect.bottom() - info_size - margin, info_size, info_size)
 
+    def _expand_icon_rect(self, rect):
+        short = min(rect.width(), rect.height())
+        size = max(20, round(short * 0.11 * self._expand_icon_scale()))
+        margin = max(4, round(size * 0.35))
+        return QRectF(rect.right() - size - margin, rect.bottom() - size - margin, size, size)
+
+    def _paint_expand_icon(self, p, rect):
+        """Bottom-right, hover-only like the chevrons — expand.svg while
+        embedded, shrink.svg once expanded, on the same primary disc the
+        chevrons use."""
+        icon_rect = self._expand_icon_rect(rect)
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setOpacity(self._arrow_alpha)
+        p.setPen(Qt.NoPen)
+        p.setBrush(T.with_alpha(T.theme.color("primary"), 230 / 255))
+        p.drawEllipse(icon_rect)
+        name = "shrink.svg" if self._expanded else "expand.svg"
+        inset = icon_rect.width() * 0.22
+        _svg_renderer(name, T.theme.hex("primary_text")).render(p, icon_rect.adjusted(inset, inset, -inset, -inset))
+        p.restore()
+
     def paint_badges(self, p, rect):
         """Mute badge (top-left, while audio is stripped) and the info badge
         (bottom-left, once a probe has landed) over `rect`. Shared with the
-        WaveLayer so both preview modes carry the same badges."""
-        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        WaveLayer so both preview modes carry the same badges. The mute
+        badge is a status indicator and normally always stays on — except
+        in the expanded preview, where it's left off entirely rather than
+        competing with the big picture (the strip state is already visible
+        from the embedded preview it was expanded from). The info badge is
+        interactive chrome like the chevrons — unlike the small embedded
+        preview (always on, out of the way in a corner), an expanded
+        preview fades it in with the rest of the hover UI instead of
+        leaving it permanently competing with the big picture."""
+        p.setRenderHint(QPainter.Antialiasing)
         mute_size, _ = self._badge_sizes(rect)
-        if self._strip_audio:
-            image = _asset_image("audio-mute.png")
-            if not image.isNull():
-                margin = max(4, round(mute_size * 0.28))
-                p.drawImage(QRectF(rect.left() + margin, rect.top() + margin, mute_size, mute_size), image)
+        if self._strip_audio and not self._expanded:
+            margin = max(4, round(mute_size * 0.28))
+            _svg_renderer("audio-mute.svg").render(
+                p, QRectF(rect.left() + margin, rect.top() + margin, mute_size, mute_size))
         if self._media_info:
-            p.drawImage(self._info_badge_rect(rect), _info_badge_image())
+            if self._expanded:
+                _paint_info_badge_faded(p, self._info_badge_rect(rect), self._arrow_alpha,
+                                        self.devicePixelRatioF() or 1.0)
+            else:
+                _paint_info_badge(p, self._info_badge_rect(rect))
 
     # ------------------------------------------------------------------ #
     #  Animation
@@ -634,7 +795,9 @@ class ThumbnailCarousel(QWidget):
     #  Input
     # ------------------------------------------------------------------ #
     def enterEvent(self, e):
-        if len(self._frames) > 1 and not self._wave_mode():
+        # >= 1 frame, not > 1 — the expand icon (unlike the chevrons/dots)
+        # is still worth showing for a single-frame preview.
+        if self._frames and not self._wave_mode():
             self._fade_to(1.0)
 
     def leaveEvent(self, e):
@@ -655,9 +818,13 @@ class ThumbnailCarousel(QWidget):
         return None
 
     def _in_chevron_band(self, x, w, h):
-        _, _, radius = self._disc_centers(w, h)
+        """Excludes a side from the "central" double-click-to-reselect area
+        only while that side's chevron is actually drawn there — on the
+        first frame (no left chevron) or the last (no right chevron), that
+        side is just dead space and should double-click like anywhere else."""
+        left, right, radius = self._disc_centers(w, h)
         reach = radius * 2.0 + 16.0
-        return x < reach or x > w - reach
+        return (left is not None and x < reach) or (right is not None and x > w - reach)
 
     def _press(self, pos, repeat):
         if self._wave_mode():
@@ -676,16 +843,35 @@ class ThumbnailCarousel(QWidget):
                 central = not self._in_chevron_band(xy[0], rect.width(), rect.height())
         elif self._frames:
             central = True
-        if central and repeat and self._prev_press_central:
+        if central and repeat and self._prev_press_central and not self._expanded:
+            # Double-click-to-import is a small/embedded-preview affordance
+            # only — while looking at a big expanded picture, an accidental
+            # double-click shouldn't pop a file browser open over it.
             self.reselect.emit()
         self._prev_press_central = central
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
+            if self._over_expand_icon(e.position()):
+                self._toggle_expand()
+                return
+            if self._expanded and not self._within_frame(e.position()):
+                # The expanded carousel widget fills nearly the whole
+                # overlay, but the actual picture inside it is letterboxed
+                # — clicking the bars above/below (or beside) it should
+                # dismiss the expanded view exactly like clicking the thin
+                # scrim border around the carousel already does, not be
+                # swallowed as an on-picture click.
+                self.force_collapse()
+                return
             self._press(e.position(), repeat=False)
 
     def mouseDoubleClickEvent(self, e):
         if e.button() == Qt.LeftButton:
+            if self._over_expand_icon(e.position()):
+                return
+            if self._expanded and not self._within_frame(e.position()):
+                return
             self._press(e.position(), repeat=True)
 
     def mouseMoveEvent(self, e):
@@ -693,6 +879,42 @@ class ThumbnailCarousel(QWidget):
             self._show_tooltip()
         else:
             self._hide_tooltip()
+        self.setCursor(self._hover_cursor(e.position()))
+
+    def _over_chevron(self, pos):
+        if self._wave_mode() or len(self._frames) <= 1:
+            return False
+        xy, rect = self._local_frame_xy(pos)
+        if xy is None:
+            return False
+        return self._hit_disc(xy[0], xy[1], rect.width(), rect.height()) is not None
+
+    def _within_frame(self, pos):
+        """Whether `pos` lands on the actual letterboxed picture, not just
+        somewhere in the carousel widget's own (much larger, once
+        expanded) bounds. The expand icon's own hit-test already stays
+        within this by construction (it's inset from the frame rect's own
+        corner), so callers don't need to check it separately."""
+        rect = self._frame_rect()
+        return not rect.isEmpty() and rect.contains(pos)
+
+    def _hover_cursor(self, pos):
+        """The small embedded preview keeps a pointing-hand cursor
+        everywhere — a click almost anywhere on it does something (step a
+        chevron, double-click to reselect). The expanded preview is mostly
+        just a big picture to look at, so it stays a plain arrow except
+        over the info icon, the chevrons, or the shrink button — the only
+        spots that actually do anything there — and never lights up at all
+        outside the picture itself (the letterbox bars around it), since a
+        click there dismisses the expanded view rather than acting on
+        anything drawn under the cursor."""
+        if not self._expanded:
+            return Qt.PointingHandCursor
+        if not self._within_frame(pos):
+            return Qt.ArrowCursor
+        if self._over_info_badge(pos) or self._over_expand_icon(pos) or self._over_chevron(pos):
+            return Qt.PointingHandCursor
+        return Qt.ArrowCursor
 
     def dragEnterEvent(self, e):
         if local_paths(e.mimeData()):
@@ -722,6 +944,37 @@ class ThumbnailCarousel(QWidget):
         c = badge.center()
         radius = badge.width() / 2 * 1.3
         return (point.x() - c.x()) ** 2 + (point.y() - c.y()) ** 2 <= radius ** 2
+
+    def _over_expand_icon(self, pos):
+        """Not offered in wave mode — nothing there to usefully expand, same
+        scope as the chevrons/dots."""
+        if self._wave_mode() or not self._frames:
+            return False
+        rect = self._frame_rect()
+        if rect.isEmpty():
+            return False
+        icon = self._expand_icon_rect(rect)
+        c = icon.center()
+        radius = icon.width() / 2 * 1.3
+        return (pos.x() - c.x()) ** 2 + (pos.y() - c.y()) ** 2 <= radius ** 2
+
+    def _toggle_expand(self):
+        self._expanded = not self._expanded
+        self.update()
+        self.expandToggled.emit(self._expanded)
+        # The listener reparents/resizes the carousel synchronously inside
+        # that emit, so the icon's on-screen position just moved out from
+        # under a mouse that hasn't — re-derive the cursor from the current
+        # global position rather than assuming it's still over anything.
+        self.setCursor(self._hover_cursor(self.mapFromGlobal(QCursor.pos())))
+
+    def force_collapse(self):
+        """Shrink back from the expanded overlay if currently expanded —
+        used when the file being previewed is about to change out from
+        under it (a rejected import) rather than left stranded showing
+        something that's disappearing."""
+        if self._expanded:
+            self._toggle_expand()
 
     def _show_tooltip(self):
         if self._tooltip is None:
@@ -800,3 +1053,79 @@ class ThumbnailCarousel(QWidget):
     def deleteLater(self):
         self._hide_tooltip()
         super().deleteLater()
+
+
+class _ExpandedPreviewOverlay(QWidget):
+    """A translucent scrim that temporarily hosts a tab's `ThumbnailCarousel`
+    at a bigger, centred size while its expand icon is on — the same widget
+    instance is reparented in and back out, so every one of its own
+    behaviors (chevrons, dots, badges, drag/drop, the shrink icon, arrow-key
+    stepping) keeps working unchanged; nothing here duplicates any of that.
+
+    Sized to the *main window's own footprint*, not the monitor — filling
+    the whole screen as a separate top-level OS window was tried first and
+    reverted: becoming its own window stole window activation from the main
+    window, which is why the app-level Left/Right keybind (gated on
+    `window.isActiveWindow()`) silently stopped working while expanded.
+    Staying a plain child widget of the main window sidesteps that
+    entirely, and doubles as the "cover the app" dimming scrim behind the
+    carousel for free — it already sits above the sidebar and tab content
+    in z-order and blocks clicks from reaching them.
+
+    The carousel fills that whole area (minus `_MARGIN`) — a "carousel at
+    half size, centred" cut was tried and reverted: it read as the preview
+    having shrunk, not expanded. The margin alone still leaves a thin scrim
+    border to click for `mousePressEvent`'s click-outside-to-dismiss.
+    Positioned with plain `setGeometry()`, not a layout, since sizing needs
+    to be recomputed from `_MARGIN` on demand rather than baked into a
+    layout margin at construction time.
+
+    One instance per `MediaTab` (Muxing and Encoding each have their own,
+    since expanding one's preview has nothing to do with the other's)."""
+
+    _SCRIM = QColor(0, 0, 0, 175)
+    _MARGIN = 20
+
+    def __init__(self, main_window):
+        super().__init__(main_window)
+        self._carousel = None
+        self.hide()
+
+    def paintEvent(self, _event):
+        QPainter(self).fillRect(self.rect(), self._SCRIM)
+
+    def resizeEvent(self, _event):
+        self._layout_carousel()
+
+    def _layout_carousel(self):
+        if self._carousel is None:
+            return
+        avail = self.rect().adjusted(self._MARGIN, self._MARGIN, -self._MARGIN, -self._MARGIN)
+        self._carousel.setGeometry(avail)
+
+    def show_with(self, carousel):
+        self._carousel = carousel
+        carousel.setParent(self)
+        self.setGeometry(self.parentWidget().rect())
+        self._layout_carousel()
+        self.show()
+        # QWidget.setParent() hides the widget as a side effect of
+        # reparenting, regardless of the new parent's own visibility —
+        # show() on the overlay alone leaves the carousel itself invisible
+        # (a blank overlay) without this.
+        carousel.show()
+        self.raise_()
+
+    def release(self):
+        """Give the carousel back — the caller re-parents it into its
+        normal home immediately after calling this."""
+        self._carousel = None
+        self.hide()
+
+    def mousePressEvent(self, e):
+        """Clicking the scrim (anywhere outside the carousel's own bounds,
+        the only other thing that can receive a click here) shrinks back —
+        a click actually on the carousel is delivered to it directly and
+        never reaches this handler."""
+        if e.button() == Qt.LeftButton and self._carousel is not None:
+            self._carousel.force_collapse()

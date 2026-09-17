@@ -17,6 +17,7 @@ for the full argv.
 import ffmpeg
 
 from core import ffmpeg_vars as v
+from core import gpu
 from core.tools import tool_path
 from core.utilities import (
     VULKAN_DEVICE_FLAGS, libplacebo_tonemap_vf, supports_fps_mode, supports_libplacebo,
@@ -86,32 +87,44 @@ def _faststart_kwargs():
     return {"movflags": "+faststart"} if v.OUTPUT_EXT in (".mp4", ".mov") else {}
 
 
+def _mux_input(entry, primary, input_kwargs, external_cache):
+    """The ffmpeg-python input a track entry reads from -- the primary input,
+    or an external file's own input (one per distinct path, cached, so
+    pulling several tracks from the same browsed-in file doesn't re-declare
+    it as a separate ffmpeg input each time). An external file gets the
+    *same* trim as the primary -- an external track is assumed to line up
+    with the primary input's own timeline."""
+    if entry.get("source") == "external" and entry.get("file"):
+        path = entry["file"]
+        if path not in external_cache:
+            external_cache[path] = ffmpeg.input(path, **input_kwargs)
+        return external_cache[path]
+    return primary
+
+
 def build_mux_command(output_path=None):
     """Muxing job -> Stream. Every stream is `-c copy` -- the only
     per-job variables are *which* tracks get mapped and from which file(s)
-    (the primary input, or one pulled in via a panel's Browse button).
-    Writes to `output_path` when given, else the job's own OUTPUT_PATH."""
+    (the primary input, or ones pulled in via a panel's "Add Stream").
+    `VIDEO_TRACKS`/`AUDIO_TRACKS` (see ffmpeg_vars.derive) each carry every
+    *checked* track for that kind -- zero, one or several -- so this needs
+    one `-map` per entry, the same multi-map pattern build_encode_command
+    uses for its own multi-stream audio. Writes to `output_path` when given,
+    else the job's own OUTPUT_PATH."""
     input_kwargs, output_kwargs = _trim_kwargs()
     primary = ffmpeg.input(v.INPUT_FILE, **input_kwargs)
+    external_cache = {}
 
     streams = []
     if not v.STRIP_VIDEO:
-        if v.VIDEO_TRACK_FILE:
-            # External file gets the *same* trim -- an external track is
-            # assumed to line up with the primary input's timeline.
-            streams.append(ffmpeg.input(v.VIDEO_TRACK_FILE, **input_kwargs)["v"])
-        elif v.VIDEO_TRACK_INDEX is not None:
-            streams.append(primary[f"v:{v.VIDEO_TRACK_INDEX}"])
-        else:  # "Auto" -- let ffmpeg pick the primary input's default video stream
-            streams.append(primary["v"])
+        for entry in v.VIDEO_TRACKS:
+            src = _mux_input(entry, primary, input_kwargs, external_cache)
+            streams.append(src[f"v:{entry['index']}"])
 
     if not v.STRIP_AUDIO:
-        if v.AUDIO_TRACK_FILE:
-            streams.append(ffmpeg.input(v.AUDIO_TRACK_FILE, **input_kwargs)["a"])
-        elif v.AUDIO_TRACK_INDEX is not None:
-            streams.append(primary[f"a:{v.AUDIO_TRACK_INDEX}"])
-        else:
-            streams.append(primary["a"])
+        for entry in v.AUDIO_TRACKS:
+            src = _mux_input(entry, primary, input_kwargs, external_cache)
+            streams.append(src[f"a:{entry['index']}"])
 
     output_kwargs["c"] = "copy"
     # Global, NOT audio-scoped (`-strict:a`) -- see build_encode_command's
@@ -151,7 +164,29 @@ def build_encode_command(output_path=None):
     else:
         streams.append(stream["v"])
         output_kwargs["c:v"] = v.VIDEO_CODEC_ARG
-        if v.QUALITY_KIND == "crf":
+        # Encoding always genuinely re-encodes the video stream when it's
+        # kept (see the module docstring for build_mux_command/
+        # build_encode_command's split -- Muxing is the only copy path) --
+        # confirmed directly that ffmpeg's default per-stream metadata
+        # mapping otherwise carries the *source's* stale statistics tags
+        # (title, BPS/DURATION/NUMBER_OF_FRAMES-<lang> -- mkvmerge/lavf's own
+        # per-track stats) onto the new stream untouched: re-encoding a
+        # trimmed 2-minute HEVC clip out of an 87-minute source kept the
+        # source's title text ("...@ 7561 kbps") and its BPS-eng tag
+        # (7562021, the *source's* real bitrate) verbatim, so every player/
+        # tool reading those tags (MediaInfo's own "Bit rate" field among
+        # them) reported the same wrong, unchanged number regardless of the
+        # new encode's actual resolution or bitrate. A video track's
+        # language tag is never used for playback/track-selection the way an
+        # audio one is, so wiping it along with the rest costs nothing real.
+        output_kwargs["map_metadata:s:v:0"] = "-1"
+        if v.HW_ENCODER:
+            # Hardware Acceleration (Settings) resolved to a real GPU
+            # encoder for this codec -- see core/gpu.py. None of NVENC/QSV/
+            # AMF take -crf/-q:v; rate_control_kwargs picks whichever flag
+            # that encoder family actually uses instead.
+            output_kwargs.update(gpu.rate_control_kwargs(v.HW_ENCODER, v.QUALITY))
+        elif v.QUALITY_KIND == "crf":
             output_kwargs["crf"] = v.QUALITY
         elif v.QUALITY_KIND == "qscale":
             output_kwargs["q:v"] = v.QUALITY
@@ -173,6 +208,7 @@ def build_encode_command(output_path=None):
             # outright, so supports_fps_mode() checks once and falls back to
             # the older -vsync for exactly the same "cfr" behaviour.
             output_kwargs["fps_mode" if supports_fps_mode() else "vsync"] = "cfr"
+        video_filters = []
         if v.HDR_TO_SDR:
             if not supports_libplacebo():
                 # No less-accurate substitute (e.g. the classic zscale+
@@ -207,7 +243,17 @@ def build_encode_command(output_path=None):
             # lower-contrast*, the opposite of an improvement). See
             # libplacebo_tonemap_vf's docstring for both sets of numbers.
             has_reliable_metadata = v.MASTERING_MAX_NITS is not None and bool(v.MAX_CLL)
-            output_kwargs["vf"] = libplacebo_tonemap_vf(peak_detect=not has_reliable_metadata)
+            video_filters.append(libplacebo_tonemap_vf(peak_detect=not has_reliable_metadata))
+        if v.SCALE_VF:
+            # After the tonemap, if any -- libplacebo's own filter string
+            # already ends back on a plain software yuv420p frame (see
+            # libplacebo_tonemap_vf), so a second, ordinary scale filter
+            # chains onto it in the same -vf with nothing else needed in
+            # between. Independent of HDR_TO_SDR otherwise: a Resolution
+            # pick downscales an SDR source exactly the same way.
+            video_filters.append(v.SCALE_VF)
+        if video_filters:
+            output_kwargs["vf"] = ",".join(video_filters)
 
     if v.STRIP_AUDIO or not v.AUDIO_STREAMS:
         output_kwargs["an"] = None
@@ -233,6 +279,18 @@ def build_encode_command(output_path=None):
                 output_kwargs[f"ac:a:{i}"] = cfg["channels_arg"]
             if cfg["sample_rate_arg"]:
                 output_kwargs[f"ar:a:{i}"] = cfg["sample_rate_arg"]
+            if cfg["codec_arg"] != "copy":
+                # Same stale-statistics problem as the video stream above,
+                # for a genuinely re-encoded audio track -- a copied
+                # (Passthru) stream's tags stay accurate (nothing about it
+                # actually changed) so this only ever runs for a real
+                # transcode. Unlike video, a wrong language tag here is a
+                # real, player-visible regression (audio track selection
+                # reads it), so it's wiped and then explicitly reapplied
+                # from the probe rather than just dropped.
+                output_kwargs[f"map_metadata:s:a:{i}"] = "-1"
+                if cfg["language"]:
+                    output_kwargs[f"metadata:s:a:{i}"] = f"language={cfg['language']}"
 
     # **Global, NOT audio-scoped.** This exists for non-standard audio/
     # container pairings (TrueHD/E-AC3 with Atmos side data, etc.) -- it used

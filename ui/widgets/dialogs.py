@@ -213,3 +213,56 @@ def choose_audio_streams(parent, streams, included):
     dialog = AudioStreamPickerDialog(parent, streams, included)
     dialog.show_modal()
     return getattr(dialog, "chosen", None)
+
+
+class ExternalStreamPickerDialog(MessageDialog):
+    """Muxing's "Add Stream": shown only once a browsed-in file turns out to
+    have more than one track of the requested kind (a single match is added
+    straight away, no dialog needed). One checkbox per track, all unchecked
+    to start — unlike `AudioStreamPickerDialog`, there's no "already
+    included" set to pre-check, since every row here is brand new. OK/"Add"
+    never returns an empty set; Cancel/close returns None."""
+
+    def __init__(self, parent, kind, streams, describe):
+        self._streams = streams
+        self._describe = describe
+        self._checks = {}
+        super().__init__(
+            parent, f"Choose {kind.capitalize()} Streams",
+            f"This file has more than one {kind} track. Pick which to add — "
+            "each becomes its own row in the track box.",
+            buttons=("Add", "Cancel"),
+        )
+
+    def _build_extra(self, body):
+        body.addSpacing(10)
+        box = QWidget()
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        for stream in self._streams:
+            index = stream["index"]
+            check = CheckBox(self._describe(stream), checked=(index == 0))
+            lay.addWidget(check)
+            self._checks[index] = check
+        body.addWidget(box)
+
+    def _dismiss(self, choice):
+        if choice == "Add":
+            chosen = {i for i, check in self._checks.items() if check.isChecked()}
+            if not chosen and self._checks:
+                self._checks[min(self._checks)].setChecked(True)
+                return
+            self.chosen = chosen
+        else:
+            self.chosen = None
+        super()._dismiss(choice)
+
+
+def pick_external_streams(parent, kind, streams, describe):
+    """Opens the picker for a file just browsed in via "Add Stream"; the
+    chosen index set, or None if cancelled. `describe(stream)` renders one
+    row's label."""
+    dialog = ExternalStreamPickerDialog(parent, kind, streams, describe)
+    dialog.show_modal()
+    return getattr(dialog, "chosen", None)

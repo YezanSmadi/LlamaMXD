@@ -16,21 +16,19 @@ LlamaPY GUI/
 ├── .vscode/
 │   └── settings.json
 ├── assets/
-│   ├── llama.ico, llama.png
-│   ├── audio-mute.png, audio-mute.svg
+│   ├── llama.ico, LlamaMXD-Logo.svg
+│   ├── audio-mute.svg, info.svg, expand.svg, shrink.svg
 │   ├── Wave Loop.json
-│   ├── info-icon-dark.png, info-icon-light.png
-│   ├── fonts/  (Roboto-Regular.ttf, Roboto-Medium.ttf)
-│   └── (source design files: dark/light mode info icon .eps/.jpg, not read by code)
-├── scripts/
-│   └── make_info_badges.py
+│   └── fonts/  (Roboto-Regular.ttf, Roboto-Medium.ttf, Oswald-VariableFont_wght.ttf)
 ├── core/
 │   ├── downloader.py
 │   ├── ffmpeg_build.py
 │   ├── ffmpeg_runner.py
 │   ├── ffmpeg_vars.py
 │   ├── formats.py
+│   ├── gpu.py
 │   ├── presets.py
+│   ├── system_info.py
 │   ├── theme.py
 │   ├── tools.py
 │   ├── utilities.py
@@ -38,6 +36,7 @@ LlamaPY GUI/
 └── ui/
     ├── app.py
     ├── theme.py
+    ├── tips.py
     ├── workers.py
     ├── tabs/
     │   ├── media_tab.py
@@ -51,7 +50,9 @@ LlamaPY GUI/
         ├── panels.py
         ├── carousel.py
         ├── dialogs.py
-        └── toast.py
+        ├── toast.py
+        ├── tracklist.py
+        └── tooltip.py
 ```
 
 Not shown: `settings.json`, `presets.json` (gitignored runtime files created on
@@ -132,25 +133,18 @@ Everything the app loads at runtime, all read `__file__`-anchored.
 - **`Wave Loop.json`** — the Bodymovin/Lottie dot-wave animation shown in
   place of a stripped-video or audio-only preview, rendered by
   `rlottie-python`.
-- **`info-icon-dark.png`** / **`info-icon-light.png`** — the bottom-left info
-  badge (one per resolved appearance mode), generated from the checked-in
-  `.jpg` source art by `scripts/make_info_badges.py`. The `.eps` files are
-  original vector art, not read by code.
 - **`fonts/`** — Roboto Regular and Medium (Apache 2.0), the app typeface,
   registered by `main.py` so text renders the same with or without Roboto
   installed.
 
-### `scripts/make_info_badges.py`
-
-A one-off conversion script, not imported by the app: turns the two source
-JPGs (`dark mode info icon.jpg` / `light mode info icon vector.jpg`) into the
-transparent-cornered `info-icon-dark.png` / `info-icon-light.png` badges.
-`content_bbox` finds the drawn circle's bounding box (everything that isn't
-near-white), crops to a square around its center, then clips to a
-supersampled circular alpha mask sized to that box — preserving each icon's
-interior fill exactly rather than chroma-keying white (which would hollow out
-the light badge). Run manually (`python scripts/make_info_badges.py`) only
-when a source `.jpg` is replaced.
+The bottom-left info badge is no longer an asset at all — it used to be a
+pair of PNGs (`info-icon-dark.png` / `info-icon-light.png`) rasterized from
+JPEG source art by a one-off `scripts/make_info_badges.py` script, but
+downscaling even a clean 512px PNG down to the badge's actual ~20-40px
+on-screen size left a visible stepped edge no amount of smoothing fixed.
+`ui/widgets/carousel.py`'s `_paint_info_badge` draws it as plain vector
+shapes (a filled circle + dot + rounded-rect stem) instead, so it stays
+crisp at any size — see that module.
 
 ---
 
@@ -178,8 +172,11 @@ Brand palettes, contrast helpers and the settings file.
 - `default_output_dir()` — `~/Videos/LlamaMXD Export`.
 - `load_settings()` / `save_settings(settings)` — `settings.json` beside
   `main.py`: `theme`, `appearance_mode` (`System`), `default_save_location`
-  (`default_output_dir()`), `gpu_enabled` (`True`). Missing keys or a
-  missing/corrupt file fall back to those defaults.
+  (`default_output_dir()`), `gpu_enabled` (`True`),
+  `downloader_separate_save` (`False`), `downloader_save_location` (`""`).
+  Missing keys or a missing/corrupt file fall back to those defaults. The
+  last two back Settings' "Separate Save for Downloader" toggle — see
+  `ui/tabs/settings.py` below.
 
 ### `core/tools.py`
 
@@ -264,6 +261,13 @@ combination unrepresentable rather than something a dialog has to catch.
   given the codecs a source holds, which containers can it be remuxed into
   without re-encoding. A `None` codec constrains nothing, so an unprobed
   file still offers everything.
+- `SOURCE_RESOLUTION`/`RESOLUTIONS`/`resolutions_for(source_height)`/
+  `resolution_height_for(resolution)` — Encoding Video's optional downscale:
+  `"Source"` (no scaling) plus a fixed ladder (`"2160p"` … `"360p"`).
+  `resolutions_for` caps the offered list to the source's own probed height
+  or below — never an upscale — falling back to the full ladder when the
+  height isn't known yet. `resolution_height_for` is the reverse lookup
+  `ffmpeg_vars._scale_vf` uses to build the actual `-vf scale=-2:<height>`.
 - `FFPROBE_VIDEO` / `FFPROBE_AUDIO` — ffprobe `codec_name` → display name,
   consumed by `utilities.probe_media`. Includes the two passthru-only codecs
   above (`"dts"` → `"DTS"`, `"truehd"` → `"Dolby TrueHD"`).
@@ -293,6 +297,56 @@ per source tab, since Muxing and Encoding no longer share a settings shape.
 `exists(tab, name)`. Every read is best-effort — a missing or corrupt file
 yields `{}` rather than raising — and `_write_all` swallows `OSError` so a
 failed write can't take the app down mid-interaction.
+
+### `core/gpu.py`
+
+GPU vendor detection and hardware-encoder selection for the Settings tab's
+Hardware Acceleration switch. No UI code.
+
+- `adapter_names()` — every video controller's display name, via `wmic path
+  win32_VideoController get name` (PowerShell's `Get-CimInstance
+  Win32_VideoController` as a fallback for a Windows build where `wmic` has
+  been removed), cached for the process's lifetime.
+- `vendor()` — `"nvidia"` / `"amd"` / `"intel"` / `""`, whichever vendor's
+  marker (`"nvidia"`/`"geforce"`/`"rtx"`/...) appears in a detected adapter
+  name, preferring NVIDIA over AMD over Intel when more than one is present
+  (the discrete GPU, on a machine with both a discrete and an integrated
+  adapter). `display_name()` is the matching adapter's own name, for the
+  Settings system-info block.
+- `available_encoders()` — every `*_nvenc`/`*_qsv`/`*_amf` id the installed
+  ffmpeg build actually reports (`ffmpeg -encoders`), cached like
+  `core.utilities.supports_fps_mode`.
+- `hw_encoder_for(codec)` — the hardware encoder id for a
+  `formats.VIDEO_ENCODERS` display name (H.264/H.265/AV1 only — the one set
+  every vendor's consumer encoder actually supports) on this machine's
+  vendor, or `None` if there's no supported vendor, no mapping for that
+  codec, or this ffmpeg build doesn't have the encoder compiled in. Read by
+  `core.ffmpeg_vars.derive()` when `gpu_enabled` is set.
+- `rate_control_kwargs(hw_encoder, quality)` — the rate-control flags
+  standing in for `-crf` on a hardware encoder (`-rc vbr -cq` for NVENC,
+  `-global_quality` for QSV, `-rc cqp -qp_i/-qp_p/-qp_b` for AMF), quality
+  clamped to 0-51. Read by `core.ffmpeg_build.build_encode_command`.
+- `summary_label()` — the human-readable line the Settings tab shows under
+  the switch: the GPU, its vendor's own encoder brand name (`_ENCODER_BRAND`
+  — "NVENC" / "Quick Sync" / "AMF", not a generic "hardware encoding"), and
+  which codecs it would accelerate.
+
+### `core/system_info.py`
+
+CPU / RAM / disk facts for the Settings tab's system-info block. No UI code;
+every lookup is best-effort and returns a placeholder rather than raising.
+
+- `cpu_name()` — the CPU's marketing name from the registry
+  (`HARDWARE\DESCRIPTION\System\CentralProcessor\0`'s `ProcessorNameString`;
+  `platform.processor()` only returns the raw architecture string on
+  Windows), cached.
+- `ram_total_bytes()` — installed physical RAM via `GlobalMemoryStatusEx`
+  (ctypes; no `psutil` dependency), cached.
+- `format_bytes(n)` — `"512.3 GB"`, binary (1024-based) units, matching how
+  Windows itself reports sizes.
+- `disk_usage(path)` — `(total_bytes, free_bytes)` for the drive holding
+  `path` (falling back to its parent directory for a not-yet-created path),
+  or `(None, None)` if that doesn't resolve to a reachable drive.
 
 ### `core/utilities.py`
 
@@ -438,9 +492,22 @@ named codes rather than numbers.
 **`AUDIO_STREAMS` is the one list-shaped variable, not a scalar** — an
 Encoding job can include more than one *output* audio stream (see `ui/tabs/encoding.py` below), each with its own codec/bitrate/channels/sample-rate.
 `_audio_stream_args(entry)` turns one settings-dict stream entry into its
-ffmpeg-ready form; a Passthru stream (forced on for `formats.
-is_passthru_only` codecs, or a deliberate pick) always comes out
-`"copy"`/`None`/`None`/`None` regardless of its other display fields.
+ffmpeg-ready form (`{"src_index", "codec_arg", "bitrate_arg",
+"channels_arg", "sample_rate_arg", "language"}`); a Passthru stream (forced
+on for `formats.is_passthru_only` codecs, or a deliberate pick) always
+comes out `"copy"`/`None`/`None`/`None`/`None` regardless of its other
+display fields — `language` is `None` there too, since nothing about a
+copied stream's tags goes stale (see `core/ffmpeg_build.py`'s
+stale-metadata note below).
+
+**`RESOLUTION`/`SOURCE_HEIGHT`/`SCALE_VF`** back Encoding Video's Resolution
+downscale (`core/formats.py`'s `RESOLUTIONS` ladder). `SOURCE_HEIGHT` is the
+probed source height snapshotted at queue time, same convention as
+`MASTERING_MAX_NITS`/`MAX_CLL` below; `SCALE_VF` (`_scale_vf`) is the
+resulting `-vf` fragment (`"scale=-2:<height>"`), `None` for `"Source"` or
+when there's no real downscale to do — re-validated against `SOURCE_HEIGHT`
+at derive time rather than trusting the caller, since a saved preset applied
+to a smaller/differently-probed file could still name a rung too tall for it.
 
 `MASTERING_MAX_NITS`/`MAX_CLL` carry the source's probed HDR static
 metadata through (snapshotted at queue time by `EncodingTab._gather_
@@ -451,8 +518,14 @@ above.
 A key belonging to the other tab keeps a default that happens to be
 correct for it too — e.g. a Mux job's `VIDEO_CODEC_ARG` comes out `"copy"`,
 exactly right since Muxing always is. Muxing never touches `AUDIO_STREAMS`
-at all; it maps its single `AUDIO_TRACK`/`AUDIO_TRACK_INDEX` straight
-through `build_mux_command`.
+at all; it maps its own `VIDEO_TRACKS`/`AUDIO_TRACKS` — **lists**, one entry
+per *checked* row in that panel's `TrackListBox` (`{"source": "primary"/
+"external", "file": path|None, "index": N}`), not the single scalar
+`AUDIO_TRACK`/`AUDIO_TRACK_INDEX` a much earlier single-dropdown UI used —
+straight through `build_mux_command`. (Those scalar `VIDEO_TRACK*`/
+`AUDIO_TRACK*` globals still exist in the module but `derive()`/`load()`
+never populate them any more; dead code left over from before the
+multi-track rewrite.)
 
 **Trim gotcha, verified against real ffmpeg output**: an input-side `-ss`
 rebases the output timeline to 0, so an output-side `-to` then behaves as a
@@ -485,15 +558,39 @@ stream including video, silently landing on the kept video stream instead
 and shifting every audio value onto the next stream's slot; the code always
 emits the qualified `-ac:a:{i}`/`-ar:a:{i}` form.
 
+When `ffmpeg_vars.HW_ENCODER` is set (GPU acceleration resolved a hardware
+encoder for this job — see `core/gpu.py`), the video stream's rate control
+comes from `gpu.rate_control_kwargs(HW_ENCODER, QUALITY)` instead of
+`-crf`/`-q:v` — none of NVENC/QSV/AMF take either flag.
+
 HDR→SDR (`uses_hdr_tonemap()` gates it) adds `core.utilities.
-libplacebo_tonemap_vf(peak_detect=...)` as `-vf`, plus explicit
+libplacebo_tonemap_vf(peak_detect=...)` as (part of) `-vf`, plus explicit
 `-color_primaries/-color_trc/-colorspace bt709` output tags (libplacebo's
 target colorspace doesn't reliably propagate to the output stream's own tags
 on its own). Raises `ValueError` if `HDR_TO_SDR` is set but
 `supports_libplacebo()` is false — should be unreachable in practice
 (`EncodingTab._validate_specific` blocks it first), but this is the last
 line of defense, caught by `QueueTab._process_next`'s "couldn't build the
-ffmpeg command" Failed-task path.
+ffmpeg command" Failed-task path. **The Resolution downscale
+(`ffmpeg_vars.SCALE_VF`) chains onto that same `-vf`**, after the tonemap
+filter when both are active (one comma-joined `-vf`, independent of
+`HDR_TO_SDR` otherwise) — safe to chain directly since libplacebo's own
+filter string already ends back on a plain software `yuv420p` frame, no
+format conversion needed in between.
+
+**A re-encoded stream's stale per-track statistics tags are stripped.**
+ffmpeg's default metadata mapping otherwise carries a *source* stream's own
+Matroska tags (`title`, `BPS-<lang>`, `DURATION-<lang>`, …) onto the output
+stream even when it's genuinely re-encoded to a different codec/bitrate/
+length — confirmed directly (a trimmed 2-minute re-encode of an 87-minute
+source still reported the source's own bitrate via its stale `BPS-eng` tag).
+`build_encode_command` always adds `-map_metadata:s:v:0 -1` for the kept
+video stream (Encoding never copies video when kept, so this is
+unconditional); for audio, only per genuinely re-encoded (non-Passthru)
+`AUDIO_STREAMS` entry, `-map_metadata:s:a:{i} -1` wipes it and
+`-metadata:s:a:{i} language=<lang>` immediately reapplies just the
+language tag (a video track's language isn't used for playback the way an
+audio one is, so it's simply dropped there instead).
 
 `-strict -2` (experimental compliance) is set **globally, not audio-scoped**
 — confirmed a real TrueHD-in-MP4 source still hard-fails with `-strict:a -2`
@@ -652,7 +749,9 @@ same control/event contract as `FfmpegJob` (`start` / `suspend` / `resume` /
 `app`.
 
 - **State**: `current_file_path`, `default_save_location` (created at startup,
-  best-effort), `gpu_enabled`, `media_info` (`_empty_media_info()` — every
+  best-effort), `gpu_enabled`, `downloader_separate_save` /
+  `downloader_save_location` (the Downloader's own optional save folder,
+  off by default), `media_info` (`_empty_media_info()` — every
   probe key `None`, `audio_streams` `[]`), `thumb_frames` /
   `thumb_frames_path`, `hdr_frames` / `hdr_frames_path`, `ytdlp_cache`,
   `deno_missing`, `tabs` (built once — `Queue` first — and stacked in a
@@ -666,26 +765,39 @@ same control/event contract as `FfmpegJob` (`start` / `suspend` / `resume` /
 - `notify(message, go_to_queue=True)` — posts a toast.
 - **File selection**: `register_media_tab(tab)`; `update_global_file(path)`
   (the only place the selected file changes — resets scrub index and
-  `media_info` on a new path, updates each media tab, starts
-  `_load_thumbnails`); `_load_thumbnails` (cache hit → broadcast; miss → one
+  `media_info` on a new path, updates each media tab, cancels any in-flight
+  HDR render for the outgoing file, starts `_load_thumbnails`);
+  `_load_thumbnails` (cache hit → broadcast; miss → one
   worker: `probe_media` delivered early via `emit_progress`, then ten frames;
-  token-guarded); `_deliver_media_info`, `_is_audio_only`,
+  token-guarded); `_deliver_media_info` (rejects a probe with neither video
+  nor audio at all — a corrupt/unreadable file, not a legitimate audio-only
+  input — via `_reject_file` before it ever reaches a tab), `_reject_file`
+  (undoes the selection entirely: every media tab's `clear_selected_file`,
+  cache/state reset, "Couldn't Read This File" dialog), `_is_audio_only`,
   `_broadcast_audio_only`, `_broadcast_media_info`, `_deliver_thumbnails`,
   `_broadcast_thumbnails`, `sync_preview_index(index)`.
 - **HDR preview**: `start_hdr_render(path)` / `_deliver_hdr` — one tone-mapped
   render per file, cached, token-guarded, broadcast to `on_hdr_frames_ready`.
+  `_cancel_hdr_render()` (a `threading.Event` passed into the render as
+  `should_cancel`) interrupts one still running for a file that's no longer
+  selected, called from `update_global_file`/`_reject_file`.
 - **Downloader**: `fetch_ytdlp_info(url)` / `_deliver_ytdlp_info` (worker fetch
   + thumbnail, token-guarded, cached in `ytdlp_cache`); `_deliver_deno_check`
-  (the startup Deno check).
+  (the startup Deno check); `downloader_default_location()` (the Downloader's
+  own separate folder if set and enabled, else the shared default);
+  `set_default_save_location`, `set_downloader_separate_save`,
+  `set_downloader_save_location` — each also refreshes the Downloader tab's
+  own autofilled path via `DownloaderTab.refresh_default_location()`.
 - `_restyle` — re-applies the stylesheet on `ThemeManager.changed`.
 - `closeEvent` — confirms (pausing the queue for the prompt) when jobs are
   unfinished, autosaves Settings, kills the active job, quits; `_closing`
   stops the close Qt re-sends during `quit()` from prompting twice.
 
 `_Keybinds(QObject)` — an application-level event filter: Left/Right step the
-current tab's carousel (not while a text field has focus); Space toggles the
-queue on the Queue tab (not for auto-repeat, text fields, buttons or combo
-boxes); inactive while a modal is open.
+current tab's carousel (not while a text field has focus); Escape collapses
+whichever media tab's carousel preview is currently expanded, if any; Space
+toggles the queue on the Queue tab (not for auto-repeat, text fields,
+buttons or combo boxes); inactive while a modal is open.
 
 ### `ui/theme.py`
 
@@ -719,6 +831,15 @@ boxes); inactive while a modal is open.
 - `pil_to_qimage(image)` — a detached `QImage` copy of a PIL image; safe on a
   worker thread (unlike `QPixmap`).
 
+### `ui/tips.py`
+
+Shared hover-tooltip copy, used by Encoding, Muxing, Downloader and
+Settings: `SELECT_VIDEO_CODEC_TIP` / `SELECT_AUDIO_CODEC_TIP` /
+`BEST_VIDEO_CODEC_TIP` / `BEST_AUDIO_CODEC_TIP` (shown before a real value's
+picked) and the dicts `VIDEO_CODEC_TIPS` / `AUDIO_CODEC_TIPS` /
+`CONTAINER_TIPS` / `AUDIO_FORMAT_TIPS` (per-value explanations). Pure data,
+no imports at all — each tab wires a value up with `ui.widgets.tooltip.tip()`.
+
 ### `ui/tabs/media_tab.py`
 
 Helpers `hrow(spacing, align_bottom)` (a plain horizontal row), `hms(seconds)`
@@ -739,8 +860,13 @@ and runs the first `_sync_controls`.
 - `_on_control_change`, `_on_trim_change` (rundown only), `_on_format_change`
   (stops auto-adopting the source container, swaps the save path's
   extension).
-- `select_input_file`, `set_selected_file`, `_reveal_preview`,
-  `on_thumbnails`, `_autofill_output_path`, `select_save_location`.
+- `select_input_file`, `set_selected_file`, `clear_selected_file` (the
+  reverse — undoes `set_selected_file` and the autofill, called when a just-
+  picked file turns out unreadable), `_reveal_preview`, `_on_expand_toggled`
+  (the carousel's expand/shrink icon — reparents the same `ThumbnailCarousel`
+  instance into/out of a shared `_ExpandedPreviewOverlay`, see `ui/widgets/
+  carousel.py` below), `on_thumbnails`, `_autofill_output_path`,
+  `select_save_location`.
 - Presets: `_refresh_preset_menu`, `_on_preset_selected`, `_on_preset_save`,
   `_on_preset_delete`.
 - `_apply_common` / `_gather_common` (the shared settings keys),
@@ -748,43 +874,92 @@ and runs the first `_sync_controls`.
   save location, the subclass's `_validate_specific`, then
   `confirm_output_path`), `run_now`, `add_to_queue`.
 
+**INVARIANT — the DropBox/preview must always render at the identical size
+and proportion in Muxing and Encoding.** It's a *consequence*, not a
+separate setting: `panels` (a `QStackedWidget`) sizes to its tallest page,
+and since both tabs' Overview page is identical, the preview comes out the
+same size in both tabs *only as long as neither tab's Video or Audio page is
+ever allowed to size taller than that tab's own Overview page*. There is no
+automatic guard against this — it's enforced by hand at the point a control
+is added to a Video/Audio panel. See `ui/tabs/muxing.py`'s `_track_panel`
+and `ui/tabs/encoding.py`'s Resolution/Strip Video row below for the two
+worked examples, and CLAUDE.md's "Muxing and Encoding" section for the full
+explanation.
+
 ### `ui/tabs/muxing.py`
 
-`MuxingTab(MediaTab)` — container change and stream selection, always a copy.
-`_stream_panel(kind)` builds each of the Video/Audio panels (track dropdown,
-`Browse…` for an external file, the Strip checkbox). `_browse_external`,
-`_track_values`, `_audio_track_values` (tracks labelled with their probed
-codec), `_external_for`. `_sync_controls` (stream presence, track lists, the
-container inversion via `_retarget_container` — which toasts a snap and keeps
-the save path's extension in step — and panel enabled state),
-`_refresh_summary` (with the `· keyframe` trim caveat), `on_media_info`
-(adopts the source container), `_gather_settings`, `_apply_settings`,
-`_set_menu` (also matches the leading `Track N` token).
+`MuxingTab(MediaTab)` — container change and stream selection, always a
+copy; mixes and matches any combination of a file's own tracks plus tracks
+pulled in from other files, via `TrackListBox` (`ui/widgets/tracklist.py`),
+not the single `Auto`/`Track N` dropdown an earlier version of this tab
+used.
+
+- `_track_panel(kind)` builds each of the Video/Audio panels: the
+  `TrackListBox` itself, `Add Stream(s)`, `Remove Stream(s)` (danger-role)
+  sharing a line with the Strip checkbox. Fixes the box's height to exactly
+  `self.panels.widget(0).sizeHint().height()` (Overview's own height) — the
+  DropBox-height invariant above, enforced here specifically.
+- `_add_stream(kind)` browses a second file and probes it off the GUI
+  thread; `_stream_probed(kind, path, info)` adds its lone matching-kind
+  stream straight away, or opens `ExternalStreamPickerDialog` (`ui/widgets/
+  dialogs.py`, via `pick_external_streams`) when it has more than one. Added
+  streams are kept in `_video_external`/`_audio_external`
+  (`{row_id: {"file", "index", "label"}}`), independent of the primary
+  input.
+- `_remove_streams(kind)` acts on every currently-checked row: an external
+  row is dropped from the box outright, a source row (the primary file's
+  own track, which can't actually be deleted) is unchecked instead
+  (`TrackListBox.set_checked`). Shows a message rather than doing nothing
+  when nothing's checked.
+- `_items_for(kind)` builds `TrackListBox.set_items`' row list (the primary
+  file's own probed streams plus whatever's in `_video_external`/
+  `_audio_external`); `_track_args(kind)` turns the box's *checked* rows into
+  the `video_tracks`/`audio_tracks` settings shape (`{"source", "file",
+  "index"}`, one entry per checked row).
+- `_sync_controls` (stream presence, the track boxes via `_items_for`, the
+  container inversion via `_retarget_container` — which toasts a snap and
+  keeps the save path's extension in step — and panel enabled state),
+  `_refresh_summary` (with the `· keyframe` trim caveat), `on_media_info`
+  (adopts the source container), `_gather_settings`, `_apply_settings`.
 
 ### `ui/tabs/encoding.py`
 
-`EncodingTab(MediaTab)` — the re-encode tab.
+`EncodingTab(MediaTab)` — the re-encode tab. Its Video panel keeps the same
+DropBox-height invariant (above) by folding `resolution_menu` onto
+`strip_video_check`'s row rather than giving it its own — a dedicated row
+(even with a compact caption) was enough on its own to push the page's
+`sizeHint` past Overview's, which silently shrinks this tab's DropBox below
+Muxing's.
 
 - `build_video` — Encoder / Profile / Level / Encoder Preset, the quality
   slider (`crf_slider`, inverted; `crf_label`, `crf_low_label`,
-  `crf_high_label`), `hdr_label` + `hdr_switch`, `strip_video_check`.
-- `build_audio` — `audio_track_menu`, `choose_streams_btn`, `audio_codec_menu`,
-  `passthru_check`, `audio_bitrate_menu`, `audio_channels_menu`,
-  `audio_samplerate_menu`, `strip_audio_check`; dropdowns sized with
-  `Dropdown.width_for` to their longest possible entry.
+  `crf_high_label`), `hdr_label` + `hdr_switch` top-right, `resolution_menu`
+  (the downscale ceiling — `core.formats.RESOLUTIONS`) sharing a row with
+  `strip_video_check` bottom-right (not a row of its own — see the
+  DropBox-height invariant note above).
+- `build_audio` — `audio_track_menu`, `choose_streams_btn`, `passthru_check`
+  on one row; `audio_codec_menu`, `audio_bitrate_menu`, `audio_channels_menu`,
+  `audio_samplerate_menu` on the next; `strip_audio_check`; dropdowns sized
+  with `Dropdown.width_for` to their longest possible entry.
 - `_on_encoder_change`, `_toggle_hdr`, `_on_quality_change`.
 - HDR preview: `_on_hdr_toggle`, `on_thumbnails`, `on_hdr_frames_ready`,
-  `_apply_preview_frames`.
+  `_apply_preview_frames`, `reset_hdr_preview` (turns HDR→SDR back off
+  without a raw/tone-mapped frame flash — called when a new file arrives).
 - `_sync_controls` (the six rules), `_retarget` (toasts a forced snap),
+  `_retarget_resolution` (caps Resolution to the newly-probed source height,
+  its own toast wording since the reason is the file, not the container),
   `_speed_values` / `_apply_speed`, `_apply_quality` / `_update_quality_label`.
 - Multi-stream audio: `_audio_track_values`, `_index_from_track_label`,
   `_save_active_audio_stream`, `_active_stream_info`,
   `_apply_passthru_values`, `_load_active_audio_stream`,
   `_on_audio_track_change`, `_open_stream_picker`,
-  `_auto_select_audio_streams`.
+  `_auto_select_audio_streams`, `_stream_language(index)` (the probed
+  language tag for one stream, snapshotted into each gathered
+  `audio_streams` entry — see `core/ffmpeg_build.py`'s stale-metadata note).
 - `_refresh_summary`, `on_media_info` → `_auto_select_codecs`,
-  `_gather_settings`, `_apply_settings` (dependency order),
-  `_validate_specific`.
+  `_gather_settings` (also snapshots `resolution`/`source_height`, a fact
+  about the input at queue time, same convention as `mastering_max_nits`/
+  `max_cll`), `_apply_settings` (dependency order), `_validate_specific`.
 
 ### `ui/tabs/downloader.py`
 
@@ -795,18 +970,34 @@ link).
 
 `DownloaderTab(QWidget)` — `set_deno_missing`, `paste_and_fetch`,
 `_on_link_drop`, `fetch`, `on_ytdlp_info`, `_apply_info` (adopts a video,
-resetting every pick), `_sync_controls` (Mode → Video Codec → Quality → Audio
-Codec → Format, or Format → Quality for Audio Only; resolves the plan for the
-size readout and extension), `_show_audio_picker`, `_retarget`, `_menu_value`,
-`_current_directory`, `_autofill_output_path`, `_apply_output_extension`,
-`select_save_location`, `_gather_settings`, `_validate_settings` (nothing
-fetched, link edited since the fetch, no save location, then
-`confirm_output_path`), `_describe`, `download_now`, `add_to_queue`.
+resetting every pick), `_sync_controls` (Mode → Video Codec → Resolution →
+Audio Codec → Format, or Format → Resolution for Audio Only; resolves the
+plan for the size readout and extension), `_show_audio_picker`, `_retarget`,
+`_menu_value`, `_current_directory`, `_autofill_output_path`,
+`_apply_output_extension`, `select_save_location`, `_gather_settings`,
+`_validate_settings` (nothing fetched, link edited since the fetch, no save
+location, then `confirm_output_path`), `_describe`, `download_now`,
+`add_to_queue`, `has_fetched()`, `refresh_default_location()` (re-adopts
+`app.downloader_default_location()` when Settings' folder changes — but
+only *before* a fetch, `has_fetched()`-gated, so it never overwrites a
+post-fetch save path from underneath a completed fetch). **The Resolution
+label is on-screen only** — internally still `quality_menu`, settings key
+still `"quality"` (see "Tabs → Encoding" above for the same convention on
+Encoder Preset/`speed`); see "Tabs → Queue" below for how the details popup
+tells this apart from Encoding's own unrelated `"quality"`.
 
 ### `ui/tabs/queue.py`
 
 - `_DETAIL_FIELDS`, `_VIDEO_DETAIL_KEYS`, `_AUDIO_DETAIL_KEYS` — which settings
   keys the details popup shows, and which a stripped stream hides.
+  `_DETAIL_FIELDS` includes `resolution` (hidden under `strip_video`, same
+  as `quality`/`profile`/`level`/`speed`). `_show_details` special-cases
+  `key == "quality"` for a Downloader task specifically, relabeling that one
+  row "Resolution" — the same settings key holds Encoding's own CRF/qscale
+  value for an Encoding task, so the row needs to say something different
+  depending on which tab queued it. Encoding's `audio_streams` and Muxing's
+  `video_tracks`/`audio_tracks` each render one detail row per entry
+  (per checked track, for Muxing).
 - `QueueRow(QWidget)` — one painted task row (`set_status`, `set_fraction`;
   signals `clicked`, `removeRequested`).
 - `ProgressStrip(QWidget)` — the flat overall bar (`set_value`).
@@ -827,16 +1018,35 @@ fetched, link edited since the fetch, no save location, then
 ### `ui/tabs/settings.py`
 
 `_Swatch` (a 26px colour chip for the previewed palette). `SettingsTab(QWidget)`
-— `_settings_snapshot`, `_sync_state_from_widgets`, `autosave`, `on_leave`,
+— a read-only, fixed-width System info label (CPU/GPU/RAM, from
+`core.system_info` / `core.gpu`) in the top-right corner of the title row
+(not a row of its own — a long CPU name sizing to its own content could
+overflow the tab frame); `_settings_snapshot` (now also
+`downloader_separate_save`/`downloader_save_location` — the entry's display
+text while separate-save is off is just the shared default shown as a
+fallback, never itself persisted as a real separate location),
+`_sync_state_from_widgets`, `autosave`, `on_leave`, `on_enter` (refreshes
+disk usage — free space can change while the app sits on another tab),
 `_show_swatches`, `_preview_theme` (hover), `_end_preview` (list closed),
-`_on_theme_change` (commit), `_on_appearance_change`, `_browse_save_location`,
-`_on_gpu_toggle`, `_on_save`.
+`_on_theme_change` (commit), `_on_appearance_change`,
+`_browse_save_location`, `_refresh_disk_usage` (total/free space for the
+Default Save Location's drive, in STOP_RED at or below 25GB free),
+`_on_downloader_separate_toggle` (reveals/hides the second save-location
+row, persists via `app.set_downloader_separate_save`),
+`_browse_downloader_location`, `_on_gpu_toggle` (also refreshes the status
+label via `_refresh_gpu_status`, naming the GPU, its encoder brand —
+NVENC/Quick Sync/AMF — and which codecs, or "Off" while unchecked),
+`_on_save`, `_on_reset_defaults` (`ask_yes_no`-confirmed — resets theme,
+appearance mode, default save location, the Downloader's separate-save
+toggle and location, and GPU acceleration all back to their defaults in one
+action, then autosaves).
 
 ### `ui/widgets/controls.py`
 
 Helpers: `NO_OPTION` (`"—"`), `ui_font(px, bold, family)`, `field_label`,
 `labeled(label_text, widget)` → `(box, label)`, `button(text, role, width,
-height)` (NoFocus, pointing cursor), `restyle(widget)`, `set_enabled(widget,
+height)` (NoFocus, pointing cursor), `button_width_for(texts)` (fits the
+widest of several button labels), `restyle(widget)`, `set_enabled(widget,
 label, enabled)`, `anim(owner, duration, on_value, curve)`,
 `draw_cross(painter, rect, color)`.
 
@@ -853,7 +1063,9 @@ label, enabled)`, `anim(owner, duration, on_value, curve)`,
 - `_TimeField(QWidget)` + `TimeSpinner(QWidget)` — the HH:MM:SS field and its
   accelerating ▲/▼ stepper; `seconds`, `set_seconds`, `valueChanged`.
 - `MarqueeLabel(QWidget)` — scrolls overflowing text; `setText`, `text`,
-  `set_color_key`, `doubleClicked`.
+  `set_color_key`, `doubleClicked`. `MarqueeGroup` — one shared clock several
+  `MarqueeLabel`s can join (`SummaryPanel`'s Video/Audio/Length rows do) so
+  they all sweep and restart in step rather than drifting apart.
 
 ### `ui/widgets/panels.py`
 
@@ -861,34 +1073,59 @@ Constants `ASSETS`, `VERSION`, `MEDIA_FILTER`; `local_paths(mime)` (local
 files carried by a drag).
 
 - `SubTabBar(QWidget)` — `changed`, `active`, `set_active`, `set_marked`.
-- `DropBox(QWidget)` — `fileSelected`, `collapse`, `browse`; drag-over
-  highlight.
-- `BorderedFrame(QWidget)` — the primary rounded border alone.
+- `DropBox(QWidget)` — `fileSelected`, `collapse` (leaves only Browse once a
+  file is chosen), `reset` (the reverse — back to pristine, used when a
+  picked file turns out unreadable), `browse`; drag-over highlight.
+- `BorderedFrame(QWidget)` — the border alone; `color_key` defaults to
+  `primary`, `TrackListBox` (`ui/widgets/tracklist.py`) passes `secondary`.
 - `SummaryPanel(QWidget)` — `set_values(rows)`.
-- `Sidebar(QWidget)` — `navigate` signal, `buttons` dict, `WIDTH`.
+- `Sidebar(QWidget)` — `navigate` signal, `buttons` dict, `WIDTH`; the logo
+  (`assets/LlamaMXD-Logo.svg`) is rendered at 4x oversample and re-tinted to
+  `primary_text` via `CompositionMode_SourceIn` (`_load_logo`), so it
+  changes colour with the theme the same way the title text does.
 - `TabIndicator(QWidget)` — `align_to(button, frame_left, animate)`.
 
 ### `ui/widgets/carousel.py`
 
 Module helpers: `_force_white_fills(node)` (flattens Bodymovin fills to
 white), `_wave()` (the cached rlottie animation, frame count and fps),
-`_asset_image(name)`, `_info_badge_image()` (per resolved appearance mode,
-with a drawn fallback).
+`_svg_renderer(name, color=None)` (a cached `QSvgRenderer`, optionally
+recoloring every `fill="currentColor"` via a raw string replace before
+parsing — not a pre-rendered bitmap, which showed a visible stepped edge at
+badge scale even through `SmoothPixmapTransform`), `_paint_info_badge` /
+`_paint_info_badge_faded` (the info badge, full and hover-faded-while-
+expanded variants, both painting a plain disc in the glyph colour first
+so `info.svg`'s cut-out "i" hole shows it through).
 
 - `WaveLayer(QWidget)` — the Wave Loop visualiser, a mouse-transparent child
   of the tab; `start`, `stop`, time-based `_index`, `_render` (rlottie →
   ARGB32 `QImage`, band crop, gradient via `SourceIn`, cached per frame and
   size).
 - `_InfoTooltip(QLabel)` — the info badge's tooltip window.
+- `_ExpandedPreviewOverlay(QWidget)` — a translucent scrim, sized to the
+  main window's own footprint (not a separate top-level window — that stole
+  window activation and broke the app-level Left/Right keybind), that
+  temporarily reparents a `ThumbnailCarousel` into itself at a bigger,
+  centred size while its expand icon is on; `show_with(carousel)` /
+  `release()` do the reparenting, `mousePressEvent` collapses back on a
+  click outside the carousel's own bounds. One instance per `MediaTab`
+  (`ui/tabs/media_tab.py`'s `_on_expand_toggled` owns it).
 - `ThumbnailCarousel(QWidget)` — signals `reselect`, `populated`,
-  `indexChanged`, `fileDropped`; public `set_frames`, `set_strip_state`,
-  `set_audio_only`, `set_media_info`, `current_index`, `step`, `sync_index`;
+  `indexChanged`, `fileDropped`, `expandToggled(bool)`; public `set_frames`,
+  `set_strip_state`, `set_audio_only`, `set_media_info`, `current_index`,
+  `step`, `sync_index`, `force_collapse` (shrinks back from expanded, used
+  when the previewed file is about to change out from under it);
   geometry (`_frame_rect`, `_pixmap`, `_disc_centers`, `_dot_geometry`,
-  `_resolve_dot_start`, `_centered_dot_start`); painting (`_paint_dots`,
-  `_paint_chevrons`, `paint_badges`); animation (`_fade_to`, `_step`,
-  slide/fade state); input (`_press` for press and double-click, drop
-  handling, `_over_info_badge`, tooltip text via `_info_text` /
-  `_mastering_text`).
+  `_resolve_dot_start`, `_centered_dot_start`, `_expand_icon_rect`);
+  painting (`_paint_dots`, `_paint_chevrons`, `paint_badges`,
+  `_paint_expand_icon`); animation (`_fade_to`, `_step`, slide/fade state);
+  input (`_press` for press and double-click, drop handling,
+  `_over_info_badge`, `_over_expand_icon`, `_toggle_expand`, tooltip text
+  via `_info_text` / `_mastering_text`). While `_expanded`: the dot row
+  scales 1.5x (`_dot_scale`), the mute badge would scale 0.5x
+  (`_icon_scale`) but in practice is never painted at all, the info badge
+  fades with hover instead of always showing (`_info_badge_scale`,
+  `_paint_info_badge_faded`), and double-click-to-reselect is disabled.
 
 ### `ui/widgets/dialogs.py`
 
@@ -899,6 +1136,9 @@ with a drawn fallback).
 - `show_message`, `ask_yes_no`, `ask_text`, `confirm_output_path`.
 - `AudioStreamPickerDialog(MessageDialog)` / `choose_audio_streams` — one
   checkbox per probed stream; never returns an empty set.
+- `ExternalStreamPickerDialog(MessageDialog)` / `pick_external_streams` —
+  same checkbox-per-stream shape, for choosing which stream(s) of a second,
+  browsed-in file Muxing's "Add Stream(s)" pulls in.
 
 ### `ui/widgets/toast.py`
 
@@ -906,3 +1146,32 @@ with a drawn fallback).
   `dismiss`; click runs its callback.
 - `ToastManager` — `show(message, on_click)` (retires the oldest past three),
   `relayout`, `forget`, `clear`; slots hang off the tab frame's top-right.
+
+### `ui/widgets/tracklist.py`
+
+- `TrackListBox(QWidget)` — Muxing's checkable, scrollable track picker
+  (replaced the original single `Auto`/`Track N` dropdown): one checkbox row
+  per stream, any combination checked maps into the output. `set_items(items,
+  reset=False)` is its own single constraint pass — diffs by row id when
+  `reset=False` (an id already present keeps its checked state, just gets
+  its label refreshed), tears down and rebuilds from scratch when `True` (a
+  new input file — a same-named row from a different file must never be
+  mistaken for a carried-over pick). A brand new row defaults to checked
+  only in the very first position. `set_checked(row_id, checked)` (the
+  programmatic counterpart of clicking a row's own checkbox — doesn't emit
+  `changed`), `item_count()`. `setFixedHeight` — fixed, not a minimum, so a
+  heavily-populated box never grows the panel around it (`MuxingTab.
+  _track_panel` sets it to exactly `Overview`'s own `sizeHint().height()` —
+  see the DropBox-height invariant note under `ui/widgets/panels.py` above).
+  Empty state ("No tracks available") is dead-centered, not the scroll
+  list's own first row.
+
+### `ui/widgets/tooltip.py`
+
+- `tip(widget, text)` — attaches a shared, themed hover tooltip to any
+  widget via one app-wide `_TooltipManager` event filter (400ms hover
+  delay); works even on a disabled widget, and syncs the cursor to a plain
+  arrow while disabled.
+- `_Tooltip(QWidget)` — the shared popup itself (fade-in only).
+- `_TooltipManager` — the single installed event filter every `tip()` call
+  registers with, rather than each widget running its own timer/popup pair.

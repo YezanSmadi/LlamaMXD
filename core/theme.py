@@ -145,14 +145,18 @@ def default_output_dir():
 
 def load_settings():
     """Reads persisted app settings (theme, appearance mode, default save
-    location, GPU acceleration), filling in defaults for anything missing or
-    if the file doesn't exist yet (e.g. first run). Appearance mode defaults
-    to "System"; default save location defaults to default_output_dir()."""
+    location, GPU acceleration, the Downloader's own separate save location),
+    filling in defaults for anything missing or if the file doesn't exist yet
+    (e.g. first run). Appearance mode defaults to "System"; default save
+    location defaults to default_output_dir(); the Downloader's separate
+    save location is off by default and empty until set."""
     settings = {
         "theme": DEFAULT_THEME_NAME,
         "appearance_mode": "System",
         "default_save_location": default_output_dir(),
         "gpu_enabled": True,
+        "downloader_separate_save": False,
+        "downloader_save_location": "",
     }
     if not os.path.exists(_SETTINGS_PATH):
         return settings

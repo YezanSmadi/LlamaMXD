@@ -225,7 +225,9 @@ def stylesheet():
     QLabel[role="detailTitle"] {{ font-size: 13px; font-weight: bold; }}
     QLabel[role="detailKey"] {{ font-family: Arial; font-size: 11px; font-weight: bold; }}
     QLabel[role="error"] {{ color: {c('stop')}; }}
-    QLabel[role="sidebarTitle"] {{ color: {c('primary_text')}; font-size: 20px; font-weight: bold; }}
+    QLabel[role="sidebarTitle"] {{
+        color: {c('primary_text')}; font-family: "Oswald", "Segoe UI"; font-size: 36px; font-weight: bold;
+    }}
     QLabel[role="sidebarFooter"] {{ color: {c('primary_text')}; font-size: 10px; }}
     QLabel[role="empty"] {{ color: {c('muted')}; }}
     QLabel[role="warn"] {{

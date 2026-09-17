@@ -7,6 +7,7 @@ Every tab is built once and lives in a QStackedWidget. A tab switch is one
 native window and presents the result as one frame, so there's no re-mapping
 of hundreds of child windows and nothing fills in piece by piece."""
 import os
+import threading
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtGui import QIcon
@@ -27,10 +28,11 @@ from core.utilities import extract_hdr_tonemapped_thumbnails, extract_video_thum
 from ui import theme as T
 from ui.tabs.downloader import DownloaderTab
 from ui.tabs.encoding import EncodingTab
+from ui.tabs.media_tab import set_line_text
 from ui.tabs.muxing import MuxingTab
 from ui.tabs.queue import QueueTab
 from ui.tabs.settings import SettingsTab
-from ui.widgets.dialogs import ask_yes_no
+from ui.widgets.dialogs import ask_yes_no, show_message
 from ui.widgets.panels import ASSETS, Sidebar, TabIndicator
 from ui.widgets.toast import ToastManager
 from ui.workers import emit_progress, pil_to_qimage, run_async
@@ -51,13 +53,25 @@ def _empty_media_info():
 class _Keybinds(QObject):
     """Global keybinds, filtered at the application level so they work
     wherever focus happens to be — unless focus is on something the key
-    already means something for."""
+    already means something for. Also clears a text field's focus the moment
+    a click lands somewhere else: every clickable in this app is `Qt.NoFocus`
+    (see Conventions), so Qt's own default — a click that lands on a widget
+    which never takes focus simply leaves focus wherever it already was —
+    otherwise left a line edit looking and behaving focused (cursor still
+    blinking, still first in line for Ctrl+A/paste) long after the user had
+    clicked off it onto a button or blank space."""
 
     def __init__(self, window):
         super().__init__(window)
         self.window = window
 
     def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonPress:
+            focus = QApplication.focusWidget()
+            typing = isinstance(focus, QLineEdit) or type(focus).__name__ == "_TimeField"
+            if typing and obj is not focus:
+                focus.clearFocus()
+            return False
         if event.type() != QEvent.KeyPress or not self.window.isActiveWindow():
             return False
         if QApplication.activeModalWidget() is not None:
@@ -70,6 +84,11 @@ class _Keybinds(QObject):
             if carousel is not None:
                 carousel.step(-1 if key == Qt.Key_Left else 1)
                 return True
+        if key == Qt.Key_Escape and not typing:
+            for tab in self.window.media_tabs:
+                if getattr(tab.carousel, "_expanded", False):
+                    tab.carousel.force_collapse()
+                    return True
         if key == Qt.Key_Space and self.window.current_tab == "Queue" and not event.isAutoRepeat():
             if typing or isinstance(focus, (QAbstractButton, QComboBox)):
                 return False
@@ -92,6 +111,10 @@ class MainWindow(QWidget):
         self.current_file_path = ""
         self.default_save_location = settings["default_save_location"]
         self.gpu_enabled = bool(settings["gpu_enabled"])
+        # The Downloader's own save folder, used instead of the shared
+        # default only while separate-save is on and a folder's been set.
+        self.downloader_separate_save = bool(settings["downloader_separate_save"])
+        self.downloader_save_location = settings["downloader_save_location"] or ""
         if self.default_save_location:
             try:
                 os.makedirs(self.default_save_location, exist_ok=True)
@@ -111,6 +134,7 @@ class MainWindow(QWidget):
         self.hdr_frames_path = None
         self._hdr_inflight_path = None
         self._hdr_token = 0
+        self._hdr_cancel_event = None
         # Downloader: the last successful fetch, and a token so a superseded
         # fetch's late result is dropped.
         self.ytdlp_cache = None
@@ -168,12 +192,16 @@ class MainWindow(QWidget):
     # ------------------------------------------------------------------ #
     def show_tab(self, name, animate=True):
         outgoing = self.tabs.get(self.current_tab)
-        if outgoing is not None and outgoing is not self.tabs[name]:
+        incoming = self.tabs[name]
+        if outgoing is not None and outgoing is not incoming:
             on_leave = getattr(outgoing, "on_leave", None)
             if callable(on_leave):
                 on_leave()
         self.current_tab = name
-        self.stack.setCurrentWidget(self.tabs[name])
+        self.stack.setCurrentWidget(incoming)
+        on_enter = getattr(incoming, "on_enter", None)
+        if callable(on_enter):
+            on_enter()
         self.indicator.align_to(self.sidebar.buttons[name], self.tab_frame.x(), animate=animate)
         if not isinstance(QApplication.focusWidget(), QLineEdit):
             self.setFocus()
@@ -192,6 +220,45 @@ class MainWindow(QWidget):
         QApplication.instance().setStyleSheet(T.stylesheet())
 
     # ------------------------------------------------------------------ #
+    #  Settings-driven defaults
+    # ------------------------------------------------------------------ #
+    def set_default_save_location(self, path):
+        """A new default save location from Settings — while no file's been
+        imported yet, Muxing/Encoding's save fields (still just the bare
+        default directory — see `MediaTab._autofill_output_path`) follow it
+        live, and so does the Downloader's own field unless it has its own
+        separate location. Once a real file/fetch is in the field, only that
+        flow's own autofill touches it again."""
+        self.default_save_location = path
+        if not self.current_file_path:
+            for tab in self.media_tabs:
+                set_line_text(tab.save_entry, path)
+                tab._auto_output = path
+        downloader_tab = self.tabs.get("Downloader")
+        if downloader_tab is not None and not self.downloader_separate_save:
+            downloader_tab.refresh_default_location()
+
+    def downloader_default_location(self):
+        """The folder the Downloader autofills into before a fetch — its own
+        separate location when Settings has that on and one's been set, else
+        the same default save location every other tab uses."""
+        if self.downloader_separate_save and self.downloader_save_location:
+            return self.downloader_save_location
+        return self.default_save_location
+
+    def set_downloader_separate_save(self, enabled):
+        self.downloader_separate_save = bool(enabled)
+        downloader_tab = self.tabs.get("Downloader")
+        if downloader_tab is not None:
+            downloader_tab.refresh_default_location()
+
+    def set_downloader_save_location(self, path):
+        self.downloader_save_location = path
+        downloader_tab = self.tabs.get("Downloader")
+        if downloader_tab is not None and self.downloader_separate_save:
+            downloader_tab.refresh_default_location()
+
+    # ------------------------------------------------------------------ #
     #  File selection broadcast
     # ------------------------------------------------------------------ #
     def register_media_tab(self, tab):
@@ -206,6 +273,21 @@ class MainWindow(QWidget):
             self._preview_index = 0
             if clean_path != self._media_info_path:
                 self.media_info = _empty_media_info()
+            # A genuinely new file — drop the outgoing file's preview right
+            # away instead of leaving it on screen until the new one's
+            # frames finish decoding (_load_thumbnails, below, rebroadcasts
+            # synchronously on a cache hit, so this never even flashes blank
+            # for a file that's been seen before).
+            for tab in self.media_tabs:
+                tab.carousel.clear_preview()
+            # The file being replaced owns any HDR→SDR preview still
+            # rendering, and its own HDR→SDR switch — interrupt the one and
+            # turn the other back off so the new file never inherits either.
+            self._cancel_hdr_render()
+            for tab in self.media_tabs:
+                reset_hdr = getattr(tab, "reset_hdr_preview", None)
+                if callable(reset_hdr):
+                    reset_hdr()
         self.current_file_path = clean_path
         for tab in self.media_tabs:
             tab.set_selected_file(clean_path)
@@ -236,11 +318,47 @@ class MainWindow(QWidget):
     def _deliver_media_info(self, token, path, info):
         if token != self._thumb_token or info is None:
             return
+        # Neither a video nor an audio stream at all -- not a legitimate
+        # audio-only file (that's has_audio True, has_video False) but a
+        # probe that found literally nothing, the signature of ffmpeg's
+        # demuxer failing to read this file (a corrupt file, or a container
+        # variant this build's demuxer doesn't handle -- e.g. some vendors'
+        # MXF headers). Rejected before it ever reaches a tab, rather than
+        # broadcast as if it were a real, empty file.
+        if info.get("has_video") in (None, False) and info.get("has_audio") in (None, False):
+            self._reject_file(path)
+            return
         self.media_info = info
         self._media_info_path = path
         self._broadcast_media_info()
         if self._is_audio_only(path):
             self._broadcast_audio_only(True)
+
+    def _reject_file(self, path):
+        """Undo the selection entirely -- back to the dropbox's pristine,
+        nothing-imported state, and this file's info never reaches Muxing/
+        Encoding. Bumping the token also makes the in-flight thumbnail
+        decode for this same path a no-op once it lands (`_deliver_thumbnails`
+        checks it too)."""
+        self._thumb_token += 1
+        self.current_file_path = ""
+        self.media_info = _empty_media_info()
+        self._media_info_path = None
+        self.thumb_frames = []
+        self.thumb_frames_path = None
+        self._preview_index = 0
+        self._cancel_hdr_render()
+        for tab in self.media_tabs:
+            tab.clear_selected_file()
+            reset_hdr = getattr(tab, "reset_hdr_preview", None)
+            if callable(reset_hdr):
+                reset_hdr()
+        show_message(
+            self, "Couldn't Read This File",
+            f"“{os.path.basename(path)}”'s video and audio couldn't be identified. "
+            "It may be corrupted, or use a format this app's bundled ffmpeg can't "
+            "fully parse.",
+        )
 
     def _is_audio_only(self, path):
         info = self.media_info
@@ -295,11 +413,22 @@ class MainWindow(QWidget):
         self._hdr_inflight_path = path
         self._hdr_token += 1
         token = self._hdr_token
+        cancel_event = threading.Event()
+        self._hdr_cancel_event = cancel_event
 
         def work():
-            return [pil_to_qimage(f) for f in extract_hdr_tonemapped_thumbnails(path, count=10)]
+            frames = extract_hdr_tonemapped_thumbnails(path, count=10, should_cancel=cancel_event.is_set)
+            return [pil_to_qimage(f) for f in frames]
 
         run_async(work, lambda frames: self._deliver_hdr(token, path, frames or []))
+
+    def _cancel_hdr_render(self):
+        """Interrupts an HDR→SDR preview render still in flight — its file is
+        no longer the one being shown, so letting it finish would just be
+        wasted ffmpeg/libplacebo work. A no-op when nothing's running."""
+        if self._hdr_cancel_event is not None:
+            self._hdr_cancel_event.set()
+        self._hdr_inflight_path = None
 
     def _deliver_hdr(self, token, path, frames):
         if path == self._hdr_inflight_path:

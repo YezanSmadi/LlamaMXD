@@ -4,18 +4,19 @@ import os
 from datetime import datetime
 
 from PySide6.QtCore import QEasingCurve, QRectF, Qt, QVariantAnimation, Signal
-from PySide6.QtGui import QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QFileDialog, QGridLayout, QLabel, QVBoxLayout, QWidget
 
 from ui import theme as T
-from ui.widgets.controls import MarqueeLabel, button, ui_font
+from ui.widgets.controls import MarqueeGroup, MarqueeLabel, button, ui_font
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ASSETS = os.path.join(_REPO_ROOT, "assets")
-VERSION = "v0.5.0-alpha.6"
+VERSION = "v0.5.0-beta.1"
 
 MEDIA_FILTER = (
-    "Media files (*.mp4 *.mkv *.mov *.webm *.avi *.m4v *.mxf "
+    "Media files (*.mp4 *.mkv *.mov *.webm *.avi *.m4v *.mxf *.ts *.vob "
     "*.mp3 *.m4a *.aac *.flac *.wav *.opus *.ogg *.wma *.aiff);;All files (*.*)"
 )
 
@@ -195,6 +196,15 @@ class DropBox(QWidget):
         self.or_label.hide()
         self.update()
 
+    def reset(self):
+        """Undo `collapse()` — back to the full drag/drop + Browse prompt,
+        exactly as before any file was ever picked (a rejected/unreadable
+        import never leaves the box looking like one was)."""
+        self._collapsed = False
+        self.prompt.show()
+        self.or_label.show()
+        self.update()
+
     def browse(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select a File", "", MEDIA_FILTER)
         if path:
@@ -236,11 +246,14 @@ class DropBox(QWidget):
 
 
 class BorderedFrame(QWidget):
-    """The DropBox's primary rounded border without its drop behaviour — the
-    Downloader tab's preview box."""
+    """The DropBox's rounded border without its drop behaviour — the
+    Downloader tab's preview box (primary), and Muxing's track box, which
+    passes `color_key="secondary"` for a visually distinct (blue on Lemon)
+    border rather than DropBox's own primary one."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, color_key="primary"):
         super().__init__(parent)
+        self._color_key = color_key
         T.theme.changed.connect(self.update)
 
     def paintEvent(self, _event):
@@ -248,7 +261,7 @@ class BorderedFrame(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 10, 10)
-        p.setPen(QPen(T.theme.color("primary"), 2))
+        p.setPen(QPen(T.theme.color(self._color_key), 2))
         p.drawPath(path)
 
 
@@ -267,13 +280,17 @@ class SummaryPanel(QWidget):
         grid.setHorizontalSpacing(0)
         grid.setVerticalSpacing(12)
         self._values = []
+        # One shared clock for all rows: whichever value is shortest finishes
+        # its scroll first and holds at rest until the slowest one catches
+        # up, so all rows sweep and restart in step instead of drifting.
+        marquee_group = MarqueeGroup()
         for row, text in enumerate(labels):
             lab = QLabel(text)
             lab.setProperty("role", "muted")
             lab.setStyleSheet("font-weight: bold;")
             lab.setFixedWidth(72)
             grid.addWidget(lab, row, 0)
-            val = MarqueeLabel("—", pixel_size=11)
+            val = MarqueeLabel("—", pixel_size=11, group=marquee_group)
             grid.addWidget(val, row, 1)
             self._values.append(val)
         grid.setColumnStretch(1, 1)
@@ -285,6 +302,25 @@ class SummaryPanel(QWidget):
             label.set_color_key(color or "text")
 
 
+class _AccentBar(QWidget):
+    """A thin accent-coloured bar — the sidebar title's underline, in the
+    theme's secondary colour (e.g. Lemon's blue) rather than a text-level
+    underline."""
+
+    def __init__(self, width, height=4, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(width, height)
+        T.theme.changed.connect(self.update)
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(T.theme.color("secondary"))
+        r = self.height() / 2
+        p.drawRoundedRect(self.rect(), r, r)
+
+
 # --------------------------------------------------------------------------- #
 #  Sidebar + active-tab pipe
 # --------------------------------------------------------------------------- #
@@ -294,6 +330,7 @@ class Sidebar(QWidget):
 
     navigate = Signal(str)
     WIDTH = 200
+    LOGO_SIZE = 170
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -306,10 +343,15 @@ class Sidebar(QWidget):
         title.setProperty("role", "sidebarTitle")
         title.setAlignment(Qt.AlignCenter)
         lay.addWidget(title)
+        lay.addSpacing(0)
+
+        title_width = QFontMetricsF(ui_font(36, bold=True, family="Oswald")).horizontalAdvance("LlamaMXD")
+        underline = _AccentBar(round(title_width))
+        lay.addWidget(underline, 0, Qt.AlignHCenter)
         lay.addSpacing(20)
 
         self.logo = QLabel()
-        self.logo.setFixedSize(140, 140)
+        self.logo.setFixedSize(self.LOGO_SIZE, self.LOGO_SIZE)
         self._load_logo()
         lay.addWidget(self.logo, 0, Qt.AlignHCenter)
         lay.addSpacing(10)
@@ -323,10 +365,11 @@ class Sidebar(QWidget):
         self._add_nav(lay, "Settings")
         lay.addSpacing(8)
 
-        footer = QLabel(f"{datetime.now().year} Yezan Smadi     {VERSION}")
+        footer = QLabel(f"© {datetime.now().year} Yezan Smadi     {VERSION}")
         footer.setProperty("role", "sidebarFooter")
         footer.setAlignment(Qt.AlignCenter)
         lay.addWidget(footer)
+        T.theme.changed.connect(self._load_logo)
         T.theme.changed.connect(self.update)
 
     def _add_nav(self, lay, name):
@@ -336,13 +379,36 @@ class Sidebar(QWidget):
         lay.addWidget(btn, 0, Qt.AlignHCenter)
         self.buttons[name] = btn
 
+    _LOGO_OVERSAMPLE = 4  # rendered above any real screen DPR, then scaled down — never up
+
     def _load_logo(self):
-        pix = QPixmap(os.path.join(ASSETS, "llama.png"))
-        if pix.isNull():
+        renderer = QSvgRenderer(os.path.join(ASSETS, "LlamaMXD-Logo.svg"))
+        if not renderer.isValid():
             return
-        dpr = self.devicePixelRatioF() or 1.0
-        pix = pix.scaled(int(140 * dpr), int(140 * dpr), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        pix.setDevicePixelRatio(dpr)
+        box = self.LOGO_SIZE * self._LOGO_OVERSAMPLE
+        native = renderer.defaultSize()
+        scale = box / max(native.width(), native.height())
+        w, h = native.width() * scale, native.height() * scale
+        x, y = (box - w) / 2, (box - h) / 2
+        img = QImage(box, box, QImage.Format_ARGB32_Premultiplied)
+        img.fill(Qt.transparent)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing)
+        renderer.render(p, QRectF(x, y, w, h))
+        p.end()
+
+        # Tint the rendered ink to the sidebar's readable-on-primary colour —
+        # the same one the title text uses — so the logo goes white on a dark
+        # primary (Noir, Vaporwave) exactly like the title does, and stays
+        # black elsewhere. SourceIn keeps the source's alpha (the art's own
+        # anti-aliased shape) and replaces only its RGB.
+        tint = QPainter(img)
+        tint.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        tint.fillRect(img.rect(), T.theme.color("primary_text"))
+        tint.end()
+
+        pix = QPixmap.fromImage(img)
+        pix.setDevicePixelRatio(self._LOGO_OVERSAMPLE)
         self.logo.setPixmap(pix)
 
     def paintEvent(self, _event):

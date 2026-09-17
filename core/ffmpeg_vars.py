@@ -29,10 +29,10 @@ pass that flag at all" — which is a genuinely fine outcome for those three
 to fall back on), so nothing blocks a job over it.
 
 A key that belongs to the other tab (no `ENCODER` on a Mux job, no
-`VIDEO_TRACK` on an Encode job) keeps its default below. Conveniently that
+`VIDEO_TRACKS` on an Encode job) keeps its default below. Conveniently that
 means a Mux job's `VIDEO_CODEC_ARG` comes out as `"copy"`, which is exactly
 right: Muxing never re-encodes (and never touches `AUDIO_STREAMS` at all --
-it maps its single `AUDIO_TRACK`/`AUDIO_TRACK_INDEX` straight through
+it maps its own `VIDEO_TRACKS`/`AUDIO_TRACKS` lists straight through
 `build_mux_command`, always `-c copy`). Branch on `SOURCE_TAB` for anything
 else that differs.
 
@@ -48,7 +48,7 @@ Pure data; no UI code in here.
 
 import os
 
-from core import formats
+from core import formats, gpu
 
 # ---------------------------------------------------------------------- #
 #  Translation tables: UI display value -> what ffmpeg takes
@@ -212,6 +212,12 @@ SPEED = ""                  # "fast", "4", ... ("" when the codec has none)
 SPEED_ARG = {}              # kwargs to merge in: {"preset": "fast"} or
                             # {"cpu-used": "4", "deadline": "good"}, or {}
 GPU_ENABLED = False         # the Settings tab's global GPU switch
+HW_ENCODER = None           # resolved hardware encoder id ("h264_nvenc", ...)
+                            # when GPU_ENABLED found one for ENCODER on this
+                            # machine's GPU, else None -- see core/gpu.py.
+                            # VIDEO_CODEC_ARG already reflects it; this is
+                            # what build_encode_command reads to know which
+                            # rate-control flags to use instead of -crf/-q:v.
 HDR_TO_SDR = False          # HDRtoSDR switch
 MASTERING_MAX_NITS = None   # the source's probed ST 2086 mastering peak (nits),
                             # or None if it wasn't tagged -- core.utilities.
@@ -225,6 +231,13 @@ MAX_CLL = None              # the source's probed MaxCLL (nits), or None/0 if
                             # its own; see that function's docstring for why
                             # (confirmed a mastering peak with no real MaxCLL
                             # measurement is the wrong signal to trust).
+RESOLUTION = formats.SOURCE_RESOLUTION   # "Source", "1080p", ... (formats.RESOLUTIONS)
+SOURCE_HEIGHT = None        # the probed source's own height (px), snapshotted
+                            # at queue time (EncodingTab._gather_settings) -- a
+                            # fact about the input, not a user choice, same
+                            # convention as MASTERING_MAX_NITS/MAX_CLL above.
+SCALE_VF = None             # -vf "scale=-2:<height>" when RESOLUTION picks a
+                            # real downscale, else None -- see _scale_vf.
 
 # --- Encoding / Audio sub-tab ---
 # One entry per *included* source audio stream (EncodingTab's Audio Track
@@ -234,7 +247,10 @@ MAX_CLL = None              # the source's probed MaxCLL (nits), or None/0 if
 #    "codec_arg": "aac",        -- -c:a:<output position>, or "copy"
 #    "bitrate_arg": "192k",     -- -b:a:<output position>, or None (omit)
 #    "channels_arg": 2,         -- -ac:<output position>, or None (omit)
-#    "sample_rate_arg": 48000}  -- -ar:<output position>, or None (omit)
+#    "sample_rate_arg": 48000,  -- -ar:<output position>, or None (omit)
+#    "language": "eng"}         -- probed language tag, or None; only set for
+#                               -- a re-encoded (non-copy) stream -- see
+#                               -- build_encode_command's stale-metadata wipe
 # "output position" is this entry's index *within this list* (0, 1, 2, ...),
 # not `src_index` -- ffmpeg numbers `:a:N` on the *output* file's audio
 # streams, which only matches the source's numbering when every source
@@ -274,13 +290,6 @@ def _split_path(path):
     return directory, name, stem, ext.lower()
 
 
-def _track_index(track):
-    """"Track N" -> N-1 (ffmpeg stream indices are 0-based); None otherwise."""
-    if track.startswith("Track "):
-        return int(track.split()[1]) - 1
-    return None
-
-
 def _audio_stream_args(entry):
     """One `settings["audio_streams"]` entry (display values, same shape the
     Audio sub-tab's four controls show) -> its ffmpeg-ready dict — the same
@@ -307,7 +316,38 @@ def _audio_stream_args(entry):
         "sample_rate_arg": (
             None if passthru or sample_rate == formats.SELECT else int(sample_rate.split()[0])
         ),
+        # The probed language tag, carried through so build_encode_command
+        # can re-apply it after wiping a re-encoded stream's stale per-track
+        # statistics (BPS/DURATION/... describing the *source's* codec and
+        # length, not this job's) -- see its own comment for why passthru
+        # never needs this at all (nothing about a copied stream's tags goes
+        # stale).
+        "language": None if passthru else entry.get("language"),
     }
+
+
+def _scale_vf(resolution, source_height):
+    """-vf value for a Resolution pick -- `-2` for the width lets ffmpeg's
+    scale filter compute it from the source's own aspect ratio (rounded to
+    the nearest even number, which every chroma subsampling this app's
+    codecs use needs), which is what actually keeps the aspect ratio intact.
+    This is the one piece of "what yt-dlp does" that doesn't carry over
+    directly: yt-dlp's own Quality dropdown (core/downloader.py) just picks
+    among streams already encoded at that size, never resizes anything
+    itself -- a local input has exactly one resolution, so getting a smaller
+    one here means a real re-encode through this filter.
+
+    None for 'Source', or when there's no real downscale to do -- an
+    unprobed height, or a resolution at/above the source's own height.
+    EncodingTab's Resolution dropdown is already capped to the source's own
+    height (formats.resolutions_for), but a saved preset applied to a
+    smaller or differently-probed file could still name a rung no longer <=
+    that file's real height, so this re-checks rather than trusting the
+    caller."""
+    target = formats.resolution_height_for(resolution)
+    if not target or not source_height or target >= source_height:
+        return None
+    return f"scale=-2:{target}"
 
 
 def _speed_kwargs(encoder, value):
@@ -343,11 +383,25 @@ def derive(settings, source_tab=""):
     level = s.get("level") or ""
     quality_spec = formats.quality_for(encoder)
     speed = s.get("speed") or ""
+    gpu_enabled = bool(s.get("gpu_enabled"))
+    # Hardware encoder ids don't understand libx264/libx265/SVT-AV1's own
+    # -preset ladder (nvenc/qsv/amf each have their own, incompatible preset
+    # vocabulary) -- rather than trying to translate one onto the other,
+    # a hardware-encoded job just omits -preset and rides that encoder's own
+    # default, same reasoning as PIX_FMT_ARG being None for a codec it
+    # doesn't apply to.
+    hw_encoder = gpu.hw_encoder_for(encoder) if gpu_enabled else None
+    video_codec_arg = hw_encoder or formats.VIDEO_ENCODERS.get(encoder, "copy")
+    speed_arg = {} if hw_encoder else _speed_kwargs(encoder, speed)
+
+    resolution = s.get("resolution") or formats.SOURCE_RESOLUTION
+    source_height = s.get("source_height")
+    scale_vf = _scale_vf(resolution, source_height)
 
     audio_streams = [_audio_stream_args(entry) for entry in (s.get("audio_streams") or [])]
 
-    video_track = s.get("video_track") or "Auto"
-    audio_track = s.get("audio_track") or "Auto"
+    video_tracks = s.get("video_tracks") or []
+    audio_tracks = s.get("audio_tracks") or []
 
     return {
         "SOURCE_TAB": source_tab,
@@ -377,7 +431,7 @@ def derive(settings, source_tab=""):
         "STRIP_AUDIO": bool(s.get("strip_audio")),
 
         "ENCODER": encoder,
-        "VIDEO_CODEC_ARG": formats.VIDEO_ENCODERS.get(encoder, "copy"),
+        "VIDEO_CODEC_ARG": video_codec_arg,
         "PROFILE": profile,
         "PROFILE_ARG": _profile_arg(encoder, profile),
         "LEVEL": level,
@@ -387,20 +441,23 @@ def derive(settings, source_tab=""):
         "QUALITY": int(s["quality"]) if s.get("quality") is not None else None,
         "QUALITY_KIND": quality_spec["kind"] if quality_spec else None,
         "SPEED": speed,
-        "SPEED_ARG": _speed_kwargs(encoder, speed),
-        "GPU_ENABLED": bool(s.get("gpu_enabled")),
+        "SPEED_ARG": speed_arg,
+        "GPU_ENABLED": gpu_enabled,
+        "HW_ENCODER": hw_encoder,
         "HDR_TO_SDR": bool(s.get("hdr_to_sdr")),
         "MASTERING_MAX_NITS": s.get("mastering_max_nits"),
         "MAX_CLL": s.get("max_cll"),
+        "RESOLUTION": resolution,
+        "SOURCE_HEIGHT": source_height,
+        "SCALE_VF": scale_vf,
 
         "AUDIO_STREAMS": audio_streams,
 
-        "VIDEO_TRACK": video_track,
-        "VIDEO_TRACK_INDEX": _track_index(video_track),
-        "VIDEO_TRACK_FILE": s.get("video_track_file") or "",
-        "AUDIO_TRACK": audio_track,
-        "AUDIO_TRACK_INDEX": _track_index(audio_track),
-        "AUDIO_TRACK_FILE": s.get("audio_track_file") or "",
+        # Each entry: {"source": "primary"/"external", "file": path|None,
+        # "index": N} -- N is 0-based among that *file's own* streams of this
+        # kind, matching what `-map <input>:v:<index>` / `:a:<index>` takes.
+        "VIDEO_TRACKS": video_tracks,
+        "AUDIO_TRACKS": audio_tracks,
     }
 
 

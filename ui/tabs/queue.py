@@ -64,15 +64,12 @@ _DETAIL_FIELDS = [
     ("profile", "Profile", None),
     ("level", "Level", None),
     ("speed", "Speed", None),
-    ("video_track", "Video Track", None),
-    ("video_track_file", "Video From", None),
-    ("audio_track", "Audio Track", None),
-    ("audio_track_file", "Audio From", None),
+    ("resolution", "Resolution", None),
     ("strip_audio", "Strip Audio", "bool"),
 ]
-_VIDEO_DETAIL_KEYS = {"encoder", "gpu_enabled", "hdr_to_sdr", "quality", "profile", "level",
-                      "speed", "video_track", "video_track_file"}
-_AUDIO_DETAIL_KEYS = {"audio_track", "audio_track_file"}
+_VIDEO_DETAIL_KEYS = {"encoder", "gpu_enabled", "hdr_to_sdr", "quality", "profile", "level", "speed",
+                      "resolution"}
+_AUDIO_DETAIL_KEYS = set()
 
 
 class QueueRow(QWidget):
@@ -397,9 +394,13 @@ class QueueTab(QWidget):
         return False
 
     def on_leave(self):
-        """Switching away: a completed 100% bar resets so it doesn't linger."""
+        """Switching away: a completed 100% bar resets so it doesn't linger,
+        and the details popup (if open) closes — coming back to Queue always
+        starts with it hidden rather than showing a stale task's details."""
         if self.progress_bar.value >= 1.0:
             self.progress_bar.set_value(0)
+        self.detail_frame.hide()
+        self._detail_task_id = None
 
     def remove_task(self, task_id):
         """Removing the active row kills its process first — a process must
@@ -466,11 +467,21 @@ class QueueTab(QWidget):
         rows = []
         strip_video = bool(settings.get("strip_video"))
         strip_audio = bool(settings.get("strip_audio"))
+        is_download = row["source_tab"] == _YTDLP
         for key, label, fmt in _DETAIL_FIELDS:
             if key not in settings:
                 continue
             if (strip_video and key in _VIDEO_DETAIL_KEYS) or (strip_audio and key in _AUDIO_DETAIL_KEYS):
                 continue
+            # "quality" means two unrelated things depending on who queued
+            # the task: Encoding's CRF/qscale value vs. the Downloader's own
+            # resolution pick (DownloaderTab's dropdown is itself labeled
+            # "Resolution:" — see its own module docstring). Same settings
+            # key, so this is the one place that has to tell them apart
+            # rather than the field list itself, which has no per-task-kind
+            # branching otherwise.
+            if key == "quality" and is_download:
+                label = "Resolution"
             value = settings[key]
             if fmt == "time":
                 value = hms(value)
@@ -488,6 +499,19 @@ class QueueTab(QWidget):
                         bits.append(entry[k])
                 rows.append(("Audio Stream" if len(streams) == 1 else f"Audio Stream {i + 1}",
                              " · ".join(bits), False))
+        # video_tracks/audio_tracks (Muxing only -- see MuxingTab._track_args)
+        # each carry every *checked* track for that kind, so a Mux task shows
+        # one row per included track rather than a single "Video Track: ..."
+        # value the way the old single-track dropdown did.
+        for kind, key, strip in (("Video", "video_tracks", strip_video), ("Audio", "audio_tracks", strip_audio)):
+            if key not in settings or strip:
+                continue
+            tracks = settings.get(key) or []
+            for i, entry in enumerate(tracks):
+                where = ("Source" if entry.get("source") == "primary"
+                         else os.path.basename((entry.get("file") or "").replace("\\", "/")))
+                label = f"{kind} Track" if len(tracks) == 1 else f"{kind} Track {i + 1}"
+                rows.append((label, f"Track {entry.get('index', 0) + 1}  ·  {where}", False))
         if row.get("error"):
             rows.append(("Error", row["error"], True))
         for r, (label, value, is_error) in enumerate(rows):

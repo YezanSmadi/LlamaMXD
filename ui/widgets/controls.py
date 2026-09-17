@@ -68,6 +68,15 @@ def labeled(label_text, widget, role="field", spacing=1, align=Qt.AlignLeft):
     return box, label
 
 
+def button_width_for(texts, padding=26, min_width=60):
+    """The width that fits the widest of `texts` inside a themed button (the
+    QPushButton stylesheet's own 10px-per-side padding, plus a little slack)
+    — so a button never clips text a fixed guess didn't leave room for."""
+    fm = QFontMetricsF(ui_font(13))
+    widest = max((fm.horizontalAdvance(t) for t in texts), default=0)
+    return max(min_width, math.ceil(widest + padding))
+
+
 def button(text, role=None, width=None, height=None):
     """A stylesheet-driven push button (secondary unless `role` says otherwise).
     NoFocus, like every clickable here: no focus rings, and a focused button
@@ -620,10 +629,11 @@ class _TimeField(QWidget):
 
     _SEGMENT_POSITIONS = (0, 1, 3, 4, 6, 7)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, mute_when_zero=False):
         super().__init__(parent)
         self.digits = list("000000")
         self.cursor_pos = 5
+        self._mute_when_zero = mute_when_zero
         self.setFixedSize(100, 30)
         self.setFocusPolicy(Qt.ClickFocus)
         self.setCursor(Qt.IBeamCursor)
@@ -711,6 +721,11 @@ class _TimeField(QWidget):
         p.drawPath(path)
 
         enabled = self.isEnabled()
+        # Muted like a placeholder while every digit's still 0 — a duration
+        # that's never been touched (or was clicked back down to it) reads
+        # as "not set" rather than "00:00:00, the number zero". Only applies
+        # to fields opted into it (Clip Duration, not Start Time).
+        muted = self._mute_when_zero and all(d == "0" for d in self.digits)
         rects = self._char_rects()
         p.setFont(self._font)
         fm = QFontMetricsF(self._font)
@@ -721,8 +736,10 @@ class _TimeField(QWidget):
                 hl = QRectF(r.left(), (self.height() - fm.height()) / 2, r.width(), fm.height())
                 p.fillRect(hl, th.color("secondary"))
                 p.setPen(th.color("secondary_text"))
+            elif not enabled:
+                p.setPen(th.color("label_disabled"))
             else:
-                p.setPen(th.color("text") if enabled else th.color("label_disabled"))
+                p.setPen(th.color("label_disabled") if muted else th.color("text"))
             p.drawText(r, Qt.AlignCenter, ch)
 
 
@@ -734,12 +751,12 @@ class TimeSpinner(QWidget):
 
     valueChanged = Signal(int)
 
-    def __init__(self, seconds=0, parent=None):
+    def __init__(self, seconds=0, parent=None, mute_when_zero=False):
         super().__init__(parent)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(5)
-        self.field = _TimeField()
+        self.field = _TimeField(mute_when_zero=mute_when_zero)
         self.field.edited.connect(lambda: self.valueChanged.emit(self.seconds()))
         lay.addWidget(self.field)
 
@@ -797,19 +814,51 @@ class TimeSpinner(QWidget):
 # --------------------------------------------------------------------------- #
 #  MarqueeLabel
 # --------------------------------------------------------------------------- #
+_MARQUEE_SPEED = 40.0   # px / second
+_MARQUEE_GAP = 48
+_MARQUEE_HOLD = 1.5     # seconds still at the start of each loop
+
+
+class MarqueeGroup:
+    """Synchronizes several `MarqueeLabel`s sharing one loop (e.g.
+    `SummaryPanel`'s Video/Audio/Length rows): without this, each label
+    wraps back to its own start the moment *its own* text finishes
+    sweeping, so three labels of different lengths drift in and out of
+    phase with each other. A grouped label instead holds at its resting
+    position once its own sweep finishes, and every member restarts
+    together only once the slowest one has too."""
+
+    def __init__(self):
+        self.t0 = time.perf_counter()
+        self._members = []
+
+    def register(self, label):
+        self._members.append(label)
+
+    def reset(self):
+        self.t0 = time.perf_counter()
+
+    def period(self):
+        """The shared cycle length: `_MARQUEE_HOLD` plus the longest sweep
+        among members that actually need to scroll right now."""
+        sweeps = [m._sweep_seconds() for m in self._members if m._overflows()]
+        return _MARQUEE_HOLD + (max(sweeps) if sweeps else 0.0)
+
+
 class MarqueeLabel(QWidget):
     """Single-line text that scrolls smoothly (sub-pixel, time-based) when it
     doesn't fit, and sits still when it does. The timer only runs while the
     widget is actually shown — a page hidden in a QStackedWidget gets a real
-    hideEvent, so there's nothing to gate by hand."""
+    hideEvent, so there's nothing to gate by hand.
+
+    Pass `group` (a `MarqueeGroup`) to keep several labels' loops in step —
+    see `MarqueeGroup`. Standalone labels (the default) just loop on their
+    own, as before."""
 
     doubleClicked = Signal()
 
-    _SPEED = 40.0   # px / second
-    _GAP = 48
-    _HOLD = 1.5     # seconds still at the start of each loop
-
-    def __init__(self, text="", pixel_size=11, color_key="text", bold=False, family=None, parent=None):
+    def __init__(self, text="", pixel_size=11, color_key="text", bold=False, family=None,
+                 parent=None, group=None):
         super().__init__(parent)
         self._text = text or ""
         self._color_key = color_key
@@ -820,6 +869,9 @@ class MarqueeLabel(QWidget):
         self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.timeout.connect(self.update)
         self._t0 = time.perf_counter()
+        self._group = group
+        if group is not None:
+            group.register(self)
         T.theme.changed.connect(self.update)
 
     def setText(self, text):
@@ -827,7 +879,10 @@ class MarqueeLabel(QWidget):
         if text == self._text:
             return
         self._text = text
-        self._t0 = time.perf_counter()
+        if self._group is not None:
+            self._group.reset()
+        else:
+            self._t0 = time.perf_counter()
         self._sync_timer()
         self.update()
 
@@ -842,10 +897,18 @@ class MarqueeLabel(QWidget):
     def _overflows(self):
         return QFontMetricsF(self._font).horizontalAdvance(self._text) > self.width()
 
+    def _sweep_seconds(self):
+        """How long this label's own text takes to scroll through once —
+        excludes the resting hold at the start."""
+        fm = QFontMetricsF(self._font)
+        span = fm.horizontalAdvance(self._text) + _MARQUEE_GAP
+        return span / _MARQUEE_SPEED
+
     def _sync_timer(self):
         if self.isVisible() and self._overflows():
             if not self._timer.isActive():
-                self._t0 = time.perf_counter()
+                if self._group is None:
+                    self._t0 = time.perf_counter()
                 self._timer.start(16)
         else:
             self._timer.stop()
@@ -872,9 +935,18 @@ class MarqueeLabel(QWidget):
         if tw <= rect.width():
             p.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, self._text)
             return
-        span = tw + self._GAP
-        elapsed = time.perf_counter() - self._t0
-        travel = max(0.0, (elapsed % (span / self._SPEED + self._HOLD)) - self._HOLD) * self._SPEED
+        span = tw + _MARQUEE_GAP
+        sweep = span / _MARQUEE_SPEED
+        if self._group is not None:
+            t0, period = self._group.t0, self._group.period()
+        else:
+            t0, period = self._t0, sweep + _MARQUEE_HOLD
+        cycle_t = (time.perf_counter() - t0) % period
+        # Holds at the resting position both before the sweep starts (everyone
+        # waits out `_MARQUEE_HOLD` together) and after this label's own sweep
+        # finishes (waiting for a slower groupmate) — travel pinned at `sweep`
+        # looks identical to 0 since the second drawn copy lands exactly at x=0.
+        travel = max(0.0, min(cycle_t - _MARQUEE_HOLD, sweep)) * _MARQUEE_SPEED
         baseline = (rect.height() + fm.ascent() - fm.descent()) / 2
         p.drawText(QPointF(-travel, baseline), self._text)
         p.drawText(QPointF(-travel + span, baseline), self._text)

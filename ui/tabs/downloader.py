@@ -4,8 +4,11 @@ A link can be pasted, typed, or dragged onto the preview box — only a single
 real http(s) link is accepted as a drop. Fetch runs `yt-dlp -J` off the GUI
 thread (`app.fetch_ytdlp_info`); the result drives every dropdown. The option
 tree is one-directional and decided in one place (`_sync_controls`): Mode →
-Video Codec → Quality → (Audio Codec) → Format, each list holding only what
-this video can deliver without re-encoding (see `core/downloader.py`).
+Video Codec → Resolution → (Audio Codec) → Format, each list holding only
+what this video can deliver without re-encoding (see `core/downloader.py`).
+("Resolution" is only the on-screen label — internally still `quality_menu`/
+`"quality"`, same as Encoding's Speed control still being labeled "Encoder
+Preset".)
 Queueing hands `downloader.resolve()`'s plan to the queue as `download`."""
 import os
 import re
@@ -29,8 +32,27 @@ from ui.widgets.controls import (
 )
 from ui.widgets.dialogs import confirm_output_path, show_message
 from ui.widgets.panels import BorderedFrame
+from ui.widgets.tooltip import tip
+from ui.tips import (
+    AUDIO_CODEC_TIPS,
+    AUDIO_FORMAT_TIPS,
+    BEST_AUDIO_CODEC_TIP,
+    BEST_VIDEO_CODEC_TIP,
+    CONTAINER_TIPS,
+    VIDEO_CODEC_TIPS,
+)
 
 _TAB = "Downloader"
+_MODE_TIP = "Video Only / Audio Only strip the other track entirely; Video + Audio keeps both."
+
+
+def _codec_tip(value, table, best_tip):
+    """A codec dropdown's hover tip: the codec's own blurb, or the "Best
+    Available" blurb for that table, or nothing for an empty/placeholder
+    value (NO_OPTION)."""
+    if value == downloader.BEST_CODEC:
+        return best_tip
+    return table.get(value, "")
 _KNOWN_EXTS = set(downloader.VIDEO_CONTAINERS) | set(downloader.AUDIO_CONVERSIONS) | {
     ".webm", ".m4a", ".mp4", ".mkv", ".ogg", ".mp3", ".aac", ".flv", ".3gp", ".mov"}
 _URL_RE = re.compile(r"^https?://\S+$")
@@ -174,6 +196,7 @@ class DownloaderTab(QWidget):
         self.mode_label = field_label("Mode:")
         self.mode_switch = SegmentedButton(downloader.MODES, current=downloader.MODE_AV)
         self.mode_switch.changed.connect(self._on_control_change)
+        tip(self.mode_switch, _MODE_TIP)
         mode_box = QWidget()
         ml = QVBoxLayout(mode_box)
         ml.setContentsMargins(0, 0, 0, 0)
@@ -187,13 +210,13 @@ class DownloaderTab(QWidget):
         self.codec_menu = Dropdown([downloader.BEST_CODEC], width=132)
         box, self.codec_label = labeled("Video Codec:", self.codec_menu)
         ol.addWidget(box)
-        # Video + Audio only — shown before Quality (see _show_audio_picker).
+        # Video + Audio only — shown before Resolution (see _show_audio_picker).
         self.audio_menu = Dropdown([downloader.BEST_CODEC], width=132)
         self.audio_box, self.audio_label = labeled("Audio Codec:", self.audio_menu)
         self.audio_box.hide()
         ol.addWidget(self.audio_box)
         self.quality_menu = Dropdown([downloader.BEST_QUALITY], width=120)
-        box, self.quality_label = labeled("Quality:", self.quality_menu)
+        box, self.quality_label = labeled("Resolution:", self.quality_menu)
         ol.addWidget(box)
         self.format_menu = Dropdown([".mp4"], width=96)
         box, self.format_label = labeled("Video Format:", self.format_menu)
@@ -210,7 +233,7 @@ class DownloaderTab(QWidget):
         self.save_entry = QLineEdit()
         self.save_entry.setPlaceholderText("Save file as...")
         self.save_entry.setFixedHeight(28)
-        set_line_text(self.save_entry, app.default_save_location)
+        set_line_text(self.save_entry, app.downloader_default_location())
         sl.addWidget(self.save_entry, 1)
         self.browse_save_btn = button("Browse", width=80)
         self.browse_save_btn.clicked.connect(self.select_save_location)
@@ -309,10 +332,10 @@ class DownloaderTab(QWidget):
 
     def _sync_controls(self, *_):
         """Nothing fetched → everything disabled. Otherwise Mode → Video Codec
-        → Quality → (Video + Audio: Audio Codec) → Format, or for Audio Only
-        Format → Quality. The resolved plan drives the size estimate and the
-        save path's extension. A snap caused by the user toasts; one caused
-        by a Mode switch doesn't."""
+        → Resolution → (Video + Audio: Audio Codec) → Format, or for Audio
+        Only Format → Resolution. The resolved plan drives the size estimate
+        and the save path's extension. A snap caused by the user toasts; one
+        caused by a Mode switch doesn't."""
         has_info = bool(self._fmts)
         for widget, label in ((self.mode_switch, self.mode_label), (self.codec_menu, self.codec_label),
                               (self.quality_menu, self.quality_label), (self.format_menu, self.format_label),
@@ -338,6 +361,9 @@ class DownloaderTab(QWidget):
         codecs = downloader.codecs_for(fmts, mode)
         self._retarget(self.codec_menu, codecs, downloader.BEST_CODEC, "Video Codec" if announce else None)
         codec = self.codec_menu.value()
+        codec_table = AUDIO_CODEC_TIPS if mode == downloader.MODE_AUDIO else VIDEO_CODEC_TIPS
+        codec_best_tip = BEST_AUDIO_CODEC_TIP if mode == downloader.MODE_AUDIO else BEST_VIDEO_CODEC_TIP
+        tip(self.codec_menu, _codec_tip(codec, codec_table, codec_best_tip))
 
         audio_codec = downloader.BEST_CODEC
         if mode == downloader.MODE_AUDIO:
@@ -346,23 +372,26 @@ class DownloaderTab(QWidget):
                            "Audio Format" if announce else None)
             qualities = downloader.qualities_for(fmts, mode, codec, self.format_menu.value())
             self._retarget(self.quality_menu, qualities, qualities[0] if qualities else None,
-                           "Quality" if announce else None)
+                           "Resolution" if announce else None)
         else:
             qualities = downloader.qualities_for(fmts, mode, codec)
             self._retarget(self.quality_menu, qualities, downloader.BEST_QUALITY,
-                           "Quality" if announce else None)
+                           "Resolution" if announce else None)
             quality = self.quality_menu.value()
             if mode == downloader.MODE_AV:
                 audio_codecs = downloader.audio_codecs_for(fmts, mode, codec, quality)
                 self._retarget(self.audio_menu, audio_codecs, downloader.BEST_CODEC,
                                "Audio Codec" if announce else None)
                 set_enabled(self.audio_menu, self.audio_label, bool(audio_codecs))
+                tip(self.audio_menu, _codec_tip(self.audio_menu.value(), AUDIO_CODEC_TIPS, BEST_AUDIO_CODEC_TIP))
                 audio_codec = self._menu_value(self.audio_menu) or downloader.BEST_CODEC
             allowed = downloader.formats_for(fmts, mode, codec, quality, audio_codec)
             self._retarget(self.format_menu, allowed, downloader.default_format(mode, allowed),
                            "Video Format" if announce else None)
         set_enabled(self.quality_menu, self.quality_label, bool(qualities))
         set_enabled(self.format_menu, self.format_label, bool(allowed))
+        format_table = AUDIO_FORMAT_TIPS if mode == downloader.MODE_AUDIO else CONTAINER_TIPS
+        tip(self.format_menu, format_table.get(self.format_menu.value(), ""))
 
         self._plan = downloader.resolve(
             fmts, mode, codec, self._menu_value(self.quality_menu), self._menu_value(self.format_menu),
@@ -404,7 +433,17 @@ class DownloaderTab(QWidget):
         current = self.save_entry.text().strip().replace("\\", "/")
         _root, ext = os.path.splitext(current)
         directory = os.path.dirname(current) if ext.lower() in _KNOWN_EXTS else current
-        return directory or self.app.default_save_location or ""
+        return directory or self.app.downloader_default_location() or ""
+
+    def has_fetched(self):
+        return bool(self._info)
+
+    def refresh_default_location(self):
+        """Settings changed the effective default folder — adopt it while
+        nothing's been fetched yet; afterward only Browse or the fetched
+        title's own autofill (`_autofill_output_path`) should touch this."""
+        if not self._info:
+            set_line_text(self.save_entry, self.app.downloader_default_location())
 
     def _autofill_output_path(self):
         if not self._info:

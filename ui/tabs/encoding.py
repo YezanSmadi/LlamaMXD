@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QLabel, QSlider, QVBoxLayout, QWidget
 
 from core import formats
 from core.utilities import av1_preset_range, supports_libplacebo
-from ui.tabs.media_tab import MediaTab, hms, hrow
+from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow
 from ui.widgets.controls import (
     NO_OPTION,
     CheckBox,
@@ -25,6 +25,13 @@ from ui.widgets.controls import (
     set_enabled,
 )
 from ui.widgets.dialogs import choose_audio_streams, show_message
+from ui.widgets.tooltip import tip
+from ui.tips import (
+    AUDIO_CODEC_TIPS,
+    SELECT_AUDIO_CODEC_TIP,
+    SELECT_VIDEO_CODEC_TIP,
+    VIDEO_CODEC_TIPS,
+)
 
 # The quality slider's range when the encoder has no spec of its own
 # (`Select`) — it stays usable rather than freezing on a stale range.
@@ -32,6 +39,21 @@ _FALLBACK_QUALITY = {
     "kind": "crf", "label": "Quality (CRF)", "lo": 0, "hi": 51,
     "default": 22, "low": "Low", "high": "Placebo",
 }
+
+_SPEED_TIP = ("Trades encode speed for compression efficiency — slower settles on a "
+              "smaller file at the same quality.")
+_PROFILE_LEVEL_TIP = ("Constrains playback compatibility (older devices/decoders may "
+                       "only support certain profiles/levels).")
+_HDR_TIP = ("Tone-maps HDR (PQ/BT.2020) down to standard SDR (BT.709) using BT.2390 — "
+            "the only curve this app uses, for accurate color.")
+_PASSTHRU_TIP = ("Copies this stream byte-for-byte instead of re-encoding it — Bitrate/"
+                  "Channels/Sample Rate below just show the source's real values.")
+_CHOOSE_STREAMS_TIP = "Pick which of this file's audio tracks are included in the output."
+_CRF_TIP = "Lower = higher quality, larger file. This encoder doesn't target a bitrate — it targets a visual quality level."
+_QSCALE_TIP = "Lower = higher quality, larger file. This is a fixed qscale, not a CRF — this codec has no bitrate-target rate control."
+_RESOLUTION_TIP = ("Downscales the video, keeping its aspect ratio — the width is computed "
+                    "from the source's own ratio, never stretched or cropped. Never upscales: "
+                    "only rungs at or below the source's own height are offered.")
 
 
 class EncodingTab(MediaTab):
@@ -65,25 +87,46 @@ class EncodingTab(MediaTab):
     # ------------------------------------------------------------------ #
     def build_video(self):
         """Encoder / Profile / Level / Encoder Preset with the quality slider
-        spanning the row beneath; HDR→SDR pinned top-right, Strip Video
-        bottom-right."""
+        spanning the row beneath; HDR→SDR pinned top-right, Resolution beside
+        Strip Video on the bottom-right row."""
         page, left, right = self.stream_page()
         left.setSpacing(0)
         row, rl = hrow(spacing=8)
-        self.encoder_menu = Dropdown([formats.SELECT], width=80)
+        # Each dropdown is sized to the longest entry it could ever show,
+        # across every encoder — not just whatever's legal right now — so
+        # picking a longer value never clips or resizes the box.
+        encoder_universe = [formats.SELECT] + list(formats.VIDEO_ENCODERS)
+        profile_universe = [NO_OPTION] + [
+            p for enc in formats.VIDEO_ENCODERS for p in formats.profiles_for(enc)
+        ]
+        level_universe = [NO_OPTION] + [
+            lvl for enc in formats.VIDEO_ENCODERS for lvl in formats.levels_for(enc)
+        ]
+        speed_universe = [NO_OPTION] + [
+            s for enc in formats.VIDEO_ENCODERS for s in formats.speed_values_for(enc)
+        ]
+        self.encoder_menu = Dropdown([formats.SELECT], width=Dropdown.width_for(encoder_universe))
         self.encoder_menu.picked.connect(self._on_encoder_change)
-        self.profile_menu = Dropdown([NO_OPTION], width=96)
-        self.level_menu = Dropdown([NO_OPTION], width=80)
-        self.speed_menu = Dropdown([NO_OPTION], width=90)
+        # MPEG-4's "Advanced Simple" is far longer than every other codec's
+        # widest profile ("Professional") — sizing for it would make every
+        # encoder's Profile box noticeably wider than Encoder/Level/Encoder
+        # Preset just to cover one rare legacy value, which elides instead.
+        profile_width = Dropdown.width_for([p for p in profile_universe if p != "Advanced Simple"])
+        self.profile_menu = Dropdown([NO_OPTION], width=profile_width)
+        self.level_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(level_universe))
+        self.speed_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(speed_universe))
         for menu in (self.profile_menu, self.level_menu, self.speed_menu):
             menu.picked.connect(self._on_control_change)
         box, self.encoder_label = labeled("Encoder:", self.encoder_menu)
         rl.addWidget(box)
+        tip(self.profile_menu, _PROFILE_LEVEL_TIP)
         box, self.profile_label = labeled("Profile:", self.profile_menu)
         rl.addWidget(box)
+        tip(self.level_menu, _PROFILE_LEVEL_TIP)
         box, self.level_label = labeled("Level:", self.level_menu)
         rl.addWidget(box)
         # Internally still "speed" — only the on-screen label changed.
+        tip(self.speed_menu, _SPEED_TIP)
         box, self.speed_label = labeled("Encoder Preset:", self.speed_menu)
         rl.addWidget(box)
         left.addWidget(row)
@@ -119,22 +162,50 @@ class EncodingTab(MediaTab):
         self.hdr_label.clicked.connect(self._toggle_hdr)
         self.hdr_switch = Switch()
         self.hdr_switch.clicked.connect(self._on_hdr_toggle)
+        tip(self.hdr_label, _HDR_TIP)
+        tip(self.hdr_switch, _HDR_TIP)
         hl.addWidget(self.hdr_label)
         hl.addWidget(self.hdr_switch)
         self.strip_video_check = CheckBox("Strip Video", color_key="stop")
         self.strip_video_check.clicked.connect(self._on_control_change)
+        tip(self.strip_video_check, STRIP_TIP)
+        # Resolution sits beside Strip Video on the bottom row — level with
+        # the quality slider in the left column, between it and Strip Video
+        # rather than in the slider row itself, where it would eat into the
+        # row's width and stop "Placebo" lining up with Encoder Preset's own
+        # right edge above it.
+        self.resolution_menu = Dropdown([formats.SOURCE_RESOLUTION],
+                                        width=Dropdown.width_for(formats.RESOLUTIONS))
+        self.resolution_menu.picked.connect(self._on_control_change)
+        tip(self.resolution_menu, _RESOLUTION_TIP)
+        # A compact caption (matching Low/Placebo's own style), not the
+        # standard `labeled()` box's 26px-min-height "field" caption — that
+        # extra height alone would push this column's fixed content taller
+        # than Overview's page, which is what sets Encoding's shared
+        # preview/DropBox height (see this module's own docstring).
+        self.resolution_label = QLabel("Resolution:")
+        self.resolution_label.setProperty("role", "muted")
+        self.resolution_label.setStyleSheet("font-size: 12px;")
+        res_box = QWidget()
+        res_box_layout = QVBoxLayout(res_box)
+        res_box_layout.setContentsMargins(0, 0, 0, 0)
+        res_box_layout.setSpacing(0)
+        res_box_layout.addWidget(self.resolution_label, 0, Qt.AlignRight)
+        res_box_layout.addWidget(self.resolution_menu, 0, Qt.AlignRight)
+        bottom_row, br = hrow(spacing=10)
+        br.addWidget(res_box)
+        br.addWidget(self.strip_video_check, 0, Qt.AlignBottom)
         right.addSpacing(26)   # aligns HDR with the dropdown row's top
         right.addWidget(hdr_row, 0, Qt.AlignRight)
         right.addStretch(1)
-        right.addWidget(self.strip_video_check, 0, Qt.AlignRight)
-        right.addSpacing(4)
+        right.addWidget(bottom_row, 0, Qt.AlignRight)
         return page
 
     def build_audio(self):
-        """Audio Track + Choose Stream(s); then Codec / Passthru / Bitrate /
-        Channels / Sample Rate for whichever stream Track shows; Strip Audio
-        alone on the right. Each dropdown is sized to its longest possible
-        entry."""
+        """Audio Track + Choose Stream(s) + Passthru on one row; then Codec /
+        Bitrate / Channels / Sample Rate for whichever stream Track shows;
+        Strip Audio alone on the right. Each dropdown is sized to its longest
+        possible entry."""
         page, left, right = self.stream_page()
         row1, r1 = hrow(spacing=8)
         track_universe = [f"Track 9 ({c})" for c in
@@ -145,7 +216,23 @@ class EncodingTab(MediaTab):
         r1.addWidget(box)
         self.choose_streams_btn = button("Choose Stream(s)", width=130)
         self.choose_streams_btn.clicked.connect(self._open_stream_picker)
+        tip(self.choose_streams_btn, _CHOOSE_STREAMS_TIP)
         r1.addWidget(self.choose_streams_btn, 0, Qt.AlignBottom)
+
+        # Passthru: its own caption above the checkbox, both centred, next
+        # to the stream picker it most directly relates to. On by default —
+        # a probed stream defaults to a plain copy, not a re-encode.
+        passthru = QWidget()
+        pl = QVBoxLayout(passthru)
+        pl.setContentsMargins(0, 0, 0, 2)
+        pl.setSpacing(1)
+        self.passthru_label = field_label("Passthru")
+        self.passthru_check = CheckBox(checked=True)
+        tip(self.passthru_label, _PASSTHRU_TIP)
+        tip(self.passthru_check, _PASSTHRU_TIP)
+        pl.addWidget(self.passthru_label, 0, Qt.AlignHCenter)
+        pl.addWidget(self.passthru_check, 0, Qt.AlignHCenter)
+        r1.addWidget(passthru, 0, Qt.AlignBottom)
         left.addWidget(row1)
 
         row2, r2 = hrow(spacing=10)
@@ -153,17 +240,6 @@ class EncodingTab(MediaTab):
         self.audio_codec_menu = Dropdown([formats.SELECT], width=Dropdown.width_for(codec_universe))
         box, self.audio_codec_label = labeled("Audio Codec:", self.audio_codec_menu)
         r2.addWidget(box)
-
-        # Passthru: its own caption above the checkbox, both centred.
-        passthru = QWidget()
-        pl = QVBoxLayout(passthru)
-        pl.setContentsMargins(0, 0, 0, 2)
-        pl.setSpacing(1)
-        self.passthru_label = field_label("Passthru")
-        self.passthru_check = CheckBox()
-        pl.addWidget(self.passthru_label, 0, Qt.AlignHCenter)
-        pl.addWidget(self.passthru_check, 0, Qt.AlignHCenter)
-        r2.addWidget(passthru)
 
         bitrate_universe = [formats.SELECT] + formats.AUDIO_BITRATES
         self.audio_bitrate_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(bitrate_universe))
@@ -188,6 +264,7 @@ class EncodingTab(MediaTab):
 
         self.strip_audio_check = CheckBox("Strip Audio", color_key="stop")
         self.strip_audio_check.clicked.connect(self._on_control_change)
+        tip(self.strip_audio_check, STRIP_TIP)
         right.addStretch(1)
         right.addWidget(self.strip_audio_check, 0, Qt.AlignRight)
         right.addSpacing(4)
@@ -219,6 +296,19 @@ class EncodingTab(MediaTab):
         self._apply_preview_frames()
         if self.hdr_switch.isChecked() and self.app.hdr_frames_path != self._preview_path:
             self.app.start_hdr_render(self._preview_path)
+
+    def reset_hdr_preview(self):
+        """A new file is coming in (`MainWindow.update_global_file`): HDR→SDR
+        starts back off, so the app never renders a tone-mapped preview
+        nobody's asked for on the file replacing this one — the app
+        separately interrupts any render already in flight for the outgoing
+        file. Skips the raw/tone-mapped frame swap `_on_hdr_toggle` would do:
+        the carousel's about to be cleared for the new file anyway, so
+        re-showing the outgoing file's raw frames here would just flash."""
+        if not self.hdr_switch.isChecked():
+            return
+        self.hdr_switch.setChecked(False)
+        self._sync_controls()
 
     def on_thumbnails(self, frames):
         """Wraps the app's raw frame broadcast so HDR→SDR can show a
@@ -255,13 +345,15 @@ class EncodingTab(MediaTab):
         """**The only place derived UI state is decided.** Idempotent.
           1. stream presence (strip / absent) — red tabs, locked strips
           2. container → legal video/audio codec lists
-          3. video codec → profile / level / speed / quality kind and range
+          3. video codec → profile / level / speed / quality kind and range;
+             source height → the Resolution ladder (never offers an upscale)
           4. audio codec → whether a bitrate is ours to set (Passthru mirrors
              the source instead)
           5. enabled state for everything a removed, absent or unresolved
              stream makes meaningless (HDR→SDR forced off when unavailable)
           6. the Overview rundown"""
         container = self.format_menu.value()
+        self._update_format_tip()
         stripping_video = self.strip_video_check.isChecked()
         stripping_audio = self.strip_audio_check.isChecked()
         info = self.app.media_info
@@ -278,11 +370,13 @@ class EncodingTab(MediaTab):
         # 2. A probe-only passthru codec (DTS / TrueHD) is never snapped away.
         self._retarget(self.encoder_menu, formats.video_codecs_for(container), "Encoder")
         encoder = self.encoder_menu.value()
+        tip(self.encoder_menu, VIDEO_CODEC_TIPS.get(encoder, SELECT_VIDEO_CODEC_TIP))
         audio_codec = self.audio_codec_menu.value()
         passthru_only = formats.is_passthru_only(audio_codec)
         if not passthru_only:
             audio_codec = self._retarget(
                 self.audio_codec_menu, formats.audio_codecs_for(container), "Audio codec")
+        tip(self.audio_codec_menu, AUDIO_CODEC_TIPS.get(audio_codec, SELECT_AUDIO_CODEC_TIP))
 
         # 3.
         profiles = formats.profiles_for(encoder)
@@ -293,6 +387,7 @@ class EncodingTab(MediaTab):
         self._apply_speed(encoder)
         self._quality_spec = formats.quality_for(encoder)
         self._apply_quality()
+        self._retarget_resolution(info.get("height"))
 
         # 3b. The Audio Track list mirrors the included streams.
         track_values = self._audio_track_values()
@@ -321,6 +416,7 @@ class EncodingTab(MediaTab):
         audio_live = not stripping_audio and not audio_absent
 
         set_enabled(self.encoder_menu, self.encoder_label, video_live)
+        set_enabled(self.resolution_menu, self.resolution_label, video_live)
         set_enabled(self.profile_menu, self.profile_label, video_live and bool(profiles))
         set_enabled(self.level_menu, self.level_label, video_live and bool(levels))
         set_enabled(self.speed_menu, self.speed_label, video_live and bool(speeds))
@@ -366,6 +462,20 @@ class EncodingTab(MediaTab):
             )
         return after
 
+    def _retarget_resolution(self, source_height):
+        """Caps the Resolution list to the current file's own height —
+        separate from `_retarget` since the reason a pick stops fitting is
+        the source's height, not the container, so the toast needs its own
+        wording."""
+        before = self.resolution_menu.value()
+        self.resolution_menu.set_values(formats.resolutions_for(source_height))
+        after = self.resolution_menu.value()
+        if self._ready and before != after:
+            self.app.notify(
+                f"Resolution reset to {after} — this file is only {source_height}p tall.",
+                go_to_queue=False,
+            )
+
     def _speed_values(self, encoder):
         """AV1's preset range comes from the installed ffmpeg."""
         av1_range = av1_preset_range() if encoder == "AV1" else None
@@ -397,6 +507,7 @@ class EncodingTab(MediaTab):
         self.crf_slider.blockSignals(False)
         self.crf_low_label.setText(spec["low"])
         self.crf_high_label.setText(spec["high"])
+        tip(self.crf_slider, _CRF_TIP if spec["kind"] == "crf" else _QSCALE_TIP)
         self._update_quality_label()
 
     def _update_quality_label(self):
@@ -498,9 +609,11 @@ class EncodingTab(MediaTab):
     def _auto_select_audio_streams(self, info):
         """(Re)initialise per-stream audio once per file: every stream
         defaults to its own probed codec/params where this app offers them,
-        DTS / TrueHD are named and forced to Passthru, and only the first
-        stream is included. Guarded per path so a re-delivery of the same
-        probe never discards the user's edits."""
+        DTS / TrueHD are named and forced to Passthru, and — Passthru
+        defaulting on — every stream starts as a plain copy until the user
+        picks a re-encode. Only the first stream is included. Guarded per
+        path so a re-delivery of the same probe never discards the user's
+        edits."""
         if self.app.current_file_path == self._audio_streams_source:
             return
         self._audio_streams_source = self.app.current_file_path
@@ -516,7 +629,7 @@ class EncodingTab(MediaTab):
                 "bitrate": stream.get("bitrate_display") or formats.SELECT,
                 "channels": stream.get("channels_display") or formats.SELECT,
                 "sample_rate": stream.get("sample_rate_display") or formats.SELECT,
-                "passthru": passthru_only,
+                "passthru": True,
             }
         self._included_audio_indices = {0} if streams else set()
         self._active_audio_index = 0 if streams else None
@@ -527,8 +640,11 @@ class EncodingTab(MediaTab):
     # ------------------------------------------------------------------ #
     def _refresh_summary(self):
         info = self.app.media_info
+        no_file = not self.app.current_file_path
 
-        if self.strip_video_check.isChecked():
+        if no_file:
+            video = ("— no streams selected —", "stop")
+        elif self.strip_video_check.isChecked():
             video = ("— removed —", "stop")
         elif info.get("has_video") is False:
             video = ("— no video stream —", "stop")
@@ -544,6 +660,8 @@ class EncodingTab(MediaTab):
             if self._quality_spec:
                 kind = "CRF" if self._quality_spec["kind"] == "crf" else "Q"
                 bits.append(f"{kind}{self.crf_slider.value()}")
+            if self.resolution_menu.value() != formats.SOURCE_RESOLUTION:
+                bits.append(self.resolution_menu.value())
             if self.hdr_switch.isChecked():
                 bits.append("SDR")
             video = (" · ".join(bits), None)
@@ -566,7 +684,7 @@ class EncodingTab(MediaTab):
                 for key in ("bitrate", "channels", "sample_rate"):
                     value = primary.get(key, formats.SELECT)
                     if value not in (formats.SELECT, NO_OPTION, ""):
-                        bits.append(value.replace(" Hz", ""))
+                        bits.append(value)
                 extra = len(self._included_audio_indices) - 1
                 if extra:
                     bits.append(f"+{extra} more")
@@ -574,7 +692,9 @@ class EncodingTab(MediaTab):
 
         start = self.start_time_spinner.seconds()
         duration = self.duration_time_spinner.seconds()
-        if not start and not duration:
+        if no_file:
+            length = ("— no file imported —", "stop")
+        elif not start and not duration:
             length = ("Whole File", None)
         elif not duration:
             length = (f"{hms(start)} → end", None)
@@ -627,6 +747,12 @@ class EncodingTab(MediaTab):
             "level": self._menu_value(self.level_menu),
             "speed": self._menu_value(self.speed_menu),
             "quality": self.crf_slider.value(),
+            "resolution": self.resolution_menu.value(),
+            # A fact about the input at queue time, not a user choice — same
+            # convention as mastering_max_nits/max_cll below — so a job
+            # queued now still scales against the source it was actually
+            # queued against even if the user swaps files before it runs.
+            "source_height": self.app.media_info.get("height"),
             "gpu_enabled": bool(self.app.gpu_enabled),
             "hdr_to_sdr": self.hdr_switch.isChecked(),
             # Facts about the input at queue time — together they decide the
@@ -636,11 +762,21 @@ class EncodingTab(MediaTab):
             "strip_video": self.strip_video_check.isChecked(),
             "strip_audio": self.strip_audio_check.isChecked(),
             "audio_streams": [
-                dict(self._audio_stream_settings.get(i, {}), index=i)
+                dict(self._audio_stream_settings.get(i, {}), index=i,
+                     language=self._stream_language(i))
                 for i in sorted(self._included_audio_indices)
             ],
         })
         return settings
+
+    def _stream_language(self, index):
+        """The probed language tag (`_describe_audio_stream`'s `"language"`,
+        an ffprobe/Matroska code like `"eng"`) for source audio stream
+        `index`, or None — snapshotted alongside each gathered audio stream
+        so a re-encoded track's stale per-track statistics can be wiped
+        (`build_encode_command`) without losing the one tag that's still
+        genuinely useful for player track selection."""
+        return next((s.get("language") for s in self._audio_streams if s.get("index") == index), None)
 
     def _apply_settings(self, settings):
         """Write a settings dict in dependency order — container, codecs,
@@ -666,6 +802,8 @@ class EncodingTab(MediaTab):
                               (self.speed_menu, "speed")):
                 if settings.get(key) is not None and settings[key] in menu.values():
                     menu.set(settings[key])
+            if settings.get("resolution") and settings["resolution"] in self.resolution_menu.values():
+                self.resolution_menu.set(settings["resolution"])
             if "audio_streams" in settings:
                 included, stream_settings = set(), {}
                 for entry in settings["audio_streams"] or []:

@@ -21,12 +21,27 @@ from PySide6.QtWidgets import (
 )
 
 from core import formats, presets
-from ui.widgets.carousel import ThumbnailCarousel
-from ui.widgets.controls import CheckBox, Dropdown, MarqueeLabel, TimeSpinner, button, labeled
+from ui.widgets.carousel import ThumbnailCarousel, _ExpandedPreviewOverlay
+from ui.widgets.controls import (
+    CheckBox,
+    Dropdown,
+    MarqueeLabel,
+    TimeSpinner,
+    button,
+    button_width_for,
+    labeled,
+)
 from ui.widgets.dialogs import ask_text, ask_yes_no, confirm_output_path, show_message
 from ui.widgets.panels import MEDIA_FILTER, DropBox, SubTabBar, SummaryPanel
+from ui.widgets.tooltip import tip
+from ui.tips import CONTAINER_TIPS
 
 SUBTABS = ("Overview", "Video", "Audio")
+
+AV_SYNC_TIP = ("Holds a constant frame rate and keeps timestamps aligned — turn off only "
+               "if you need the source's exact original timing.")
+STRIP_TIP = "Removes this stream entirely from the output — the other panel's stream is unaffected."
+PRESET_TIP = "Presets remember the container and codec/quality choices — never the trim, file paths, or track picks."
 
 
 def hrow(spacing=0, align_bottom=True):
@@ -102,6 +117,8 @@ class MediaTab(QWidget):
         self.carousel.populated.connect(self._reveal_preview)
         self.carousel.indexChanged.connect(app.sync_preview_index)
         self.carousel.fileDropped.connect(app.update_global_file)
+        self.carousel.expandToggled.connect(self._on_expand_toggled)
+        self._expand_overlay = None
         self._preview_stack.addWidget(self.drop_box)
         self._preview_stack.addWidget(self.carousel)
         root.addWidget(preview, 1)
@@ -163,6 +180,7 @@ class MediaTab(QWidget):
         row1, r1 = hrow(spacing=8)
         self.format_menu = Dropdown(formats.containers(), width=92)
         self.format_menu.picked.connect(self._on_format_change)
+        self._update_format_tip()
         box, self.format_label = labeled("Output Format:", self.format_menu)
         r1.addWidget(box)
         r1.addSpacing(6)
@@ -171,19 +189,24 @@ class MediaTab(QWidget):
         self.preset_menu.picked.connect(self._on_preset_selected)
         box, self.preset_label = labeled("Preset:", self.preset_menu)
         r1.addWidget(box)
-        self.preset_save_btn = button("Save", width=54)
+        preset_btn_width = button_width_for(["Save", "Delete"])
+        self.preset_save_btn = button("Save", width=preset_btn_width)
         self.preset_save_btn.clicked.connect(self._on_preset_save)
-        self.preset_delete_btn = button("Delete", width=54)
+        self.preset_delete_btn = button("Delete", width=preset_btn_width)
         self.preset_delete_btn.clicked.connect(self._on_preset_delete)
+        tip(self.preset_save_btn, PRESET_TIP)
+        tip(self.preset_delete_btn, PRESET_TIP)
         r1.addWidget(self.preset_save_btn, 0, Qt.AlignBottom)
         r1.addWidget(self.preset_delete_btn, 0, Qt.AlignBottom)
         left.addWidget(row1)
 
         # There is no "Retain Video Length" checkbox: Duration 00:00:00
-        # already means "to the end of the file".
+        # already means "to the end of the file" — greyed out like a
+        # placeholder while it's still 0, for exactly that reason, and back
+        # to normal the moment it's incremented off it.
         row2, r2 = hrow(spacing=14)
         self.start_time_spinner = TimeSpinner()
-        self.duration_time_spinner = TimeSpinner()
+        self.duration_time_spinner = TimeSpinner(mute_when_zero=True)
         for spinner in (self.start_time_spinner, self.duration_time_spinner):
             spinner.valueChanged.connect(self._on_trim_change)
         box, self.start_label = labeled("Start Time:", self.start_time_spinner)
@@ -193,6 +216,7 @@ class MediaTab(QWidget):
         r2.addSpacing(2)
         self.av_sync_check = CheckBox("A/V Sync", checked=True)
         self.av_sync_check.clicked.connect(self._on_control_change)
+        tip(self.av_sync_check, AV_SYNC_TIP)
         r2.addWidget(self.av_sync_check, 0, Qt.AlignBottom)
         left.addWidget(row2)
         outer.addLayout(left)
@@ -234,9 +258,16 @@ class MediaTab(QWidget):
         if self._ready:
             self._refresh_summary()
 
+    def _update_format_tip(self):
+        """The container dropdown's hover tip — called on every value change,
+        wherever it comes from (a user pick, `_apply_settings`, or a
+        subclass's `_sync_controls` auto-adopting the source's own)."""
+        tip(self.format_menu, CONTAINER_TIPS.get(self.format_menu.value(), ""))
+
     def _on_format_change(self, _value=None):
         """The user picked a container: stop auto-adopting the source's,
         swap the output path's extension, and re-sync."""
+        self._update_format_tip()
         self._auto_format = None
         current = self.save_entry.text().strip()
         stem, extension = os.path.splitext(current)
@@ -259,8 +290,44 @@ class MediaTab(QWidget):
         self.file_label.setText(f"Selected File:  {path}")
         self.drop_box.collapse()
 
+    def clear_selected_file(self):
+        """Undo `set_selected_file` and the save-path autofill it triggers —
+        called when a just-picked file turns out to be unreadable
+        (`app._reject_file`), so the tab looks exactly as it did before that
+        file was ever picked rather than stranded mid-import."""
+        self.file_label.setText("")
+        self.drop_box.reset()
+        self.carousel.force_collapse()
+        self.carousel.clear_preview()
+        self._preview_stack.setCurrentWidget(self.drop_box)
+        set_line_text(self.save_entry, self.app.default_save_location)
+        self._auto_output = self.app.default_save_location or ""
+
     def _reveal_preview(self):
         self._preview_stack.setCurrentWidget(self.carousel)
+
+    def _on_expand_toggled(self, expanded):
+        """The carousel's own expand/shrink icon: reparent the same carousel
+        instance into (or back out of) a dimming overlay filling the main
+        window. Every one of the carousel's own behaviors — chevrons, dots,
+        badges, drag/drop, the icon itself, arrow-key stepping — keeps
+        working unchanged since nothing here is a copy of it, just a
+        different temporary parent."""
+        if expanded:
+            self._preview_stack.removeWidget(self.carousel)
+            if self._expand_overlay is None:
+                self._expand_overlay = _ExpandedPreviewOverlay(self.app)
+            self._expand_overlay.show_with(self.carousel)
+        else:
+            self._expand_overlay.release()
+            self._preview_stack.insertWidget(1, self.carousel)
+            self._preview_stack.setCurrentWidget(self.carousel)
+            # Same reparent-hides-the-widget gotcha as show_with() above —
+            # insertWidget() reparents the carousel back here, which hides
+            # it regardless of the stack (and this tab) already being
+            # visible. Without this it stays invisible forever after,
+            # leaving the preview area blank no matter what's imported next.
+            self.carousel.show()
 
     def on_thumbnails(self, frames):
         """The app's frame broadcast (QImages)."""

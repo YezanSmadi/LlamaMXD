@@ -339,6 +339,22 @@ def _probe_hdr_static_metadata(path):
     return result
 
 
+def _describe_video_stream(index, stream):
+    """One entry of `probe_media`'s `video_streams` list -- the video-side
+    counterpart of `_describe_audio_stream`, for Muxing's track box and its
+    "Add Stream" picker (see CLAUDE.md's Muxing/Video panel). `index` is the
+    stream's position among video streams only, matching `-map 0:v:<index>`."""
+    name = stream.get("codec_name")
+    width, height = stream.get("width"), stream.get("height")
+    return {
+        "index": index,
+        "codec": formats.FFPROBE_VIDEO.get(name),
+        "resolution_display": f"{width}x{height}" if width and height else None,
+        "profile": _normalize_video_profile(name, stream.get("profile")),
+        "language": (stream.get("tags") or {}).get("language"),
+    }
+
+
 def _describe_audio_stream(index, stream):
     """One entry of `probe_media`'s `audio_streams` list: the raw values a
     per-stream settings UI needs (a display codec/channels/rate/bitrate,
@@ -387,7 +403,8 @@ def probe_media(path):
       "width": 1920, "height": 1080, "duration": 83.4, "file_size": 12345,
       "audio_channels": "Stereo", "audio_sample_rate": "48000 Hz",
       "audio_bitrate": "192k", "has_video": True, "has_audio": True,
-      "audio_streams": [{...}, ...], "mastering_max_nits": None,
+      "video_streams": [{...}, ...], "audio_streams": [{...}, ...],
+      "mastering_max_nits": None,
       "mastering_min_nits": None, "max_cll": None, "max_fall": None}`.
 
     The last four are only ever populated for HDR content (see
@@ -421,12 +438,14 @@ def probe_media(path):
     `_HDR_TRANSFERS`) — never a guess.
 
     `video`/`audio`/`video_profile`/etc. describe only the *first* stream of
-    each kind (this app models exactly one video and one audio stream for
-    most purposes). `audio_streams` is the exception: every audio stream,
-    in order, each described by `_describe_audio_stream` — what the Encoding
-    tab's multi-track picker offers, and what `channels_display_for` /
-    `sample_rate_display_for` / `bitrate_display_for` can't resolve to one of
-    this app's own options is simply left as the raw ffprobe value instead of
+    each kind (most of the app models exactly one video and one audio
+    stream). `video_streams`/`audio_streams` are the exception: every stream
+    of that kind, in order, each described by `_describe_video_stream`/
+    `_describe_audio_stream` — what Muxing's track box (and its "Add Stream"
+    picker) and Encoding's multi-track audio picker offer, and what
+    `channels_display_for` / `sample_rate_display_for` / `bitrate_display_for`
+    can't resolve to one of this app's own options is simply left as the raw
+    ffprobe value instead of
     None, since a per-stream settings UI still wants *something* to show even
     for a channel layout or rate this app has no named option for.
 
@@ -443,7 +462,7 @@ def probe_media(path):
         "video_profile": None, "video_level": None, "hdr": None,
         "width": None, "height": None, "duration": None, "file_size": None,
         "audio_channels": None, "audio_sample_rate": None, "audio_bitrate": None,
-        "has_video": None, "has_audio": None, "audio_streams": [],
+        "has_video": None, "has_audio": None, "video_streams": [], "audio_streams": [],
         "mastering_max_nits": None, "mastering_min_nits": None,
         "max_cll": None, "max_fall": None,
     }
@@ -478,8 +497,14 @@ def probe_media(path):
     info["has_video"] = False
     info["has_audio"] = False
     info["file_size"] = file_size
+    # The extension as read off disk, not filtered to this app's own output
+    # containers -- an import-only format (.vob, .ts, .mxf, ...) still shows
+    # correctly in the info tooltip. Callers that auto-adopt an *output*
+    # container (MuxingTab/EncodingTab.on_media_info) separately re-check it
+    # against `formats.containers()`, so a source extension this app doesn't
+    # offer as an export target is never mistakenly auto-selected there.
     extension = os.path.splitext(path)[1].lower()
-    if extension in formats.containers():
+    if extension:
         info["container"] = extension
 
     duration = (payload.get("format") or {}).get("duration")
@@ -490,13 +515,17 @@ def probe_media(path):
             pass
 
     audio_index = 0
+    video_index = 0
     # First stream of each kind wins for the singular video/audio_* fields —
     # the app models exactly one video and one audio stream there — but
-    # audio_streams collects every one, for the multi-track picker.
+    # video_streams/audio_streams collect every one, for Muxing's track box
+    # and Encoding's multi-track audio picker.
     for stream in streams:
         kind, name = stream.get("codec_type"), stream.get("codec_name")
         if kind == "video":
             info["has_video"] = True
+            info["video_streams"].append(_describe_video_stream(video_index, stream))
+            video_index += 1
             if info["video"] is None:
                 info["video"] = formats.FFPROBE_VIDEO.get(name)
                 info["video_profile"] = _normalize_video_profile(name, stream.get("profile"))
@@ -739,7 +768,7 @@ def extract_video_thumbnail(video_path):
     return frames[0] if frames else None
 
 
-def extract_hdr_tonemapped_thumbnails(video_path, count=10):
+def extract_hdr_tonemapped_thumbnails(video_path, count=10, should_cancel=None):
     """Like `extract_video_thumbnails`, but each frame is decoded and
     tone-mapped by ffmpeg's own libplacebo BT.2390 chain
     (`libplacebo_tonemap_vf` — the exact filter `build_encode_command` uses
@@ -776,7 +805,15 @@ def extract_hdr_tonemapped_thumbnails(video_path, count=10):
     raising — this only ever replaces a preview, never blocks the app.
     Callers must check `supports_libplacebo()` themselves before treating an
     empty result as "no HDR to show" vs. "libplacebo isn't available".
-    Runs subprocesses, so keep this off the GUI thread."""
+    Runs subprocesses, so keep this off the GUI thread.
+
+    `should_cancel`, an optional zero-arg callable, is checked before every
+    frame's ffmpeg process starts — a new file replacing the one this render
+    was for (see `MainWindow._cancel_hdr_render`) makes the rest of the run
+    pointless. Cancelling returns `[]`, same as any other failure, rather
+    than a partial set: a caller that expects `count`-many index-aligned
+    frames (`extract_video_thumbnails`'s own set) would otherwise get a
+    shorter list quietly out of step with it."""
     if not supports_libplacebo():
         return []
     total, fps = _probe_frame_geometry(video_path)
@@ -795,6 +832,8 @@ def extract_hdr_tonemapped_thumbnails(video_path, count=10):
     frames = []
     with tempfile.TemporaryDirectory(prefix="llamamxd_hdr_") as tmp_dir:
         for i, frame_index in enumerate(targets):
+            if should_cancel is not None and should_cancel():
+                return []
             out_path = os.path.join(tmp_dir, f"frame_{i:03d}.png")
             try:
                 subprocess.run(
