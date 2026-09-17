@@ -26,7 +26,7 @@ container as far as the UI can tell -- only a probe of the actual input
 (`core.utilities.probe_media`) can say otherwise, which is what feeds
 `containers_for`.
 
-Pure data + lookups; no Tk in here.
+Pure data + lookups; no UI code in here.
 """
 
 # The one "nothing picked/resolved yet" placeholder, shared by every derived
@@ -256,6 +256,44 @@ def speed_default_for(encoder):
     """The encoder's own recommended default speed value, or None."""
     spec = _SPEED_SPECS.get(encoder)
     return spec["default"] if spec else None
+
+
+# Encoding / Video sub-tab's optional downscale. Unlike the Downloader's own
+# Quality dropdown (core/downloader.py), which just picks among streams
+# YouTube already encoded at each size, a local input has exactly one
+# resolution -- picking one of these actually re-encodes at a smaller size
+# via ffmpeg's scale filter (see ffmpeg_vars._scale_vf) rather than choosing
+# among files that already exist at that size. "Source" (no scaling at all)
+# is a genuine, permanent choice here, not a placeholder -- unlike SELECT, it
+# never auto-resolves to something else and never blocks a job.
+SOURCE_RESOLUTION = "Source"
+RESOLUTIONS = [SOURCE_RESOLUTION, "2160p", "1440p", "1080p", "720p", "480p", "360p"]
+
+# Target *height* in pixels for each rung -- ffmpeg's scale filter computes
+# the matching width itself from the source's own aspect ratio, which is what
+# actually keeps it intact rather than this module trying to precompute both
+# dimensions.
+_RESOLUTION_HEIGHTS = {
+    "2160p": 2160, "1440p": 1440, "1080p": 1080, "720p": 720, "480p": 480, "360p": 360,
+}
+
+
+def resolutions_for(source_height):
+    """Resolution ladder for a probed source height, capped so a pick can
+    never *upscale* -- 'Source' plus every standard rung at or below the
+    source's own height. An unknown height (no probe yet, or one that
+    couldn't read it) offers the full ladder rather than guessing a cap."""
+    if not source_height:
+        return list(RESOLUTIONS)
+    return [SOURCE_RESOLUTION] + [
+        r for r in RESOLUTIONS[1:] if _RESOLUTION_HEIGHTS[r] <= source_height
+    ]
+
+
+def resolution_height_for(resolution):
+    """Target pixel height for a Resolution pick, or None for 'Source' /
+    anything unrecognized -- the "no scaling" case."""
+    return _RESOLUTION_HEIGHTS.get(resolution)
 
 
 # Canonical bitrate ladder in kbps -- 1024/1536 rather than round 1000/1500

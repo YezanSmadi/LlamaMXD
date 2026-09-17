@@ -1,8 +1,48 @@
-import customtkinter as ctk
-from core.app import LlamaGUI
-from core.theme import load_settings
+"""LlamaMXD entry point.
+
+    python main.py
+"""
+import os
+import sys
+
+from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtWidgets import QApplication
+
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _ROOT)
+
+from ui import theme as T  # noqa: E402
+from ui.workers import init_workers  # noqa: E402
+
+
+def _load_fonts():
+    """Register the bundled Roboto (assets/fonts) — the app's typeface."""
+    folder = os.path.join(_ROOT, "assets", "fonts")
+    if os.path.isdir(folder):
+        for name in os.listdir(folder):
+            if name.lower().endswith((".ttf", ".otf")):
+                QFontDatabase.addApplicationFont(os.path.join(folder, name))
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName("LlamaMXD")
+    app.setStyle("Fusion")
+    _load_fonts()
+    font = QFont()
+    font.setFamilies(["Roboto", "Segoe UI"])
+    font.setPixelSize(13)
+    app.setFont(font)
+
+    init_workers()
+    T.init_theme()
+    app.setStyleSheet(T.stylesheet())
+
+    from ui.app import MainWindow
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
+
 
 if __name__ == "__main__":
-    ctk.set_appearance_mode(load_settings()["appearance_mode"])
-    app = LlamaGUI()
-    app.mainloop()
+    main()

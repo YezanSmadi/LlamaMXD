@@ -5,7 +5,10 @@ __pycache__/
 .venv/
 venv/
 settings.json
-_generated_themes/
 
 # Local preset recipes — a user preference file, not shared repo state
 presets.json
+
+# Bundled helper binaries (ffmpeg/ffprobe/ffplay, yt-dlp, deno) — copied in by
+# the setup wizard at build time; each is far over GitHub's 100MB file limit
+dependables/
