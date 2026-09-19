@@ -10,8 +10,40 @@ at the time — see MuxingTab._remove_streams) rather than a per-row control."""
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
-from ui.widgets.controls import CheckBox
+from ui.widgets.controls import CheckBox, MarqueeGroup, MarqueeLabel
 from ui.widgets.panels import BorderedFrame
+
+
+class _TrackRow(QWidget):
+    """One row: a text-less `CheckBox` plus a `MarqueeLabel` in place of the
+    checkbox's own caption, so a long label scrolls instead of clipping while
+    the box itself stays put. A click anywhere on the row (label included)
+    toggles the checkbox, matching what clicking a captioned `CheckBox`
+    did before."""
+
+    def __init__(self, label, checked, group):
+        super().__init__()
+        self.setCursor(Qt.PointingHandCursor)
+        rl = QHBoxLayout(self)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(7)
+        self.check = CheckBox("", checked=checked)
+        rl.addWidget(self.check)
+        # Same face as CheckBox's own caption (Arial 12 bold) so the swap
+        # is invisible for text that already fit.
+        self.label = MarqueeLabel(label, pixel_size=12, bold=True, family="Arial", group=group)
+        self.label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        rl.addWidget(self.label, 1)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self.isEnabled() and self.rect().contains(e.position().toPoint()):
+            self.check.click()
+
+    def enterEvent(self, e):
+        self.check.set_hover(True)
+
+    def leaveEvent(self, e):
+        self.check.set_hover(False)
 
 
 class TrackListBox(BorderedFrame):
@@ -45,6 +77,10 @@ class TrackListBox(BorderedFrame):
         self.setMinimumWidth(340)
         self.setFixedHeight(92)
         self._rows = {}  # id -> (row_widget, CheckBox)
+        # One shared loop for every row's label: a long label holds at its
+        # start once its own sweep ends, and they all restart together only
+        # after the longest has too — same as the Overview rundown.
+        self._marquee_group = MarqueeGroup()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(9, 7, 5, 7)
@@ -81,26 +117,22 @@ class TrackListBox(BorderedFrame):
             self._remove_row(rid)
         for i, item in enumerate(items):
             if item["id"] in self._rows:
-                _, check = self._rows[item["id"]]
-                check.setText(item["label"])
+                row, _check = self._rows[item["id"]]
+                row.label.setText(item["label"])
             else:
                 self._add_row(item, checked=(i == 0))
         self.empty_label.setVisible(not items)
         self.scroll.setVisible(bool(items))
 
     def _add_row(self, item, checked):
-        row = QWidget()
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(6)
-        check = CheckBox(item["label"], checked=checked)
-        check.clicked.connect(lambda _=False: self.changed.emit())
-        rl.addWidget(check, 1)
+        row = _TrackRow(item["label"], checked, self._marquee_group)
+        row.check.clicked.connect(lambda _=False: self.changed.emit())
         self._list_layout.insertWidget(self._list_layout.count() - 1, row)
-        self._rows[item["id"]] = (row, check)
+        self._rows[item["id"]] = (row, row.check)
 
     def _remove_row(self, rid):
         row, _check = self._rows.pop(rid)
+        self._marquee_group.unregister(row.label)
         row.setParent(None)
         row.deleteLater()
 
@@ -119,3 +151,8 @@ class TrackListBox(BorderedFrame):
 
     def item_count(self):
         return len(self._rows)
+
+    def item_ids(self):
+        """Every row's id, in the order rows were added — checked or not,
+        unlike `checked_ids()`. What "Select All"/"Deselect All" iterate."""
+        return list(self._rows)

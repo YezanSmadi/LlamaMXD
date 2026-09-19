@@ -3,8 +3,9 @@ the sidebar + active-tab pipe."""
 import os
 from datetime import datetime
 
-from PySide6.QtCore import QEasingCurve, QRectF, Qt, QVariantAnimation, Signal
-from PySide6.QtGui import QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPixmap
+import numpy as np
+from PySide6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QVariantAnimation, Signal
+from PySide6.QtGui import QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QFileDialog, QGridLayout, QLabel, QVBoxLayout, QWidget
 
@@ -13,7 +14,7 @@ from ui.widgets.controls import MarqueeGroup, MarqueeLabel, button, ui_font
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ASSETS = os.path.join(_REPO_ROOT, "assets")
-VERSION = "v0.5.0-beta.1"
+VERSION = "v0.5.0-beta.2"
 
 MEDIA_FILTER = (
     "Media files (*.mp4 *.mkv *.mov *.webm *.avi *.m4v *.mxf *.ts *.vob "
@@ -33,13 +34,16 @@ def local_paths(mime):
 # --------------------------------------------------------------------------- #
 class SubTabBar(QWidget):
     """Overview / Video / Audio. Active = `primary` at full height, inactive =
-    `secondary` at 80%, bottom-aligned like tabs on a shelf. Height and fill
+    `secondary` at 80%, bottom-aligned like tabs on a shelf, standing on a
+    thin `primary` line that runs the whole length of the bar (the tabs' bottom
+    rounding is clipped away so each one sits flat on it). Height and fill
     ease between states; hover shades fade too. `set_marked` cross-fades a
     button to STOP_RED — a stream removed on a panel the user can't see."""
 
     changed = Signal(str)
 
     _ACTIVE_H = 30.0
+    _LINE_H = 4.0
     _INACTIVE_H = 24.0
     _GAP = 3.0
     _RADIUS = 6.0
@@ -56,7 +60,7 @@ class SubTabBar(QWidget):
         fm = QFontMetricsF(self._bold13)
         self._widths = [max(58.0, fm.horizontalAdvance(n) + 2 * self._PAD_X) for n in self._names]
         total = sum(self._widths) + self._GAP * (len(self._names) - 1)
-        self.setFixedSize(int(total + 0.999), int(self._ACTIVE_H))
+        self.setFixedSize(int(total + 0.999), int(self._ACTIVE_H + self._LINE_H))
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
 
@@ -145,16 +149,23 @@ class SubTabBar(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         edge = 0.0
+        p.save()
+        p.setClipRect(QRectF(0, 0, self.width(), self._ACTIVE_H))
         for n, w in zip(self._names, self._widths):
             fill, h, text = self._cur[n]
             rect = QRectF(edge, self._ACTIVE_H - h, w, h)
+            # Drawn a radius taller than visible: the clip above cuts off the
+            # bottom corners' rounding, leaving the tab's foot flat on the line.
             path = QPainterPath()
-            path.addRoundedRect(rect, self._RADIUS, self._RADIUS)
+            path.addRoundedRect(rect.adjusted(0, 0, 0, self._RADIUS), self._RADIUS, self._RADIUS)
             p.fillPath(path, fill)
             p.setPen(text)
             p.setFont(self._bold13 if n == self._active else self._bold12)
             p.drawText(rect, Qt.AlignCenter, n)
             edge += w + self._GAP
+        p.restore()
+        # Square-ended, not a rounded stroke.
+        p.fillRect(QRectF(0, self._ACTIVE_H, self.width(), self._LINE_H), T.theme.color("primary"))
 
 
 # --------------------------------------------------------------------------- #
@@ -168,8 +179,12 @@ class DropBox(QWidget):
 
     fileSelected = Signal(str)
 
-    def __init__(self, prompt="Drag & Drop File Here", parent=None):
+    def __init__(self, prompt="Drag & Drop File Here", parent=None, start_dir=None):
+        """`start_dir` is an optional callable returning the folder Browse
+        should open in (else the OS's own default — which for an unset start
+        directory was this app's working folder)."""
         super().__init__(parent)
+        self._start_dir = start_dir
         self.setAcceptDrops(True)
         self._dragging = False
         self._collapsed = False
@@ -206,7 +221,8 @@ class DropBox(QWidget):
         self.update()
 
     def browse(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select a File", "", MEDIA_FILTER)
+        start = self._start_dir() if self._start_dir else ""
+        path, _ = QFileDialog.getOpenFileName(self, "Select a File", start, MEDIA_FILTER)
         if path:
             self.fileSelected.emit(path)
 
@@ -372,9 +388,13 @@ class Sidebar(QWidget):
         T.theme.changed.connect(self._load_logo)
         T.theme.changed.connect(self.update)
 
+    NAV_BUTTON_WIDTH = 110  # narrower than the sidebar itself, so the pipe's
+    # own gap runs wider on both sides — enough to see the RCA cable's black
+    # lead trailing out from behind the button before it plugs in.
+
     def _add_nav(self, lay, name):
         btn = button(name)
-        btn.setFixedSize(140, 28)
+        btn.setFixedSize(self.NAV_BUTTON_WIDTH, 28)
         btn.clicked.connect(lambda _=False, n=name: self.navigate.emit(n))
         lay.addWidget(btn, 0, Qt.AlignHCenter)
         self.buttons[name] = btn
@@ -415,42 +435,188 @@ class Sidebar(QWidget):
         QPainter(self).fillRect(self.rect(), T.theme.color("primary"))
 
 
-class TabIndicator(QWidget):
-    """The flat `primary` pipe from the active nav button to the tab frame,
-    with the 12px `secondary` band through its middle. It *glides* to the new
-    button instead of jumping. Square corners, so it meets the button's
-    rounded edge flush at mid-height."""
+_CABLE_SVG = os.path.join(ASSETS, "RCA Cable Yellow.svg")
+_CABLE_OVERSAMPLE = 4  # rendered above any real screen DPR, then scaled down — never up
+_cable_base_cache = {}
+_cable_pixmap_cache = {}
 
-    _LINE_H = 12
+
+def _cable_base_image():
+    """The RCA cable art rendered once at high resolution and cropped to
+    its own drawn content — the SVG's declared viewBox (509 wide) is
+    nearly 3x wider than the plug it actually draws (~172 units, the rest
+    blank margin), which would otherwise squash the rotated art into one
+    end of its frame instead of filling it edge to edge."""
+    cached = _cable_base_cache.get("img")
+    if cached is not None:
+        return cached
+    renderer = QSvgRenderer(_CABLE_SVG)
+    if not renderer.isValid():
+        return None
+    native = renderer.defaultSize()
+    scale = 3
+    w, h = round(native.width() * scale), round(native.height() * scale)
+    img = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+    img.fill(Qt.transparent)
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing)
+    renderer.render(p, QRectF(0, 0, w, h))
+    p.end()
+
+    stride = img.bytesPerLine()
+    raw = np.frombuffer(img.constBits(), dtype=np.uint8, count=h * stride).reshape(h, stride)[:, : w * 4]
+    raw = raw.reshape(h, w, 4)
+    alpha = raw[:, :, 3]
+    cols = np.where(alpha.any(axis=0))[0]
+    rows = np.where(alpha.any(axis=1))[0]
+    if len(cols) and len(rows):
+        img = img.copy(int(cols[0]), int(rows[0]), int(cols[-1] - cols[0] + 1), int(rows[-1] - rows[0] + 1))
+    _cable_base_cache["img"] = img
+    return img
+
+
+def _cable_pixmap(height):
+    """The cropped cable art (above), rotated 90° clockwise so the grey
+    plug collar — the top of the source art, at low y — lands on the
+    *right* (toward the tab frame it plugs into) and the trailing cable —
+    the bottom, at high y — lands on the *left* (toward the sidebar button
+    it slides out of). Rasterized `height` px tall (oversampled the same
+    way the sidebar logo is) and cached by that height, since every nav
+    button's pipe wants the same size."""
+    cached = _cable_pixmap_cache.get(height)
+    if cached is not None:
+        return cached
+    base = _cable_base_image()
+    if base is None or base.isNull():
+        return None
+    w0 = height * _CABLE_OVERSAMPLE
+    h0 = w0 * base.height() / base.width()
+    scaled = base.scaled(round(w0), round(h0), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    pix = QPixmap.fromImage(scaled).transformed(QTransform().rotate(90), Qt.SmoothTransformation)
+    pix.setDevicePixelRatio(_CABLE_OVERSAMPLE)
+    _cable_pixmap_cache[height] = pix
+    return pix
+
+
+class _TabPipe(QWidget):
+    """One nav button's own pipe: the RCA cable art sliding out of the
+    button and toward the tab frame. *extension* (0 = hidden, flush with
+    the button's own edge; 1 = plugged in) slides the cable horizontally —
+    at 1 it's pushed in just far enough that the long thin grey pin (the
+    plug's actual contact, see `_cable_pixmap`) lands entirely past the
+    frame's edge, hidden behind it the way a real plug's pin disappears
+    into a jack — but *not* the wider grey base collar right behind it,
+    which stays visible sitting proud of the frame along with the yellow
+    shell and the cable trailing back off toward the button. Independent
+    per button so an outgoing and an incoming pipe can animate at once
+    instead of one bar jumping between button positions.
+
+    Replaces an earlier abstract pill-plus-pin shape meant to *suggest* a
+    jack plug in the round-rectangle language the rest of the UI uses —
+    dropped once a real cable graphic (`assets/RCA Cable Yellow.svg`) made
+    that abstraction unnecessary."""
+
+    # The art's own long thin pin (`assets/RCA Cable Yellow.svg`'s first
+    # grey path) runs tip-to-142.23 out of the full 825.37 length; its
+    # wider base collar (the second grey path, 146.9-171.22) is deliberately
+    # excluded here so insertion stops with the base still showing.
+    _PIN_FRAC = 142.23 / 825.37
+    _MARGIN = 6  # vertical breathing room within the button's own row height
 
     def __init__(self, parent):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._extension = 0.0
         self._anim = QVariantAnimation(self)
         self._anim.setDuration(220)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
-        self._anim.valueChanged.connect(lambda y: self.move(self.x(), round(y)))
+        self._anim.valueChanged.connect(self._set_extension)
         T.theme.changed.connect(self.update)
 
-    def align_to(self, target, frame_left, animate=True):
-        top_left = target.mapTo(self.parentWidget(), target.rect().topLeft())
-        x = top_left.x() + target.width()
-        self.resize(max(1, frame_left - x), target.height())
-        if animate and self.isVisible():
-            self._anim.stop()
-            self._anim.setStartValue(float(self.y()))
-            self._anim.setEndValue(float(top_left.y()))
-            self.move(x, self.y())
+    def _set_extension(self, value):
+        self._extension = value
+        self.update()
+
+    def set_active(self, active, animate=True):
+        target = 1.0 if active else 0.0
+        self._anim.stop()
+        if animate:
+            self._anim.setStartValue(self._extension)
+            self._anim.setEndValue(target)
             self._anim.start()
         else:
-            self._anim.stop()
-            self.move(x, top_left.y())
-        self.show()
-        self.raise_()
+            self._set_extension(target)
 
     def paintEvent(self, _event):
+        if self._extension <= 0:
+            return
+        pix = _cable_pixmap(max(1, self.height() - self._MARGIN))
+        if pix is None:
+            return
+        dpr = pix.devicePixelRatio()
+        img_w, img_h = pix.width() / dpr, pix.height() / dpr
+
+        # Hidden: the tip sits flush with local x=0 (the button's own
+        # edge), so nothing is visible. Shown: the tip has crossed past
+        # this widget's own right edge (the frame's edge) by exactly the
+        # long pin's own width — the base collar right behind it stops
+        # short of the edge and stays visible.
+        hidden_x = -img_w
+        shown_x = self.width() - img_w * (1 - self._PIN_FRAC)
+        x = hidden_x + (shown_x - hidden_x) * self._extension
+        y = (self.height() - img_h) / 2
+
         p = QPainter(self)
-        th = T.theme
-        p.fillRect(self.rect(), th.color("primary"))
-        y = self.height() // 2 - self._LINE_H // 2
-        p.fillRect(0, y, self.width(), self._LINE_H, th.color("secondary"))
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        p.drawPixmap(QPointF(x, y), pix)
+
+
+class TabIndicator(QWidget):
+    """Owns one independently-animated `_TabPipe` per nav button. Selecting
+    a tab grows that button's own pipe out of it and into the tab frame
+    while, at the same time, the previously-selected button's pipe shrinks
+    back into its own button — two motions at once, rather than one shared
+    bar jumping between button positions like the pipe used to. No longer
+    paints anything of its own — an earlier version also drew a static
+    `primary` notch per button, always visible regardless of selection, but
+    that's being replaced with a different idea."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._buttons = {}
+        self._pipes = {}
+        self._active = None
+        self._frame_left = 0
+        T.theme.changed.connect(self.update)
+
+    def set_active(self, name, buttons, frame_left, animate=True):
+        """(Re)lays out every button's pipe geometry — cheap, and needed
+        since a button's position is only final once the window's actually
+        shown — then animates the outgoing pipe shut and the incoming one
+        open together."""
+        self._buttons = buttons
+        self._frame_left = frame_left
+        parent = self.parentWidget()
+        self.setGeometry(0, 0, parent.width(), parent.height())
+        for btn_name, btn in buttons.items():
+            top_left = btn.mapTo(parent, btn.rect().topLeft())
+            x = top_left.x() + btn.width()
+            pipe = self._pipes.get(btn_name)
+            if pipe is None:
+                pipe = _TabPipe(self)
+                # A widget created after its parent is already shown doesn't
+                # inherit that visibility automatically — without this it
+                # silently never paints at all, notch or full pipe alike.
+                pipe.show()
+                self._pipes[btn_name] = pipe
+            pipe.setGeometry(x, top_left.y(), max(1, frame_left - x), btn.height())
+        self._active = name
+        for btn_name, pipe in self._pipes.items():
+            pipe.set_active(btn_name == name, animate=animate)
+        self.show()
+        self.raise_()
+        for pipe in self._pipes.values():
+            pipe.raise_()
+        self.update()
+

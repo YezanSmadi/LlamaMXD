@@ -296,6 +296,36 @@ def resolution_height_for(resolution):
     return _RESOLUTION_HEIGHTS.get(resolution)
 
 
+# Encoding / Video sub-tab's optional frame-rate change, alongside
+# Resolution -- "Source" (no change) plus a fixed ladder of common rates.
+# Deliberately whole numbers rather than the NTSC-exact 29.97/23.976: a
+# source probed at one of those still offers the round number right below
+# it (fps_values_for's own tolerance), and ffmpeg's -r happily retimes onto
+# a plain integer target without needing this app to reproduce broadcast
+# drop-frame arithmetic in the UI.
+SOURCE_FPS = "Source"
+FPS_VALUES = [SOURCE_FPS, "60", "50", "30", "25", "24", "12", "8"]
+
+
+def fps_values_for(source_fps):
+    """FPS ladder for a probed source frame rate, capped so a pick can never
+    *upsample* -- 'Source' plus every standard rate at or below the source's
+    own. A small tolerance (0.1) keeps a true 29.97/23.976 source from
+    excluding the round 30/24 sitting just above it. An unknown rate (no
+    probe yet) offers the full ladder rather than guessing a cap."""
+    if not source_fps:
+        return list(FPS_VALUES)
+    return [SOURCE_FPS] + [f for f in FPS_VALUES[1:] if float(f) <= source_fps + 0.1]
+
+
+def fps_arg_for(fps):
+    """ffmpeg -r value for an FPS pick, or None for 'Source' -- the "no
+    change" case."""
+    if not fps or fps == SOURCE_FPS:
+        return None
+    return fps
+
+
 # Canonical bitrate ladder in kbps -- 1024/1536 rather than round 1000/1500
 # are deliberate: both are exact multiples of 1024, so `_format_bitrate`'s
 # kbps->Mbps conversion below lands on a clean "1 Mbps"/"1.5 Mbps" rather

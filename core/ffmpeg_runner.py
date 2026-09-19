@@ -5,9 +5,10 @@ The command itself is built with ffmpeg-python (`core.ffmpeg_build`), but it
 is *launched* here with one plain `subprocess.Popen`, because ffmpeg-python's
 own `run_async()` can't pass `creationflags` — and CREATE_NO_WINDOW matters:
 without it every job flashes a console window. ffmpeg runs at the OS's
-normal process priority (profiled: event-loop lateness during a full-speed
-x264 encode came back the same as idle, so there was nothing to protect the
-UI from by throttling it — see _CREATION_FLAGS).
+normal process priority unless Settings' "Priority Level" says otherwise
+(profiled: event-loop lateness during a full-speed x264 encode came back the
+same as idle, so there's no reason to throttle it by default — see
+_CREATION_FLAGS).
 
 Threads here never touch a widget. Everything reaches the GUI thread
 through `poll_events()`, which the Queue tab drains on its own timer tick.
@@ -32,13 +33,15 @@ import subprocess
 import threading
 import time
 
+from core import priority as process_priority
 from core.utilities import probe_duration, verify_hdr_sdr_tag
 
 # CREATE_NO_WINDOW only -- otherwise every job flashes a console window.
-# Deliberately *not* BELOW_NORMAL_PRIORITY_CLASS any more: profiled event-loop
+# Deliberately not a hard-coded BELOW_NORMAL_PRIORITY_CLASS: profiled event-loop
 # lateness at normal priority came back the same as idle (see the module
-# docstring), so throttling ffmpeg was buying nothing on this machine while
-# slowing every encode down for no reason. getattr() so the module still
+# docstring), so throttling ffmpeg by default was buying nothing while
+# slowing every encode down. The priority is the user's call now (Settings'
+# "Priority Level", OR-ed in at launch). getattr() so the module still
 # imports on a non-Windows Python (the flag is Windows-only).
 _CREATION_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -150,8 +153,10 @@ class FfmpegJob:
     A job that was `stop()`ped reports nothing further."""
 
     def __init__(self, args, final_path, temp_path, *, duration_secs=0,
-                 input_file="", start_secs=0, verify_hdr_tag=False):
+                 input_file="", start_secs=0, verify_hdr_tag=False,
+                 priority=process_priority.DEFAULT_LEVEL):
         self.args = list(args)
+        self._priority = priority
         self.final_path = final_path
         self.temp_path = temp_path
         self._duration_secs = duration_secs or 0
@@ -199,7 +204,7 @@ class FfmpegJob:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
-                creationflags=_CREATION_FLAGS,
+                creationflags=_CREATION_FLAGS | process_priority.creation_flag(self._priority),
             )
         except FileNotFoundError:
             self._fail_early("ffmpeg wasn't found. Reinstall LlamaMXD, or install ffmpeg and add it to your PATH.")
@@ -213,6 +218,14 @@ class FfmpegJob:
         self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
         self._stderr_thread.start()
         threading.Thread(target=self._watch, daemon=True).start()
+
+    def set_priority(self, level):
+        """Moves the running process to a new priority level (Settings'
+        "Priority Level" changed mid-job). Returns whether it worked."""
+        self._priority = level
+        if self._proc is None or self._proc.poll() is not None:
+            return False
+        return process_priority.set_process_priority(self._proc.pid, level)
 
     def suspend(self):
         """Freezes the process in place. Returns whether it worked."""

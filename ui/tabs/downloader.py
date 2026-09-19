@@ -17,7 +17,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QLineEdit, QVBoxLayout, QWidget
 
-from core import downloader
+from core import downloader, naming
 from ui.tabs.media_tab import hrow, set_line_text
 from ui.widgets.controls import (
     NO_OPTION,
@@ -138,6 +138,9 @@ class DownloaderTab(QWidget):
         self._ready = False
         self._url = None
         self._info = None
+        # The path the last autofill wrote (None once the user Browses) — what
+        # `refresh_auto_output` compares against before re-deriving the name.
+        self._auto_output = None
         self._fmts = []
         self._thumb = None
         self._plan = None
@@ -344,6 +347,8 @@ class DownloaderTab(QWidget):
         self.queue_btn.setEnabled(has_info)
         self.download_btn.setEnabled(has_info)
         if not has_info:
+            for menu in (self.codec_menu, self.audio_menu, self.quality_menu, self.format_menu):
+                menu.set(NO_OPTION)
             self._plan = None
             self.size_label.setText("")
             return
@@ -445,12 +450,46 @@ class DownloaderTab(QWidget):
         if not self._info:
             set_line_text(self.save_entry, self.app.downloader_default_location())
 
+    def _name_info(self):
+        """The fetched info with its title made file-name-safe the Downloader's
+        own way (`safe_stem` swaps illegal characters for look-alikes instead
+        of dropping them), ready for the naming format's tokens."""
+        info = dict(self._info or {})
+        info["title"] = downloader.safe_stem(info["title"]) if info.get("title") else ""
+        return info
+
+    def _default_stem(self):
+        """The file name (no extension) Settings' naming format gives this
+        video: `{source}` is the site, `{title}` the video's title; queue-time
+        tokens stay literal until queueing (`_resolve_output_tokens`)."""
+        info = self._name_info()
+        return naming.render_live(self.app.naming_template, naming.download_live_values(info),
+                                  fallback=info["title"] or "download")
+
     def _autofill_output_path(self):
         if not self._info:
             return
         ext = self._plan["ext"] if self._plan else ".mp4"
-        stem = downloader.safe_stem(self._info.get("title"))
-        set_line_text(self.save_entry, os.path.normpath(os.path.join(self._current_directory(), stem + ext)))
+        suggested = os.path.normpath(os.path.join(self._current_directory(), self._default_stem() + ext))
+        set_line_text(self.save_entry, suggested)
+        self._auto_output = suggested
+
+    def refresh_auto_output(self):
+        """The naming format changed: re-derive the suggested name, but only
+        while the field still holds what was autofilled (see MediaTab)."""
+        if not self._info or not self._auto_output:
+            return
+        typed = os.path.splitext(self.save_entry.text().strip())[0]
+        if typed == os.path.splitext(self._auto_output)[0]:
+            self._autofill_output_path()
+
+    def _resolve_output_tokens(self, settings):
+        """The queue-time pass (`{date}` `{time}` `{creation-time}` `{quality}`
+        `{bitrate}`), against this download's own settings."""
+        path = settings.get("output_path") or ""
+        if "{" in os.path.basename(path):
+            values = naming.download_queue_values(self._name_info(), settings)
+            settings["output_path"] = naming.resolve_path(path, values)
 
     def _apply_output_extension(self, ext):
         current = self.save_entry.text().strip()
@@ -460,13 +499,14 @@ class DownloaderTab(QWidget):
 
     def select_save_location(self):
         ext = self._plan["ext"] if self._plan else ".mp4"
-        stem = downloader.safe_stem((self._info or {}).get("title")) if self._info else "download"
+        stem = self._default_stem() if self._info else "download"
         path, _ = QFileDialog.getSaveFileName(
             self, "Select Output File", os.path.join(self._current_directory(), stem + ext),
             f"{ext.lstrip('.').upper()} File (*{ext});;All Files (*.*)",
         )
         if path:
             set_line_text(self.save_entry, os.path.normpath(path))
+            self._auto_output = None
             self._sync_controls()
 
     # ------------------------------------------------------------------ #
@@ -514,6 +554,7 @@ class DownloaderTab(QWidget):
 
     def download_now(self):
         settings = self._gather_settings()
+        self._resolve_output_tokens(settings)
         if not self._validate_settings(settings):
             return
         queue_tab = self.app.tabs["Queue"]
@@ -528,6 +569,7 @@ class DownloaderTab(QWidget):
 
     def add_to_queue(self):
         settings = self._gather_settings()
+        self._resolve_output_tokens(settings)
         if not self._validate_settings(settings):
             return
         self.app.tabs["Queue"].add_task(self._describe(settings), settings=settings,

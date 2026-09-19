@@ -238,6 +238,11 @@ SOURCE_HEIGHT = None        # the probed source's own height (px), snapshotted
                             # convention as MASTERING_MAX_NITS/MAX_CLL above.
 SCALE_VF = None             # -vf "scale=-2:<height>" when RESOLUTION picks a
                             # real downscale, else None -- see _scale_vf.
+FPS = formats.SOURCE_FPS    # "Source", "30", ... (formats.FPS_VALUES)
+SOURCE_FPS = None           # the probed source's own fps (float), snapshotted
+                            # at queue time -- same convention as SOURCE_HEIGHT.
+FPS_ARG = None              # -r value when FPS picks a real rate, else None
+                            # -- see _fps_arg.
 
 # --- Encoding / Audio sub-tab ---
 # One entry per *included* source audio stream (EncodingTab's Audio Track
@@ -350,6 +355,20 @@ def _scale_vf(resolution, source_height):
     return f"scale=-2:{target}"
 
 
+def _fps_arg(fps, source_fps):
+    """-r value for an FPS pick -- None for 'Source', or when the picked
+    rate is no longer <= the source's own (a saved preset applied to a
+    different/faster file). EncodingTab's FPS dropdown is already capped
+    (formats.fps_values_for), but this re-checks rather than trusting the
+    caller, same reasoning as _scale_vf."""
+    target = formats.fps_arg_for(fps)
+    if not target:
+        return None
+    if source_fps and float(target) > source_fps + 0.1:
+        return None
+    return target
+
+
 def _speed_kwargs(encoder, value):
     """SPEED's ffmpeg-ready kwargs -- a named -preset for x264/x265/AV1, or
     -cpu-used (+ a fixed -deadline good) for the libvpx codecs (see
@@ -397,6 +416,10 @@ def derive(settings, source_tab=""):
     resolution = s.get("resolution") or formats.SOURCE_RESOLUTION
     source_height = s.get("source_height")
     scale_vf = _scale_vf(resolution, source_height)
+
+    fps = s.get("fps") or formats.SOURCE_FPS
+    source_fps = s.get("source_fps")
+    fps_arg = _fps_arg(fps, source_fps)
 
     audio_streams = [_audio_stream_args(entry) for entry in (s.get("audio_streams") or [])]
 
@@ -450,6 +473,9 @@ def derive(settings, source_tab=""):
         "RESOLUTION": resolution,
         "SOURCE_HEIGHT": source_height,
         "SCALE_VF": scale_vf,
+        "FPS": fps,
+        "SOURCE_FPS": source_fps,
+        "FPS_ARG": fps_arg,
 
         "AUDIO_STREAMS": audio_streams,
 

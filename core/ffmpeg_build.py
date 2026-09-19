@@ -198,6 +198,8 @@ def build_encode_command(output_path=None):
             output_kwargs["pix_fmt"] = v.PIX_FMT_ARG
         if v.QUALITY_PRESET_ARG:
             output_kwargs["quality"] = v.QUALITY_PRESET_ARG
+        if v.FPS_ARG:
+            output_kwargs["r"] = v.FPS_ARG
         output_kwargs.update(v.SPEED_ARG)
         if v.AV_SYNC:
             # -fps_mode is the current, non-deprecated way to say "hold a

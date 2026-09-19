@@ -14,12 +14,12 @@ import os
 import uuid
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QSizePolicy, QVBoxLayout, QWidget
 
 from core import formats
 from core.utilities import probe_media
 from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow, set_line_text
-from ui.widgets.controls import CheckBox, button, button_width_for
+from ui.widgets.controls import NO_OPTION, CheckBox, IconButton, button, button_width_for
 from ui.widgets.dialogs import pick_external_streams, show_message
 from ui.widgets.tooltip import tip
 from ui.widgets.tracklist import TrackListBox
@@ -29,10 +29,14 @@ _TRACK_TIP = ("Check as many streams as the output should carry — muxing never
               "re-encodes them. \"Add Stream(s)\" pulls one in from another file.")
 _REMOVE_TIP = ("Excludes every checked track from the output — one pulled in with "
                "\"Add Stream(s)\" is dropped outright, a source track is simply unchecked.")
+_SELECT_ALL_TIP = "Checks every track in the box — include all of them in the output."
+_DESELECT_ALL_TIP = "Unchecks every track in the box, without removing any of them."
 
 _VIDEO_BROWSE_FILTER = "Video Files (*.mp4 *.mkv *.avi *.mov *.webm *.mxf *.ts *.vob)"
-_AUDIO_BROWSE_FILTER = ("Audio / Video Files (*.mp3 *.aac *.ac3 *.flac *.opus *.wav *.m4a "
-                         "*.mp4 *.mkv *.mov *.mxf *.ts *.vob)")
+# Audio-only, built off the app's own audio-extension list so it can't drift
+# from what an audio-only *input* is treated as elsewhere.
+_AUDIO_BROWSE_FILTER = "Audio Files (%s)" % " ".join(
+    "*" + ext for ext in sorted(formats.AUDIO_EXTENSIONS))
 
 
 def _describe_stream(kind, stream):
@@ -71,16 +75,28 @@ class MuxingTab(MediaTab):
     #  Panels
     # ------------------------------------------------------------------ #
     def _track_panel(self, kind):
-        """The box fills the row, stopping only where the Add/Remove Stream(s)
-        + Strip column begins, so the whole panel stays as short as
-        Encoding's own Video/Audio panels: the tab-wide preview above is
-        sized off whichever sub-tab page is tallest, so a taller Muxing
-        panel would shrink the preview on this tab alone relative to
-        Encoding's. "Add Stream(s)" sits above; "Remove Stream(s)" (which
-        acts on every checked row, deleting the ones it can and unchecking
-        the ones it can't — see `_remove_streams`) shares a line with Strip
-        below it, matching width so the pair stacks flush."""
+        """The box fills the row, stopping only where the Select/Deselect
+        All + Add/Remove Stream(s) + Strip column begins, so the whole panel
+        stays as short as Encoding's own Video/Audio panels: the tab-wide
+        preview above is sized off whichever sub-tab page is tallest, so a
+        taller Muxing panel would shrink the preview on this tab alone
+        relative to Encoding's. Select/Deselect All are icon buttons
+        (select-multiple.svg / deselect-multiple.svg, recolored like any
+        other themed control — see `IconButton`) sharing a line on top,
+        each spanning half of `btn_width` so the pair lines up flush with
+        "Add Stream(s)"/"Remove Stream(s)" beneath them; "Add Stream(s)"
+        sits beneath them; "Remove Stream(s)" (which acts on every checked
+        row, deleting the ones it can and unchecking the ones it can't —
+        see `_remove_streams`) shares a line with Strip below that, matching
+        width so the pair stacks flush. Select/Deselect All share a line
+        rather than each getting a full-width row of their own the way Add
+        Stream(s) does — a fourth full row would have pushed this column
+        past the box's own fixed height (see the sizing rule in this
+        module's own history / CLAUDE.md), and a two-across row costs only
+        one row's worth of height for both."""
         btn_width = button_width_for(["Add Stream(s)", "Remove Stream(s)"])
+        select_spacing = 8
+        select_width = (btn_width - select_spacing) // 2
         row, rl = hrow(spacing=10, align_bottom=True)
         box = TrackListBox()
         # Maximize the box rather than leaving it at TrackListBox's own
@@ -94,6 +110,14 @@ class MuxingTab(MediaTab):
         # populate it; see TrackListBox's own fixed-height comment.
         overview_height = self.panels.widget(0).sizeHint().height()
         box.setFixedHeight(max(box.height(), overview_height))
+        # Select/Deselect All take whatever height is left in the column once
+        # Add/Remove Stream(s) (one stock 28px button row apiece) and the two
+        # 6px gaps are accounted for, so the pair reaches the box's own top
+        # edge and reads closer to square than the stock 28px-tall button.
+        # Done by fixing the *row's* height and letting the buttons expand
+        # into it: the QPushButton stylesheet's `min-height: 28px` overrides
+        # a `setFixedHeight` on the button itself (it stays at 28).
+        select_height = max(28, box.height() - 2 * 28 - 2 * 6)
         box.changed.connect(self._on_control_change)
         tip(box, _TRACK_TIP)
         rl.addWidget(box, 1)
@@ -102,6 +126,22 @@ class MuxingTab(MediaTab):
         sl = QVBoxLayout(side)
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(6)
+        top, tl = hrow(spacing=select_spacing, align_bottom=False)
+        top.setFixedHeight(select_height)
+        # Left-aligned, not spread: the column is as wide as Remove Stream(s)
+        # + Strip, so unaligned the pair drifted apart to fill that width.
+        tl.setAlignment(Qt.AlignLeft)
+        select_all_btn = IconButton("select-multiple", width=select_width)
+        select_all_btn.clicked.connect(lambda: self._select_all(kind.lower()))
+        tip(select_all_btn, _SELECT_ALL_TIP)
+        select_all_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        tl.addWidget(select_all_btn)
+        deselect_all_btn = IconButton("deselect-multiple", width=select_width)
+        deselect_all_btn.clicked.connect(lambda: self._deselect_all(kind.lower()))
+        tip(deselect_all_btn, _DESELECT_ALL_TIP)
+        deselect_all_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        tl.addWidget(deselect_all_btn)
+        sl.addWidget(top)
         add_btn = button("Add Stream(s)", width=btn_width)
         add_btn.clicked.connect(lambda: self._add_stream(kind.lower()))
         sl.addWidget(add_btn)
@@ -122,16 +162,18 @@ class MuxingTab(MediaTab):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addStretch(1)
         outer.addWidget(row)
-        return page, box, add_btn, remove_btn, check
+        return page, box, add_btn, remove_btn, check, select_all_btn, deselect_all_btn
 
     def build_video(self):
         page, self.video_box, self.video_add_btn, self.video_remove_btn, \
-            self.strip_video_check = self._track_panel("Video")
+            self.strip_video_check, self.video_select_all_btn, \
+            self.video_deselect_all_btn = self._track_panel("Video")
         return page
 
     def build_audio(self):
         page, self.audio_box, self.audio_add_btn, self.audio_remove_btn, \
-            self.strip_audio_check = self._track_panel("Audio")
+            self.strip_audio_check, self.audio_select_all_btn, \
+            self.audio_deselect_all_btn = self._track_panel("Audio")
         return page
 
     # ------------------------------------------------------------------ #
@@ -140,10 +182,10 @@ class MuxingTab(MediaTab):
     # ------------------------------------------------------------------ #
     def _add_stream(self, kind):
         if kind == "video":
-            title, types = "Select Video Source", _VIDEO_BROWSE_FILTER
+            title, types = "Select Video Source", _VIDEO_BROWSE_FILTER + ";;All Files (*.*)"
         else:
             title, types = "Select Audio Source", _AUDIO_BROWSE_FILTER
-        path, _ = QFileDialog.getOpenFileName(self, title, "", types + ";;All Files (*.*)")
+        path, _ = QFileDialog.getOpenFileName(self, title, "", types)
         if not path:
             return
         run_async(probe_media, lambda info: self._stream_probed(kind, path, info), path)
@@ -192,6 +234,23 @@ class MuxingTab(MediaTab):
                 store.pop(row_id, None)
             else:
                 box.set_checked(row_id, False)
+        self._sync_controls()
+
+    def _select_all(self, kind):
+        """Checks every row in the box — unlike "Remove Stream(s)", which
+        only ever acts on rows already checked, this acts on every row
+        regardless of its current state."""
+        box = self.video_box if kind == "video" else self.audio_box
+        for row_id in box.item_ids():
+            box.set_checked(row_id, True)
+        self._sync_controls()
+
+    def _deselect_all(self, kind):
+        """Unchecks every row in the box — the non-destructive counterpart
+        to "Remove Stream(s)": nothing leaves the box, checked or not."""
+        box = self.video_box if kind == "video" else self.audio_box
+        for row_id in box.item_ids():
+            box.set_checked(row_id, False)
         self._sync_controls()
 
     # ------------------------------------------------------------------ #
@@ -260,24 +319,34 @@ class MuxingTab(MediaTab):
         self.video_box.setEnabled(video_live)
         self.video_add_btn.setEnabled(video_live)
         self.video_remove_btn.setEnabled(video_live)
+        self.video_select_all_btn.setEnabled(video_live)
+        self.video_deselect_all_btn.setEnabled(video_live)
         self.audio_box.setEnabled(audio_live)
         self.audio_add_btn.setEnabled(audio_live)
         self.audio_remove_btn.setEnabled(audio_live)
+        self.audio_select_all_btn.setEnabled(audio_live)
+        self.audio_deselect_all_btn.setEnabled(audio_live)
 
         self._refresh_summary()
+        self._apply_import_gate()
 
     def _retarget_container(self, allowed):
         before = self.format_menu.value()
         self.format_menu.set_values(allowed)
         after = self.format_menu.value()
         self._update_format_tip()
-        if before != after:
+        # before == NO_OPTION means the dropdown was just showing the
+        # no-file-imported placeholder (_apply_import_gate) a moment ago,
+        # not a real prior pick — recovering from that as a file comes in
+        # isn't a forced snap worth rewriting the save path or toasting
+        # about.
+        if before != after and before != NO_OPTION:
             # Keep the save path's extension in step with a forced snap, so
             # a snapped .mkv never sits beside "_muxed.mp4".
             stem, extension = os.path.splitext(self.save_entry.text().strip())
             if extension:
                 set_line_text(self.save_entry, stem + after)
-        if self._ready and before != after:
+        if self._ready and before != after and before != NO_OPTION:
             self.app.notify(
                 f"Container switched to {after} — {before} can't hold this file's streams "
                 "without re-encoding.",

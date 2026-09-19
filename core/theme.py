@@ -5,6 +5,8 @@ on top of what's here."""
 import json
 import os
 
+from core import naming, power, priority
+
 # Repo root, derived from this file's own location — settings.json always
 # lands next to main.py whatever directory the app was launched from.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -145,11 +147,16 @@ def default_output_dir():
 
 def load_settings():
     """Reads persisted app settings (theme, appearance mode, default save
-    location, GPU acceleration, the Downloader's own separate save location),
-    filling in defaults for anything missing or if the file doesn't exist yet
-    (e.g. first run). Appearance mode defaults to "System"; default save
-    location defaults to default_output_dir(); the Downloader's separate
-    save location is off by default and empty until set."""
+    location, GPU acceleration, the Downloader's own separate save location,
+    the output naming format, "When Done" and its reset-on-launch flag, and
+    the job priority level), filling in defaults for anything missing or if
+    the file doesn't exist yet (e.g. first run). Appearance mode defaults to
+    "System"; default save location defaults to default_output_dir(); the
+    Downloader's separate save location is off by default and empty until
+    set; the naming format is `core.naming.DEFAULT_TEMPLATE`, "When Done" is
+    "Do Nothing" (and reset to it on every launch), priority is "Normal".
+    A stored value that's no longer valid (a hand-edited file) falls back to
+    its default rather than reaching the UI."""
     settings = {
         "theme": DEFAULT_THEME_NAME,
         "appearance_mode": "System",
@@ -157,6 +164,10 @@ def load_settings():
         "gpu_enabled": True,
         "downloader_separate_save": False,
         "downloader_save_location": "",
+        "naming_template": naming.DEFAULT_TEMPLATE,
+        "when_done": power.DO_NOTHING,
+        "when_done_reset": True,
+        "priority_level": priority.DEFAULT_LEVEL,
     }
     if not os.path.exists(_SETTINGS_PATH):
         return settings
@@ -165,6 +176,12 @@ def load_settings():
             settings.update(json.load(f))
     except (json.JSONDecodeError, OSError):
         pass
+    if naming.template_error(settings["naming_template"]):
+        settings["naming_template"] = naming.DEFAULT_TEMPLATE
+    if settings["when_done"] not in power.ACTIONS:
+        settings["when_done"] = power.DO_NOTHING
+    if settings["priority_level"] not in priority.LEVELS:
+        settings["priority_level"] = priority.DEFAULT_LEVEL
     return settings
 
 

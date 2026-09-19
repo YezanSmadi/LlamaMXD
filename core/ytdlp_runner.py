@@ -50,6 +50,7 @@ import time
 import uuid
 
 from core import downloader
+from core import priority as process_priority
 from core.ffmpeg_runner import _replace_output, _set_suspended
 
 # CREATE_SUSPENDED so the first process can be put in the job before it runs
@@ -60,6 +61,8 @@ _CREATION_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) | (
 )
 
 _OUTPUT_TAIL = 60
+# How often poll_events re-applies the priority level to the process tree.
+_PRIORITY_SYNC_SECS = 1.0
 _WORK_DIR_PREFIX = ".llamamxd-download-"
 # Never report more than this until the file is actually in place — the last
 # sliver is the move into the user's folder.
@@ -142,8 +145,10 @@ class YtDlpJob:
     """One yt-dlp download plus the thread that watches it. `plan` is
     `core.downloader.resolve()`'s dict, as carried in the task's settings."""
 
-    def __init__(self, url, plan, final_path):
+    def __init__(self, url, plan, final_path, priority=process_priority.DEFAULT_LEVEL):
         self.url = url
+        self._priority = priority
+        self._last_priority_sync = 0.0
         self.plan = plan
         self.final_path = os.path.abspath(final_path)
         self.work_dir = work_dir_for(self.final_path)
@@ -198,7 +203,7 @@ class YtDlpJob:
                 # merging them keeps their order and needs only one reader.
                 stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
-                creationflags=_CREATION_FLAGS,
+                creationflags=_CREATION_FLAGS | process_priority.creation_flag(self._priority),
                 env=downloader.subprocess_env(),
             )
         except FileNotFoundError:
@@ -214,6 +219,26 @@ class YtDlpJob:
         self._started_at = time.monotonic()
         self._events.put(("stage", "Preparing..."))
         threading.Thread(target=self._watch, daemon=True).start()
+
+    def set_priority(self, level):
+        """Moves the whole tree to a new priority level (Settings' "Priority
+        Level" changed mid-download). Returns whether it worked."""
+        self._priority = level
+        return self._sync_priority()
+
+    def _sync_priority(self):
+        """Puts every process in the tree at the chosen level. A child only
+        inherits its parent's class when that class is Low or Below Normal, so
+        yt-dlp's own ffmpeg (started later, for a merge) would otherwise run
+        at Normal under a High parent -- `poll_events` re-runs this about once
+        a second to catch it. (The job object's own priority-limit isn't used
+        instead: Windows refuses High there without a privilege a normal user
+        doesn't hold.)"""
+        self._last_priority_sync = time.monotonic()
+        if self._proc is None or self._proc.poll() is not None:
+            return False
+        return all([process_priority.set_process_priority(pid, self._priority)
+                    for pid in self._tree_pids()])
 
     def suspend(self):
         """Freezes every process in the tree. Returns whether it worked."""
@@ -263,6 +288,9 @@ class YtDlpJob:
             except queue.Empty:
                 break
         if not any(e[0] in ("done", "failed") for e in events):
+            if (self._priority != process_priority.DEFAULT_LEVEL
+                    and time.monotonic() - self._last_priority_sync >= _PRIORITY_SYNC_SECS):
+                self._sync_priority()
             fraction = self._estimate()
             if fraction is not None:
                 events.append(("progress", fraction))

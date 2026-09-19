@@ -54,6 +54,8 @@ _QSCALE_TIP = "Lower = higher quality, larger file. This is a fixed qscale, not 
 _RESOLUTION_TIP = ("Downscales the video, keeping its aspect ratio — the width is computed "
                     "from the source's own ratio, never stretched or cropped. Never upscales: "
                     "only rungs at or below the source's own height are offered.")
+_FPS_TIP = ("Retimes the video to a lower frame rate, duplicating or dropping frames as "
+            "needed. Never speeds up: only rates at or below the source's own are offered.")
 
 
 class EncodingTab(MediaTab):
@@ -86,9 +88,10 @@ class EncodingTab(MediaTab):
     #  Panels
     # ------------------------------------------------------------------ #
     def build_video(self):
-        """Encoder / Profile / Level / Encoder Preset with the quality slider
-        spanning the row beneath; HDR→SDR pinned top-right, Resolution beside
-        Strip Video on the bottom-right row."""
+        """Encoder / Profile / Level / Encoder Preset / Resolution on one row
+        (Resolution's own column stacking FPS directly beneath it), with the
+        quality slider spanning the row beneath; the right column holds
+        HDR→SDR (top) then Strip Video (bottom), right-aligned."""
         page, left, right = self.stream_page()
         left.setSpacing(0)
         row, rl = hrow(spacing=8)
@@ -105,7 +108,8 @@ class EncodingTab(MediaTab):
         speed_universe = [NO_OPTION] + [
             s for enc in formats.VIDEO_ENCODERS for s in formats.speed_values_for(enc)
         ]
-        self.encoder_menu = Dropdown([formats.SELECT], width=Dropdown.width_for(encoder_universe))
+        encoder_width = Dropdown.width_for(encoder_universe)
+        self.encoder_menu = Dropdown([formats.SELECT], width=encoder_width)
         self.encoder_menu.picked.connect(self._on_encoder_change)
         # MPEG-4's "Advanced Simple" is far longer than every other codec's
         # widest profile ("Professional") — sizing for it would make every
@@ -113,9 +117,16 @@ class EncodingTab(MediaTab):
         # Preset just to cover one rare legacy value, which elides instead.
         profile_width = Dropdown.width_for([p for p in profile_universe if p != "Advanced Simple"])
         self.profile_menu = Dropdown([NO_OPTION], width=profile_width)
-        self.level_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(level_universe))
-        self.speed_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(speed_universe))
-        for menu in (self.profile_menu, self.level_menu, self.speed_menu):
+        level_width = Dropdown.width_for(level_universe)
+        self.level_menu = Dropdown([NO_OPTION], width=level_width)
+        speed_width = Dropdown.width_for(speed_universe)
+        self.speed_menu = Dropdown([NO_OPTION], width=speed_width)
+        self.resolution_menu = Dropdown([formats.SOURCE_RESOLUTION],
+                                        width=Dropdown.width_for(formats.RESOLUTIONS))
+        fps_width = Dropdown.width_for(formats.FPS_VALUES)
+        self.fps_menu = Dropdown([formats.SOURCE_FPS], width=fps_width)
+        for menu in (self.profile_menu, self.level_menu, self.speed_menu,
+                     self.resolution_menu, self.fps_menu):
             menu.picked.connect(self._on_control_change)
         box, self.encoder_label = labeled("Encoder:", self.encoder_menu)
         rl.addWidget(box)
@@ -129,12 +140,27 @@ class EncodingTab(MediaTab):
         tip(self.speed_menu, _SPEED_TIP)
         box, self.speed_label = labeled("Encoder Preset:", self.speed_menu)
         rl.addWidget(box)
+        tip(self.resolution_menu, _RESOLUTION_TIP)
+        box, self.resolution_label = labeled("Resolution:", self.resolution_menu)
+        rl.addWidget(box)
         left.addWidget(row)
-        left.addSpacing(4)
 
         self.crf_label = field_label("Quality")
         self.crf_label.setAlignment(Qt.AlignCenter)
-        left.addWidget(self.crf_label)
+        tip(self.fps_menu, _FPS_TIP)
+        # "FPS:" sits on its own caption row beside "Quality (CRF): NN"
+        # (below) rather than stacked directly on top of the FPS dropdown
+        # in a `labeled()` box — keeping the dropdown itself a direct,
+        # un-wrapped sibling of `slider_row` in `quality_row` (below) is
+        # what keeps their vertical alignment identical to before this
+        # caption existed at all, rather than fighting to re-centre the
+        # slider against a taller box.
+        self.fps_label = field_label("FPS:")
+        self.fps_label.setFixedWidth(fps_width)
+        caption_row, cpl = hrow(spacing=8, align_bottom=False)
+        cpl.addWidget(self.crf_label)
+        cpl.addWidget(self.fps_label)
+        left.addWidget(caption_row)
         slider_row, sr = hrow(spacing=4, align_bottom=False)
         self.crf_low_label = QLabel("Low")
         self.crf_low_label.setProperty("role", "muted")
@@ -153,8 +179,30 @@ class EncodingTab(MediaTab):
         sr.addWidget(self.crf_low_label)
         sr.addWidget(self.crf_slider, 1)
         sr.addWidget(self.crf_high_label)
-        left.addWidget(slider_row)
-        left.addSpacing(2)
+        # Fixed to exactly span Encoder..Encoder Preset (not Resolution's own
+        # column to the right) — width alone, since its own row would
+        # otherwise stretch it to fill the full available width by default —
+        # so "Placebo" ends flush with Encoder Preset's own right edge
+        # rather than trailing off under a column the slider has nothing to
+        # do with. `crf_label` gets the identical width for the same reason,
+        # so "Quality (CRF): 22" centres over the slider itself rather than
+        # the wider Encoder..Resolution span `left`'s own column spans.
+        quality_width = encoder_width + profile_width + level_width + speed_width + 8 * 3
+        slider_row.setFixedWidth(quality_width)
+        self.crf_label.setFixedWidth(quality_width)
+        # FPS sits beside the slider, in the space its fixed width leaves
+        # under Resolution's own column — same 8px gap the row above uses
+        # before Resolution, and (Resolution's and FPS's value lists both
+        # happening to size to the same width) it lands exactly under
+        # Resolution's dropdown. Added as a direct, un-wrapped sibling of
+        # `slider_row` — not inside a `labeled()` box with its own caption
+        # — so the two vertically align exactly the way they did before FPS
+        # had a caption at all (the caption itself lives in `caption_row`
+        # above, not here).
+        quality_row, ql = hrow(spacing=8, align_bottom=True)
+        ql.addWidget(slider_row)
+        ql.addWidget(self.fps_menu)
+        left.addWidget(quality_row)
 
         hdr_row, hl = hrow(spacing=8, align_bottom=False)
         self.hdr_label = ClickableLabel("HDRtoSDR")
@@ -169,36 +217,10 @@ class EncodingTab(MediaTab):
         self.strip_video_check = CheckBox("Strip Video", color_key="stop")
         self.strip_video_check.clicked.connect(self._on_control_change)
         tip(self.strip_video_check, STRIP_TIP)
-        # Resolution sits beside Strip Video on the bottom row — level with
-        # the quality slider in the left column, between it and Strip Video
-        # rather than in the slider row itself, where it would eat into the
-        # row's width and stop "Placebo" lining up with Encoder Preset's own
-        # right edge above it.
-        self.resolution_menu = Dropdown([formats.SOURCE_RESOLUTION],
-                                        width=Dropdown.width_for(formats.RESOLUTIONS))
-        self.resolution_menu.picked.connect(self._on_control_change)
-        tip(self.resolution_menu, _RESOLUTION_TIP)
-        # A compact caption (matching Low/Placebo's own style), not the
-        # standard `labeled()` box's 26px-min-height "field" caption — that
-        # extra height alone would push this column's fixed content taller
-        # than Overview's page, which is what sets Encoding's shared
-        # preview/DropBox height (see this module's own docstring).
-        self.resolution_label = QLabel("Resolution:")
-        self.resolution_label.setProperty("role", "muted")
-        self.resolution_label.setStyleSheet("font-size: 12px;")
-        res_box = QWidget()
-        res_box_layout = QVBoxLayout(res_box)
-        res_box_layout.setContentsMargins(0, 0, 0, 0)
-        res_box_layout.setSpacing(0)
-        res_box_layout.addWidget(self.resolution_label, 0, Qt.AlignRight)
-        res_box_layout.addWidget(self.resolution_menu, 0, Qt.AlignRight)
-        bottom_row, br = hrow(spacing=10)
-        br.addWidget(res_box)
-        br.addWidget(self.strip_video_check, 0, Qt.AlignBottom)
         right.addSpacing(26)   # aligns HDR with the dropdown row's top
         right.addWidget(hdr_row, 0, Qt.AlignRight)
         right.addStretch(1)
-        right.addWidget(bottom_row, 0, Qt.AlignRight)
+        right.addWidget(self.strip_video_check, 0, Qt.AlignRight | Qt.AlignBottom)
         return page
 
     def build_audio(self):
@@ -388,6 +410,7 @@ class EncodingTab(MediaTab):
         self._quality_spec = formats.quality_for(encoder)
         self._apply_quality()
         self._retarget_resolution(info.get("height"))
+        self._retarget_fps(info.get("fps"))
 
         # 3b. The Audio Track list mirrors the included streams.
         track_values = self._audio_track_values()
@@ -417,6 +440,7 @@ class EncodingTab(MediaTab):
 
         set_enabled(self.encoder_menu, self.encoder_label, video_live)
         set_enabled(self.resolution_menu, self.resolution_label, video_live)
+        set_enabled(self.fps_menu, self.fps_label, video_live)
         set_enabled(self.profile_menu, self.profile_label, video_live and bool(profiles))
         set_enabled(self.level_menu, self.level_label, video_live and bool(levels))
         set_enabled(self.speed_menu, self.speed_label, video_live and bool(speeds))
@@ -448,6 +472,24 @@ class EncodingTab(MediaTab):
 
         # 6.
         self._refresh_summary()
+        self._apply_import_gate(extra=(
+            (self.encoder_menu, self.encoder_label), (self.profile_menu, self.profile_label),
+            (self.level_menu, self.level_label), (self.speed_menu, self.speed_label),
+            (self.resolution_menu, self.resolution_label), (self.fps_menu, self.fps_label),
+            (self.audio_track_menu, self.audio_track_label),
+            (self.audio_codec_menu, self.audio_codec_label),
+            (self.audio_bitrate_menu, self.audio_bitrate_label),
+            (self.audio_channels_menu, self.audio_channels_label),
+            (self.audio_samplerate_menu, self.audio_samplerate_label),
+        ))
+        # The non-dropdown controls, same no-file rule. Every one's enabled
+        # state was already recomputed fresh above, so — like `extra`'s
+        # dropdowns — only the no-file side needs forcing here.
+        if not self.app.current_file_path:
+            for widget in (self.crf_slider, self.crf_label, self.crf_low_label, self.crf_high_label,
+                           self.strip_video_check, self.strip_audio_check,
+                           self.choose_streams_btn, self.passthru_check, self.passthru_label):
+                widget.setEnabled(False)
 
     def _retarget(self, menu, values, what=None):
         """Point a derived dropdown at a fresh list, toasting a forced snap —
@@ -470,9 +512,28 @@ class EncodingTab(MediaTab):
         before = self.resolution_menu.value()
         self.resolution_menu.set_values(formats.resolutions_for(source_height))
         after = self.resolution_menu.value()
-        if self._ready and before != after:
+        # before == NO_OPTION means the dropdown was just showing the
+        # no-file-imported placeholder (_apply_import_gate) a moment ago,
+        # not a real prior pick — recovering from that isn't a snap worth
+        # toasting about, same guard `_retarget` already has.
+        if self._ready and before != after and before != NO_OPTION:
             self.app.notify(
                 f"Resolution reset to {after} — this file is only {source_height}p tall.",
+                go_to_queue=False,
+            )
+
+    def _retarget_fps(self, source_fps):
+        """Caps the FPS list to the current file's own frame rate — separate
+        from `_retarget` since the reason a pick stops fitting is the
+        source's rate, not the container, so the toast needs its own
+        wording."""
+        before = self.fps_menu.value()
+        self.fps_menu.set_values(formats.fps_values_for(source_fps))
+        after = self.fps_menu.value()
+        if self._ready and before != after and before != NO_OPTION:
+            rate = f"{source_fps:.2f}" if source_fps else "?"
+            self.app.notify(
+                f"FPS reset to {after} — this file is only {rate}fps.",
                 go_to_queue=False,
             )
 
@@ -662,6 +723,8 @@ class EncodingTab(MediaTab):
                 bits.append(f"{kind}{self.crf_slider.value()}")
             if self.resolution_menu.value() != formats.SOURCE_RESOLUTION:
                 bits.append(self.resolution_menu.value())
+            if self.fps_menu.value() != formats.SOURCE_FPS:
+                bits.append(f"{self.fps_menu.value()}fps")
             if self.hdr_switch.isChecked():
                 bits.append("SDR")
             video = (" · ".join(bits), None)
@@ -748,11 +811,14 @@ class EncodingTab(MediaTab):
             "speed": self._menu_value(self.speed_menu),
             "quality": self.crf_slider.value(),
             "resolution": self.resolution_menu.value(),
+            "fps": self.fps_menu.value(),
             # A fact about the input at queue time, not a user choice — same
             # convention as mastering_max_nits/max_cll below — so a job
-            # queued now still scales against the source it was actually
-            # queued against even if the user swaps files before it runs.
+            # queued now still scales/retimes against the source it was
+            # actually queued against even if the user swaps files before
+            # it runs.
             "source_height": self.app.media_info.get("height"),
+            "source_fps": self.app.media_info.get("fps"),
             "gpu_enabled": bool(self.app.gpu_enabled),
             "hdr_to_sdr": self.hdr_switch.isChecked(),
             # Facts about the input at queue time — together they decide the
@@ -804,6 +870,8 @@ class EncodingTab(MediaTab):
                     menu.set(settings[key])
             if settings.get("resolution") and settings["resolution"] in self.resolution_menu.values():
                 self.resolution_menu.set(settings["resolution"])
+            if settings.get("fps") and settings["fps"] in self.fps_menu.values():
+                self.fps_menu.set(settings["fps"])
             if "audio_streams" in settings:
                 included, stream_settings = set(), {}
                 for entry in settings["audio_streams"] or []:
