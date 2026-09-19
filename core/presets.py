@@ -30,7 +30,7 @@ NONE_LABEL = "— none —"
 PRESET_KEYS = {
     "Encoding": [
         "output_format", "av_sync",
-        "encoder", "profile", "level", "speed", "quality", "resolution", "hdr_to_sdr",
+        "encoder", "profile", "level", "speed", "quality", "resolution", "fps", "hdr_to_sdr",
         "strip_video", "strip_audio",
     ],
     "Muxing": [

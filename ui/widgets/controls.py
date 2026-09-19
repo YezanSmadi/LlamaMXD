@@ -10,9 +10,12 @@ disabled and nothing fills in piece by piece. Animations run on
 when code sets a value. That's what lets the tabs write a settings dict into
 the form without tripping their own handlers."""
 import math
+import os
+import re
 import time
 
 from PySide6.QtCore import (
+    QByteArray,
     QEasingCurve,
     QPointF,
     QRectF,
@@ -23,6 +26,7 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QRegion
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractButton,
     QComboBox,
@@ -37,6 +41,30 @@ from PySide6.QtWidgets import (
 from ui import theme as T
 
 NO_OPTION = "—"
+
+_ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
+_SVG_CACHE = {}
+_BLACK_STROKE_RE = re.compile(r'stroke(=")#000(?:000)?"|stroke(:\s*)#000(?:000)?(;?)')
+
+
+def _icon_svg(name, color):
+    """A cached, recolored `QSvgRenderer` for `assets/<name>` — every literal
+    black stroke swapped for `color` (a hex string) before parsing, the same
+    "recolor by string replace" trick `carousel._svg_renderer` uses for
+    `fill="currentColor"`. Covers both forms a stroke-drawn icon actually
+    ships in: an inline `stroke="#000000"` attribute (select-multiple.svg)
+    and a `stroke: #000;` CSS property inside a `<style>` block
+    (deselect-multiple.svg) — `QSvgRenderer` honors both, so the same
+    recolor has to reach whichever one a given asset uses."""
+    key = (name, color)
+    if key not in _SVG_CACHE:
+        with open(os.path.join(_ASSETS, name), "r", encoding="utf-8") as fh:
+            data = fh.read()
+        data = _BLACK_STROKE_RE.sub(
+            lambda m: (f'stroke="{color}"' if m.group(1) else f'stroke{m.group(2)}{color}{m.group(3)}'), data)
+        data = data.replace('fill="currentColor"', f'fill="{color}"')
+        _SVG_CACHE[key] = QSvgRenderer(QByteArray(data.encode("utf-8")))
+    return _SVG_CACHE[key]
 
 
 def ui_font(px, bold=False, family=None):
@@ -134,9 +162,14 @@ def draw_cross(p, rect, color, width=1.6):
     p.restore()
 
 
+_SVG_ICON_KINDS = {"select-multiple": "select-multiple.svg", "deselect-multiple": "deselect-multiple.svg"}
+
+
 class IconButton(QPushButton):
     """A stylesheet-backed button whose glyph is painted: "close" (✕),
-    "up" (▲) or "down" (▼)."""
+    "up" (▲), "down" (▼), or an svg asset ("select-multiple" /
+    "deselect-multiple", recolored to match the button's own text color via
+    `_icon_svg` rather than shipped pre-tinted)."""
 
     def __init__(self, kind, role=None, width=None, height=None):
         super().__init__("")
@@ -161,6 +194,17 @@ class IconButton(QPushButton):
             color = T.theme.color("secondary_text" if self.isEnabled() else "secondary_disabled_text")
         if self._kind == "close":
             draw_cross(p, rect, color)
+            return
+        if self._kind in _SVG_ICON_KINDS:
+            # Square and centered, sized off the shorter side only — the
+            # button itself is usually a wide rectangle, and `render(rect)`
+            # stretches a square-viewBox svg to fill whatever rect it's
+            # given rather than preserving its aspect ratio, so a plain
+            # inset on all four sides of a wide `rect` squashed the icon.
+            side = min(rect.width(), rect.height()) * 0.56
+            icon_rect = QRectF(0, 0, side, side)
+            icon_rect.moveCenter(rect.center())
+            _icon_svg(_SVG_ICON_KINDS[self._kind], color.name()).render(p, icon_rect)
             return
         c = rect.center()
         half_w, half_h = 3.5, 2.2
@@ -355,8 +399,12 @@ class Dropdown(QComboBox):
         p.setPen(text_color)
         p.setFont(ui_font(13))
         text_rect = r.adjusted(8, 0, -self._ARROW_W - 4, 0)
-        elided = p.fontMetrics().elidedText(self.value(), Qt.ElideRight, int(text_rect.width()))
-        p.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, elided)
+        value = self.value()
+        elided = p.fontMetrics().elidedText(value, Qt.ElideRight, int(text_rect.width()))
+        # The NO_OPTION placeholder ("—") reads as a centred "nothing here"
+        # mark rather than left-aligned like it's the start of real text.
+        h_align = Qt.AlignHCenter if value == NO_OPTION else Qt.AlignLeft
+        p.drawText(text_rect, Qt.AlignVCenter | h_align, elided)
 
         cx, cy = r.right() - self._ARROW_W / 2, r.center().y() + 1
         pen = QPen(text_color, 1.8)
@@ -411,13 +459,18 @@ class CheckBox(QAbstractButton):
     def minimumSizeHint(self):
         return self.sizeHint()
 
+    def set_hover(self, hover):
+        """Drives the hover shade from outside — a caption-less checkbox whose
+        row (e.g. `TrackListBox`'s) is what the pointer is really over."""
+        if hover != self._hover:
+            self._hover = hover
+            self.update()
+
     def enterEvent(self, e):
-        self._hover = True
-        self.update()
+        self.set_hover(True)
 
     def leaveEvent(self, e):
-        self._hover = False
-        self.update()
+        self.set_hover(False)
 
     def paintEvent(self, _event):
         th = T.theme
@@ -835,6 +888,13 @@ class MarqueeGroup:
     def register(self, label):
         self._members.append(label)
 
+    def unregister(self, label):
+        """Drops a label that's about to be destroyed (a removed track row),
+        so `period()` never touches a deleted widget."""
+        if label in self._members:
+            self._members.remove(label)
+            self.reset()
+
     def reset(self):
         self.t0 = time.perf_counter()
 
@@ -907,8 +967,14 @@ class MarqueeLabel(QWidget):
     def _sync_timer(self):
         if self.isVisible() and self._overflows():
             if not self._timer.isActive():
+                # A label that starts scrolling *now* (imported after its group
+                # was already looping, or just shown) restarts the shared loop
+                # instead of landing at some arbitrary phase of it — which could
+                # be past its own sweep, leaving it parked until the next wrap.
                 if self._group is None:
                     self._t0 = time.perf_counter()
+                else:
+                    self._group.reset()
                 self._timer.start(16)
         else:
             self._timer.stop()

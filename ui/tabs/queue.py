@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QScrollArea,
+    QStackedLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -65,10 +66,11 @@ _DETAIL_FIELDS = [
     ("level", "Level", None),
     ("speed", "Speed", None),
     ("resolution", "Resolution", None),
+    ("fps", "FPS", None),
     ("strip_audio", "Strip Audio", "bool"),
 ]
 _VIDEO_DETAIL_KEYS = {"encoder", "gpu_enabled", "hdr_to_sdr", "quality", "profile", "level", "speed",
-                      "resolution"}
+                      "resolution", "fps"}
 _AUDIO_DETAIL_KEYS = set()
 
 
@@ -252,14 +254,34 @@ class QueueTab(QWidget):
         self.list_layout = QVBoxLayout(host)
         self.list_layout.setContentsMargins(0, 0, 4, 0)
         self.list_layout.setSpacing(8)
-        self.empty_label = QLabel("No tasks queued yet.")
-        self.empty_label.setProperty("role", "empty")
-        self.empty_label.setAlignment(Qt.AlignHCenter)
-        self.list_layout.addSpacing(10)
-        self.list_layout.addWidget(self.empty_label)
         self.list_layout.addStretch(1)
         self.scroll.setWidget(host)
-        root.addWidget(self.scroll, 1)
+
+        # The empty-state message lives in its own stack page, not inside
+        # `list_layout` alongside real rows — a stretch on both sides of it
+        # there would centre it nicely while the list is genuinely empty,
+        # but that same stretch stays live once rows exist too (a plain
+        # QLayout item, unaffected by any one widget's own `.hide()`),
+        # pushing the whole populated list down/off-centre instead of
+        # letting it anchor to the top and scroll normally. A `QStackedLayout`
+        # sidesteps that: only one page is ever shown, chosen explicitly by
+        # `_show_task_list`/`_show_empty_state` below, so the centring
+        # stretches here can never leak into the row list's own layout.
+        self.empty_label = QLabel("No tasks queued yet.")
+        self.empty_label.setProperty("role", "empty")
+        self.empty_label.setAlignment(Qt.AlignCenter)
+        self._empty_page = QWidget()
+        epl = QVBoxLayout(self._empty_page)
+        epl.addStretch(1)
+        epl.addWidget(self.empty_label, 0, Qt.AlignHCenter)
+        epl.addStretch(1)
+
+        list_area = QWidget()
+        self._list_stack = QStackedLayout(list_area)
+        self._list_stack.addWidget(self.scroll)
+        self._list_stack.addWidget(self._empty_page)
+        self._list_stack.setCurrentWidget(self._empty_page)
+        root.addWidget(list_area, 1)
 
         # Details popup — hidden until a row is clicked; fixed height so a
         # long Encode field list scrolls instead of growing the box.
@@ -319,7 +341,7 @@ class QueueTab(QWidget):
     # ------------------------------------------------------------------ #
     def add_task(self, description, settings=None, status="Queued", source_tab="Encoding"):
         """Adds a task row; returns its id."""
-        self.empty_label.hide()
+        self._list_stack.setCurrentWidget(self.scroll)
         task_id = self._next_id
         self._next_id += 1
         settings = settings or {}
@@ -422,7 +444,7 @@ class QueueTab(QWidget):
         if task_id == self._detail_task_id:
             self.detail_frame.hide()
         if not self._rows:
-            self.empty_label.show()
+            self._list_stack.setCurrentWidget(self._empty_page)
         self._update_overall_progress()
         if continue_with is not None:
             self._process_next(continue_with)
@@ -620,6 +642,7 @@ class QueueTab(QWidget):
             self._set_running(False)
             self._stop_timers()
             self.app.notify("All queued jobs finished.")
+            QTimer.singleShot(0, self._run_when_done)
             return
         task_id, rest = remaining[0], list(remaining[1:])
         row = self._rows.get(task_id)
@@ -649,6 +672,7 @@ class QueueTab(QWidget):
             input_file=ffmpeg_vars.INPUT_FILE,
             start_secs=ffmpeg_vars.START_SECS,
             verify_hdr_tag=uses_hdr_tonemap(),
+            priority=self.app.priority_level,
         )
         self._active = {"task_id": task_id, "job": job, "rest": rest,
                         "paused": False, "fraction": 0.0, "stage": None}
@@ -661,12 +685,29 @@ class QueueTab(QWidget):
         if not plan or not settings.get("url") or not settings.get("output_path"):
             self._fail_task(task_id, rest, "This download is missing its link or format choice.")
             return
-        job = YtDlpJob(settings["url"], plan, settings["output_path"])
+        job = YtDlpJob(settings["url"], plan, settings["output_path"],
+                       priority=self.app.priority_level)
         print("yt-dlp:", subprocess.list2cmdline(job.args))
         self._active = {"task_id": task_id, "job": job, "rest": rest,
                         "paused": False, "fraction": 0.0, "stage": _PREPARING}
         job.start()
         self._start_timers()
+
+    def apply_priority(self):
+        """Settings' Priority Level changed: move the running job (if any) to
+        it. Jobs started later read `app.priority_level` themselves."""
+        if self._active is not None:
+            self._active["job"].set_priority(self.app.priority_level)
+
+    def _run_when_done(self):
+        """Settings' "When Done" — held back while a failure notice is still
+        up (its modal would otherwise stack under the countdown) and dropped if
+        the user queued more work in the meantime."""
+        if self._error_dialog_open or self._error_queue:
+            QTimer.singleShot(500, self._run_when_done)
+            return
+        if self._active is None and not self.pending_task_count():
+            self.app.perform_when_done()
 
     def _start_timers(self):
         self._poll_timer.start()

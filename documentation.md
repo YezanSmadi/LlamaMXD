@@ -16,8 +16,9 @@ LlamaPY GUI/
 ├── .vscode/
 │   └── settings.json
 ├── assets/
-│   ├── llama.ico, LlamaMXD-Logo.svg
+│   ├── llama.ico, LlamaMXD-Logo.svg, RCA Cable Yellow.svg
 │   ├── audio-mute.svg, info.svg, expand.svg, shrink.svg
+│   ├── select-multiple.svg, deselect-multiple.svg
 │   ├── Wave Loop.json
 │   └── fonts/  (Roboto-Regular.ttf, Roboto-Medium.ttf, Oswald-VariableFont_wght.ttf)
 ├── core/
@@ -27,7 +28,10 @@ LlamaPY GUI/
 │   ├── ffmpeg_vars.py
 │   ├── formats.py
 │   ├── gpu.py
+│   ├── naming.py
+│   ├── power.py
 │   ├── presets.py
+│   ├── priority.py
 │   ├── system_info.py
 │   ├── theme.py
 │   ├── tools.py
@@ -91,6 +95,7 @@ practice installed globally, no venv):
 | Package | Version | Used for |
 |---|---|---|
 | `opencv-python` | 5.0.0 | `cv2` — seeks and grabs preview frames (`core/utilities.py`). |
+| `numpy` | 2.4.1 | Crops the sidebar's RCA cable art to its drawn content (`ui/widgets/panels.py`); also a dependency of `opencv-python`. |
 | `Pillow` | 11.3.0 | `PIL` — frame images, badge generation, thumbnail downloads. |
 | `rlottie-python` | 1.3.8 | Renders the `Wave Loop.json` visualiser (`ui/widgets/carousel.py`); optional at runtime. |
 | `ffmpeg-python` | 0.2.0 | Builds ffmpeg command lines (`core/ffmpeg_build.py`). |
@@ -125,26 +130,35 @@ virtual environment, matching the project's no-venv setup.
 Everything the app loads at runtime, all read `__file__`-anchored.
 
 - **`llama.ico`** — the window icon for the main window and every dialog.
-- **`llama.png`** — the sidebar logo, scaled to 140×140 at the screen's
-  device-pixel ratio (`ui/widgets/panels.py`'s `Sidebar`).
-- **`audio-mute.png`** / **`audio-mute.svg`** — the red speaker-with-X badge
-  drawn top-left on the preview while audio is stripped
-  (`ui/widgets/carousel.py`). The `.svg` is source artwork, not loaded.
+- **`LlamaMXD-Logo.svg`** — the sidebar logo (a vector), rendered at 4x
+  oversample and re-tinted to `primary_text` so it follows the theme
+  (`ui/widgets/panels.py`'s `Sidebar._load_logo`).
+- **`RCA Cable Yellow.svg`** — the RCA cable that plugs from the active nav
+  button into the tab frame (`_TabPipe`, `ui/widgets/panels.py`). Drawn in its
+  own fixed colours — not theme-tinted.
+- **`audio-mute.svg`** — the red speaker-with-X badge drawn top-left on the
+  preview while audio is stripped (`ui/widgets/carousel.py`); rendered exactly
+  as authored.
+- **`info.svg`** — the bottom-left info badge: a solid disc with the "i" cut
+  out as a hole. `carousel._paint_info_badge` paints a plain disc in the glyph
+  colour first, then this SVG (its `fill="currentColor"` string-replaced with
+  the disc colour) on top, so the hole shows the glyph colour through.
+- **`expand.svg`** / **`shrink.svg`** — the preview's expand / collapse corner
+  icon.
+- **`select-multiple.svg`** / **`deselect-multiple.svg`** — the Select All /
+  Deselect All icons on Muxing's track boxes. Stroke-drawn in black;
+  `controls._icon_svg` swaps the stroke for the button's own text colour.
 - **`Wave Loop.json`** — the Bodymovin/Lottie dot-wave animation shown in
   place of a stripped-video or audio-only preview, rendered by
   `rlottie-python`.
 - **`fonts/`** — Roboto Regular and Medium (Apache 2.0), the app typeface,
-  registered by `main.py` so text renders the same with or without Roboto
-  installed.
+  plus Oswald, all registered by `main.py` so text renders the same with or
+  without them installed.
 
-The bottom-left info badge is no longer an asset at all — it used to be a
-pair of PNGs (`info-icon-dark.png` / `info-icon-light.png`) rasterized from
-JPEG source art by a one-off `scripts/make_info_badges.py` script, but
-downscaling even a clean 512px PNG down to the badge's actual ~20-40px
-on-screen size left a visible stepped edge no amount of smoothing fixed.
-`ui/widgets/carousel.py`'s `_paint_info_badge` draws it as plain vector
-shapes (a filled circle + dot + rounded-rect stem) instead, so it stays
-crisp at any size — see that module.
+Every icon and badge is an SVG rendered through `QSvgRenderer`, not a scaled
+bitmap: a raster downscaled to a badge's actual ~20-40px on-screen size showed
+a visible stepped edge even through `SmoothPixmapTransform`, which a vector
+doesn't have at any size.
 
 ---
 
@@ -173,10 +187,15 @@ Brand palettes, contrast helpers and the settings file.
 - `load_settings()` / `save_settings(settings)` — `settings.json` beside
   `main.py`: `theme`, `appearance_mode` (`System`), `default_save_location`
   (`default_output_dir()`), `gpu_enabled` (`True`),
-  `downloader_separate_save` (`False`), `downloader_save_location` (`""`).
-  Missing keys or a missing/corrupt file fall back to those defaults. The
-  last two back Settings' "Separate Save for Downloader" toggle — see
-  `ui/tabs/settings.py` below.
+  `downloader_separate_save` (`False`), `downloader_save_location` (`""`),
+  `naming_template` (`core.naming.DEFAULT_TEMPLATE`), `when_done` (`Do
+  Nothing`), `when_done_reset` (`True`), `priority_level` (`Normal`).
+  Missing keys or a missing/corrupt file fall back to those defaults, and so
+  does a stored `naming_template` / `when_done` / `priority_level` that's no
+  longer valid (a hand-edited file) — checked against `core.naming`,
+  `core.power` and `core.priority`, which this module imports for that. The
+  separate-save pair backs Settings' "Separate Save for Downloader" toggle —
+  see `ui/tabs/settings.py` below.
 
 ### `core/tools.py`
 
@@ -268,6 +287,17 @@ combination unrepresentable rather than something a dialog has to catch.
   or below — never an upscale — falling back to the full ladder when the
   height isn't known yet. `resolution_height_for` is the reverse lookup
   `ffmpeg_vars._scale_vf` uses to build the actual `-vf scale=-2:<height>`.
+- `SOURCE_FPS` / `FPS_VALUES` / `fps_values_for(source_fps)` /
+  `fps_arg_for(fps)` — Encoding Video's optional frame-rate change, the same
+  idea as Resolution: `"Source"` (no change) plus a fixed ladder of round
+  rates (`"60"` … `"24"`, then `"12"`/`"8"` for deliberately choppy output —
+  whole numbers, not the NTSC-exact 29.97/23.976, since ffmpeg's `-r` retimes
+  onto an integer without this app reproducing drop-frame arithmetic).
+  `fps_values_for` caps the list to `"Source"` plus every rung at or below the
+  source's own rate — never a speed-up — with a 0.1 tolerance so a true
+  29.97/23.976 source still offers the round 30/24 just above it, and offers
+  the full ladder when the rate isn't known yet. `fps_arg_for` is the reverse
+  lookup `ffmpeg_vars._fps_arg` uses (`None` for `"Source"`).
 - `FFPROBE_VIDEO` / `FFPROBE_AUDIO` — ffprobe `codec_name` → display name,
   consumed by `utilities.probe_media`. Includes the two passthru-only codecs
   above (`"dts"` → `"DTS"`, `"truehd"` → `"Dolby TrueHD"`).
@@ -279,13 +309,73 @@ combination unrepresentable rather than something a dialog has to catch.
   `coerce(value, allowed, fallback)` snaps a value into a list and reports
   whether it changed.
 
+### `core/naming.py`
+
+The output file-name template Settings stores (`DEFAULT_TEMPLATE` =
+`{source}-{title}`, held on `app.naming_template`) and the tokens it can hold.
+Pure data + string handling, no UI code. Tokens split by *when* they can be
+known:
+
+- **Live** (`LIVE_TOKENS`) — `{source}` (the input's name; a download's site),
+  `{title}` (the embedded title tag; a download's video title), `{chapters}`
+  (`12ch`). Facts about the picked input, so a tab fills them into the Save
+  field as soon as it has them and refills as the probe lands.
+- **Queue-time** (`QUEUE_TOKENS`) — `{date}` `{time}` `{creation-time}`
+  `{quality}` `{bitrate}`. They depend on the clock or on settings still being
+  changed, so the Save field shows them as literal text and `resolve_path` fills
+  them into the job's own output path when it's queued.
+
+`ALL_TOKENS`; `unknown_tokens(template)`; `template_error(template)` (why a
+template can't be a file name — empty, illegal characters, unknown `{token}` —
+or `None`; what Settings' naming field validates against); `render(template,
+values, tokens)` (fills only the named tokens, leaves other braces literal, and
+**a token that resolves to nothing takes its neighbouring separator with it**, so
+`{source}-{title}` on an untitled file is `clip`, not `clip-`); `finalize(stem)`
+(Windows-safe: illegal characters, trailing dots, length cap); `render_live`
+(the Save-field name) and `resolve_path` (the queue-time pass; a name with no
+braces comes back unchanged). Value builders: `media_live_values(path, info)` /
+`download_live_values(info)` for the live pass, `media_queue_values(path, info,
+settings)` / `download_queue_values(info, settings)` for the queue-time one —
+`{quality}` is `crf22`/`q5` for an Encode (empty for Muxing and rate-control-less
+codecs) and the Resolution pick for a download; `{bitrate}` is the source's
+overall bitrate (a download's is the chosen streams' size over its length);
+`{creation-time}` is the media's creation tag, else the file's, or a download's
+upload date.
+
+### `core/power.py`
+
+Settings' "When Done" — what the machine (or the app) does once the Queue has
+finished its last job. No UI code. `ACTIONS` = Do Nothing / Shutdown / Sleep /
+Hibernate / Lock System / Log Off / Quit LlamaMXD; `SYSTEM_ACTIONS` (Shutdown,
+Sleep, Hibernate, Log Off) are the four that end or suspend the user's session,
+which the UI gives a cancellable countdown first. `command_for(action)` is the
+`shutdown.exe` argv for Shutdown / Hibernate / Log Off (`/t 0`, and no `/f` so
+an app holding unsaved work can still object); `perform(action)` carries it out
+and returns an error string or `None`. Sleep calls `SetSuspendState` through
+ctypes rather than `rundll32 powrprof.dll,SetSuspendState`, which is known to
+hibernate instead when hibernation is enabled; Lock calls `LockWorkStation`.
+`Quit` isn't handled here — closing the app is the window's job.
+
+### `core/priority.py`
+
+Process priority for the jobs the Queue runs (Settings' "Priority Level").
+`LEVELS` = High / Above Normal / Normal / Below Normal / Low (`DEFAULT_LEVEL`
+Normal), mapped to Windows priority classes by the names Task Manager uses.
+**Realtime is deliberately not offered** — it can starve the mouse and keyboard
+drivers. `creation_flag(level)` is the `Popen(creationflags=...)` bit that starts
+a process at a level; `set_process_priority(pid, level)` moves a running one
+(`OpenProcess` + `SetPriorityClass` via ctypes) and returns whether it worked;
+`get_process_priority(pid)` reads it back, for verification. Read by
+`core/ffmpeg_runner.py` and `core/ytdlp_runner.py`.
+
 ### `core/presets.py`
 
 Named codec/quality recipes, persisted to a gitignored `presets.json` at the
 repo root shaped `{tab: {name: settings}}`.
 
 A preset is a **recipe, not a job**: `PRESET_KEYS` limits what's stored to
-the container, the `av_sync` flag and the codec/quality choices, and
+the container, the `av_sync` flag and the codec/quality choices (including
+the Resolution and FPS picks), and
 deliberately excludes the trim, the input/output paths and (on Muxing) the
 track picks — so loading one can't quietly re-trim a clip or repoint its
 output. Presets are scoped
@@ -300,19 +390,30 @@ failed write can't take the app down mid-interaction.
 
 ### `core/gpu.py`
 
-GPU vendor detection and hardware-encoder selection for the Settings tab's
-Hardware Acceleration switch. No UI code.
+GPU detection and hardware-encoder selection for the Settings tab's Hardware
+Acceleration switch. No UI code. **Only a dedicated (discrete) GPU counts** — an
+integrated one is still listed in the system info, but never offered for
+acceleration; with none present the switch is forced off and greyed out.
 
 - `adapter_names()` — every video controller's display name, via `wmic path
   win32_VideoController get name` (PowerShell's `Get-CimInstance
   Win32_VideoController` as a fallback for a Windows build where `wmic` has
   been removed), cached for the process's lifetime.
-- `vendor()` — `"nvidia"` / `"amd"` / `"intel"` / `""`, whichever vendor's
-  marker (`"nvidia"`/`"geforce"`/`"rtx"`/...) appears in a detected adapter
-  name, preferring NVIDIA over AMD over Intel when more than one is present
-  (the discrete GPU, on a machine with both a discrete and an integrated
-  adapter). `display_name()` is the matching adapter's own name, for the
-  Settings system-info block.
+- `is_dedicated(name)` / `dedicated_adapters()` — WMI has no reliable
+  "discrete" flag (`AdapterRAM` is a 32-bit field that caps at 4GB and reports
+  an iGPU's carve-out as if it were VRAM), so adapters are classified by name.
+  Every NVIDIA adapter counts (there are no integrated NVIDIA desktop parts);
+  AMD is dedicated on `RX` / `PRO` / `VII` / FirePro / Instinct / R5-R9 / HD
+  numbering unless the name is an APU's (ends in "Graphics", or a bare Radeon
+  6xx/7xxM); Intel is dedicated only for Arc A-/B-series, Data Center GPU and
+  Flex — "Arc(TM) Graphics" (Meteor Lake) and every UHD / Iris / HD Graphics is
+  integrated. (`_adapter_vendor(name)` maps a name to its vendor.)
+- `vendor()` — the vendor to hardware-encode with: `"nvidia"` / `"amd"` /
+  `"intel"`, the first in that priority among the *dedicated* adapters, or `""`
+  when there are none (integrated graphics alone never count). `has_dedicated()`
+  is whether Hardware Acceleration can be offered at all. `display_name()` is
+  the dedicated adapter this app would accelerate with, else the first detected
+  adapter (an iGPU is still worth showing), for the Settings system-info block.
 - `available_encoders()` — every `*_nvenc`/`*_qsv`/`*_amf` id the installed
   ffmpeg build actually reports (`ffmpeg -encoders`), cached like
   `core.utilities.supports_fps_mode`.
@@ -329,7 +430,8 @@ Hardware Acceleration switch. No UI code.
 - `summary_label()` — the human-readable line the Settings tab shows under
   the switch: the GPU, its vendor's own encoder brand name (`_ENCODER_BRAND`
   — "NVENC" / "Quick Sync" / "AMF", not a generic "hardware encoding"), and
-  which codecs it would accelerate.
+  which codecs it would accelerate — or "No dedicated GPU detected — hardware
+  acceleration is unavailable." when there isn't one.
 
 ### `core/system_info.py`
 
@@ -394,7 +496,13 @@ stream's `color_transfer` tag — `smpte2084`/`arib-std-b67`), `width`/
 `bitrate_display_for`), `has_video`/`has_audio` (whether a stream of that
 kind exists *at all* — `False` only once the probe ran and found none,
 `None` while unknown, never conflated with "unrecognized codec"),
-`audio_streams` (every audio stream, each described by
+`fps` (the video stream's `r_frame_rate` as a plain float — `_parse_frame_rate`
+converts ffprobe's rational `"24000/1001"` string to 23.976, or `None` for a
+missing / `"0/0"` value), and the container's `title` / `chapters` (a count) /
+`bit_rate` (overall bits per second) / `creation_time` — the values behind the
+`{title}` `{chapters}` `{bitrate}` `{creation-time}` naming tokens
+(`core/naming.py`), each `None` when the file has none. `audio_streams` (every
+audio stream, each described by
 `_describe_audio_stream` — codec/channels/rate/bitrate/language — for the
 Encoding tab's multi-track picker), and, only for HDR content,
 `mastering_max_nits`/`mastering_min_nits`/`max_cll`/`max_fall` (a separate
@@ -509,6 +617,13 @@ when there's no real downscale to do — re-validated against `SOURCE_HEIGHT`
 at derive time rather than trusting the caller, since a saved preset applied
 to a smaller/differently-probed file could still name a rung too tall for it.
 
+**`FPS`/`SOURCE_FPS`/`FPS_ARG`** are the identical pattern for Encoding Video's
+frame-rate change (`core/formats.py`'s `FPS_VALUES`): `SOURCE_FPS` is the probed
+source rate snapshotted at queue time, and `FPS_ARG` (`_fps_arg`) is the `-r`
+value — `None` for `"Source"` or when the pick is no longer at or below the
+source's own rate (the same re-validation `_scale_vf` does, for the same
+reason).
+
 `MASTERING_MAX_NITS`/`MAX_CLL` carry the source's probed HDR static
 metadata through (snapshotted at queue time by `EncodingTab._gather_
 settings`, not read live) — both together decide `build_encode_command`'s
@@ -557,6 +672,10 @@ which already carry the `a:` type qualifier) counts across every output
 stream including video, silently landing on the kept video stream instead
 and shifting every audio value onto the next stream's slot; the code always
 emits the qualified `-ac:a:{i}`/`-ar:a:{i}` form.
+
+When `FPS_ARG` is set, `build_encode_command` sets the `r` output option
+directly — `-r` is a plain output option, not a `-vf` filter, so it has no
+interaction with the tonemap/scale filter chain below.
 
 When `ffmpeg_vars.HW_ENCODER` is set (GPU acceleration resolved a hardware
 encoder for this job — see `core/gpu.py`), the video stream's rate control
@@ -613,9 +732,13 @@ outright.
 it, no UI code in the module. `start()` launches the compiled argv via a plain
 `subprocess.Popen` (not ffmpeg-python's `run_async()`, which can't pass
 `creationflags` — `CREATE_NO_WINDOW` matters, or every job flashes a console
-window), at the OS's normal process priority (profiled: throttling it bought
-no protection and only slowed encodes down, so a `BELOW_NORMAL_PRIORITY_
-CLASS` attempt was removed).
+window). It runs at the OS's normal process priority unless Settings' "Priority
+Level" says otherwise: the constructor's `priority` argument is ORed into
+`creationflags` via `core.priority.creation_flag`, and `set_priority(level)`
+moves a running process (the level changed mid-job). Normal stays the default
+because throttling was profiled to be pure downside — event-loop lateness
+during a full-speed encode came back the same as idle either way, and a
+below-normal encode finished within 0.3% of a normal one.
 
 Two threads per job: one drains stderr continuously (mandatory — a full
 pipe blocks ffmpeg forever, and the tail becomes the failure reason), one
@@ -736,6 +859,14 @@ same control/event contract as `FfmpegJob` (`start` / `suspend` / `resume` /
   step (learned from the last measured rate this session, then from how fast
   the work folder grows). The value eases toward its target so a spike only
   nudges it.
+- **Priority** (`priority` argument, `set_priority(level)`) is applied to the
+  whole process tree, not just yt-dlp.exe: a child only inherits its parent's
+  class when that class is Low or Below Normal, so yt-dlp's own ffmpeg (started
+  later for a merge) would otherwise run at Normal under a High parent.
+  `_sync_priority` re-sets every PID in the tree, and `poll_events` re-runs it
+  about once a second (`_PRIORITY_SYNC_SECS`) while the level isn't Normal. A Job
+  Object priority limit was tried instead and refused — Windows rejects High
+  there without a privilege a normal user lacks.
 - `_folder_bytes` uses `os.stat(path)`, not `DirEntry.stat()` — the latter is
   stale for a file another process still has open.
 
@@ -749,7 +880,12 @@ same control/event contract as `FfmpegJob` (`start` / `suspend` / `resume` /
 `app`.
 
 - **State**: `current_file_path`, `default_save_location` (created at startup,
-  best-effort), `gpu_enabled`, `downloader_separate_save` /
+  best-effort), `gpu_preference` (what the user chose and what gets saved) vs.
+  `gpu_enabled` (what jobs use — forced off without a dedicated GPU, without
+  overwriting the saved choice, so a GPU added later picks it back up),
+  `naming_template`, `priority_level`, `when_done` (starts on Do Nothing when
+  `when_done_reset` is set, so a Shutdown chosen last session can't surprise
+  this one), `downloader_separate_save` /
   `downloader_save_location` (the Downloader's own optional save folder,
   off by default), `media_info` (`_empty_media_info()` — every
   probe key `None`, `audio_streams` `[]`), `thumb_frames` /
@@ -760,7 +896,8 @@ same control/event contract as `FfmpegJob` (`start` / `suspend` / `resume` /
   left, `#TabFrame` (holding the stack) on the right, the `TabIndicator` and a
   `ToastManager` on top.
 - `show_tab(name, animate=True)` — the outgoing tab's `on_leave`, switch,
-  align the pipe, take focus back from anything but a line edit, re-seat
+  `indicator.set_active` (plugs the new button's cable in and pulls the old one
+  out), take focus back from anything but a line edit, re-seat
   toasts. `showEvent` does the first alignment after geometry settles.
 - `notify(message, go_to_queue=True)` — posts a toast.
 - **File selection**: `register_media_tab(tab)`; `update_global_file(path)`
@@ -788,6 +925,14 @@ same control/event contract as `FfmpegJob` (`start` / `suspend` / `resume` /
   `set_default_save_location`, `set_downloader_separate_save`,
   `set_downloader_save_location` — each also refreshes the Downloader tab's
   own autofilled path via `DownloaderTab.refresh_default_location()`.
+- **Settings-driven**: `set_naming_template(template)` (every tab whose Save
+  field still holds an autofilled name re-derives it, via `refresh_auto_output`),
+  `set_priority_level(level)` (applied at once to a running job through
+  `QueueTab.apply_priority`), `perform_when_done()` (the queue just emptied —
+  Shutdown / Sleep / Hibernate / Log Off get a 30-second cancellable
+  `confirm_countdown` first; Lock and Quit act at once; a failure is shown).
+  `_broadcast_media_info` also calls each media tab's `refresh_auto_output`,
+  since the probe may carry a title / chapter count the naming format uses.
 - `_restyle` — re-applies the stylesheet on `ThemeManager.changed`.
 - `closeEvent` — confirms (pausing the queue for the prompt) when jobs are
   unfinished, autosaves Settings, kills the active job, quits; `_closing`
@@ -797,7 +942,12 @@ same control/event contract as `FfmpegJob` (`start` / `suspend` / `resume` /
 current tab's carousel (not while a text field has focus); Escape collapses
 whichever media tab's carousel preview is currently expanded, if any; Space
 toggles the queue on the Queue tab (not for auto-repeat, text fields,
-buttons or combo boxes); inactive while a modal is open.
+buttons or combo boxes); inactive while a modal is open. The same filter also
+watches `MouseButtonPress`: since every clickable is `Qt.NoFocus`, a click on a
+button or empty space never moved focus, leaving a line edit (or the
+TimeSpinner's field) visibly focused — cursor still blinking, still first in line
+for Ctrl+A/paste. If the focused widget is one of those and the click lands on
+some *other* object, its focus is cleared before the click is delivered.
 
 ### `ui/theme.py`
 
@@ -857,6 +1007,15 @@ and runs the first `_sync_controls`.
 - `_build_overview()` — Output Format, the preset row, the trim
   (`start_time_spinner`, `duration_time_spinner`), `av_sync_check`, and the
   `summary` rundown. `stream_page()` — an empty `(page, left, right)` panel.
+- `_apply_import_gate(extra=())` — run last in every `_sync_controls`. With no
+  file imported, every Overview/Video/Audio dropdown reads `—` (`NO_OPTION`,
+  centred) and disables: Output Format and Preset here, plus whatever
+  `(menu, label)` pairs `extra` names. Start Time, Clip Duration, A/V Sync and
+  the preset Save/Delete buttons disable with them (values untouched). Output
+  Format/Preset/the spinners get their enabled state set *both ways*
+  unconditionally, because nothing else ever re-enables them; `extra` dropdowns
+  only need the no-file side, since each one's own enabled state is recomputed
+  fresh every pass by the rest of `_sync_controls`.
 - `_on_control_change`, `_on_trim_change` (rundown only), `_on_format_change`
   (stops auto-adopting the source container, swaps the save path's
   extension).
@@ -867,6 +1026,18 @@ and runs the first `_sync_controls`.
   instance into/out of a shared `_ExpandedPreviewOverlay`, see `ui/widgets/
   carousel.py` below), `on_thumbnails`, `_autofill_output_path`,
   `select_save_location`.
+- Output naming: `_output_directory()` (the folder the Save field points at —
+  where the input file dialogs and the DropBox's Browse open, and the one part
+  of the field an autofill keeps), `_default_stem()` (Settings' naming format
+  filled with the live tokens; queue-time ones stay as literal text),
+  `refresh_auto_output()` (re-derives the suggested name when the probe lands or
+  the format changes, but only while the field still holds what was autofilled,
+  compared extension-less — a Browsed or hand-typed path is never touched),
+  `_resolve_output_tokens(settings)` (the queue-time pass, run in `run_now` /
+  `add_to_queue` before validation; the field keeps the tokens so each queue
+  stamps its own time). `_autofill_output_path` falls back to `OUTPUT_SUFFIX`
+  only when the name would equal the input's own path, and takes the input's own
+  extension while the Output Format still shows `—`.
 - Presets: `_refresh_preset_menu`, `_on_preset_selected`, `_on_preset_save`,
   `_on_preset_delete`.
 - `_apply_common` / `_gather_common` (the shared settings keys),
@@ -882,7 +1053,7 @@ same size in both tabs *only as long as neither tab's Video or Audio page is
 ever allowed to size taller than that tab's own Overview page*. There is no
 automatic guard against this — it's enforced by hand at the point a control
 is added to a Video/Audio panel. See `ui/tabs/muxing.py`'s `_track_panel`
-and `ui/tabs/encoding.py`'s Resolution/Strip Video row below for the two
+and `ui/tabs/encoding.py`'s Video-panel layout below for the two
 worked examples, and CLAUDE.md's "Muxing and Encoding" section for the full
 explanation.
 
@@ -895,8 +1066,13 @@ not the single `Auto`/`Track N` dropdown an earlier version of this tab
 used.
 
 - `_track_panel(kind)` builds each of the Video/Audio panels: the
-  `TrackListBox` itself, `Add Stream(s)`, `Remove Stream(s)` (danger-role)
-  sharing a line with the Strip checkbox. Fixes the box's height to exactly
+  `TrackListBox` itself, a top line of two **icon buttons** — Select All /
+  Deselect All (`IconButton` `select-multiple` / `deselect-multiple`, with hover
+  tooltips) sized to half of the Add/Remove buttons' width and stretched
+  vertically to fill whatever column height is left — then `Add Stream(s)`, then
+  `Remove Stream(s)` (danger-role) sharing a line with the Strip checkbox. The
+  two-across rows are what keep the four-row column under the box's fixed
+  height. Fixes the box's height to exactly
   `self.panels.widget(0).sizeHint().height()` (Overview's own height) — the
   DropBox-height invariant above, enforced here specifically.
 - `_add_stream(kind)` browses a second file and probes it off the GUI
@@ -906,6 +1082,9 @@ used.
   streams are kept in `_video_external`/`_audio_external`
   (`{row_id: {"file", "index", "label"}}`), independent of the primary
   input.
+- `_select_all(kind)` / `_deselect_all(kind)` check / uncheck every row
+  (`TrackListBox.item_ids()`, regardless of current state) without adding or
+  removing any — the non-destructive counterpart to Remove.
 - `_remove_streams(kind)` acts on every currently-checked row: an external
   row is dropped from the box outright, a source row (the primary file's
   own track, which can't actually be deleted) is unchecked instead
@@ -925,18 +1104,24 @@ used.
 ### `ui/tabs/encoding.py`
 
 `EncodingTab(MediaTab)` — the re-encode tab. Its Video panel keeps the same
-DropBox-height invariant (above) by folding `resolution_menu` onto
-`strip_video_check`'s row rather than giving it its own — a dedicated row
-(even with a compact caption) was enough on its own to push the page's
-`sizeHint` past Overview's, which silently shrinks this tab's DropBox below
-Muxing's.
+DropBox-height invariant (above): the rule is that a new control is never free
+height *or* free width just because there's a blank stretch nearby — a row's
+height is set by its tallest column, and two controls that need to align
+against each other should be literal siblings in one layout call, not one
+stacked inside a wrapper. CLAUDE.md's "Encoding's own worked example" has the
+full history of the layouts tried.
 
-- `build_video` — Encoder / Profile / Level / Encoder Preset, the quality
-  slider (`crf_slider`, inverted; `crf_label`, `crf_low_label`,
-  `crf_high_label`), `hdr_label` + `hdr_switch` top-right, `resolution_menu`
-  (the downscale ceiling — `core.formats.RESOLUTIONS`) sharing a row with
-  `strip_video_check` bottom-right (not a row of its own — see the
-  DropBox-height invariant note above).
+- `build_video` — one row of Encoder / Profile / Level / Encoder Preset /
+  `resolution_menu` (the downscale ceiling — `core.formats.RESOLUTIONS`); a
+  caption row beneath it ("Quality (CRF): NN" beside "FPS:"); then a controls
+  row with the quality slider (`crf_slider`, inverted; `crf_label`,
+  `crf_low_label`, `crf_high_label`) beside the bare `fps_menu` (a frame-rate
+  ceiling — `core.formats.FPS_VALUES`). The slider and its caption are
+  **fixed to span exactly Encoder..Encoder Preset** (so "Placebo" lands flush
+  with Encoder Preset's right edge), and FPS's caption is width-matched to its
+  dropdown the same way; the FPS dropdown sits in the gap the slider leaves,
+  landing directly under Resolution. The right column holds `hdr_label` +
+  `hdr_switch` (top) and `strip_video_check` (bottom), right-aligned.
 - `build_audio` — `audio_track_menu`, `choose_streams_btn`, `passthru_check`
   on one row; `audio_codec_menu`, `audio_bitrate_menu`, `audio_channels_menu`,
   `audio_samplerate_menu` on the next; `strip_audio_check`; dropdowns sized
@@ -945,9 +1130,14 @@ Muxing's.
 - HDR preview: `_on_hdr_toggle`, `on_thumbnails`, `on_hdr_frames_ready`,
   `_apply_preview_frames`, `reset_hdr_preview` (turns HDR→SDR back off
   without a raw/tone-mapped frame flash — called when a new file arrives).
-- `_sync_controls` (the six rules), `_retarget` (toasts a forced snap),
-  `_retarget_resolution` (caps Resolution to the newly-probed source height,
-  its own toast wording since the reason is the file, not the container),
+- `_sync_controls` (the six rules, then `_apply_import_gate` with every
+  Encoder..Sample Rate dropdown as `extra`, plus a block disabling the
+  non-dropdown controls — quality slider and captions, both Strip checkboxes,
+  Choose Stream(s), Passthru — while no file is imported), `_retarget` (toasts a
+  forced snap), `_retarget_resolution` / `_retarget_fps` (cap Resolution / FPS to
+  the newly-probed source height / rate, each with its own toast wording since
+  the reason is the file, not the container; all three skip the toast when the
+  prior value was the no-file `—`),
   `_speed_values` / `_apply_speed`, `_apply_quality` / `_update_quality_label`.
 - Multi-stream audio: `_audio_track_values`, `_index_from_track_label`,
   `_save_active_audio_stream`, `_active_stream_info`,
@@ -957,9 +1147,9 @@ Muxing's.
   language tag for one stream, snapshotted into each gathered
   `audio_streams` entry — see `core/ffmpeg_build.py`'s stale-metadata note).
 - `_refresh_summary`, `on_media_info` → `_auto_select_codecs`,
-  `_gather_settings` (also snapshots `resolution`/`source_height`, a fact
-  about the input at queue time, same convention as `mastering_max_nits`/
-  `max_cll`), `_apply_settings` (dependency order), `_validate_specific`.
+  `_gather_settings` (also carries `resolution`/`fps` and snapshots
+  `source_height`/`source_fps`, facts about the input at queue time, same
+  convention as `mastering_max_nits`/`max_cll`), `_apply_settings` (dependency order), `_validate_specific`.
 
 ### `ui/tabs/downloader.py`
 
@@ -972,9 +1162,17 @@ link).
 `_on_link_drop`, `fetch`, `on_ytdlp_info`, `_apply_info` (adopts a video,
 resetting every pick), `_sync_controls` (Mode → Video Codec → Resolution →
 Audio Codec → Format, or Format → Resolution for Audio Only; resolves the
-plan for the size readout and extension), `_show_audio_picker`, `_retarget`,
-`_menu_value`, `_current_directory`, `_autofill_output_path`,
-`_apply_output_extension`, `select_save_location`, `_gather_settings`,
+plan for the size readout and extension; with nothing fetched every dropdown
+reads `—`, the same no-file convention as `MediaTab._apply_import_gate`,
+inlined here since this isn't a `MediaTab`), `_show_audio_picker`, `_retarget`,
+`_menu_value`, `_current_directory`, `_name_info` / `_default_stem` (the fetched
+video run through Settings' naming format — `{source}` is the site, `{title}`
+the video's title, made file-name-safe with `downloader.safe_stem`, which swaps
+illegal characters for look-alikes instead of dropping them),
+`_autofill_output_path` (records `_auto_output`), `refresh_auto_output` (the
+naming format changed — re-derive only while the field still holds the
+autofill), `_resolve_output_tokens` (the queue-time pass, in `download_now` /
+`add_to_queue`), `_apply_output_extension`, `select_save_location`, `_gather_settings`,
 `_validate_settings` (nothing fetched, link edited since the fetch, no save
 location, then `confirm_output_path`), `_describe`, `download_now`,
 `add_to_queue`, `has_fetched()`, `refresh_default_location()` (re-adopts
@@ -990,14 +1188,19 @@ tells this apart from Encoding's own unrelated `"quality"`.
 
 - `_DETAIL_FIELDS`, `_VIDEO_DETAIL_KEYS`, `_AUDIO_DETAIL_KEYS` — which settings
   keys the details popup shows, and which a stripped stream hides.
-  `_DETAIL_FIELDS` includes `resolution` (hidden under `strip_video`, same
-  as `quality`/`profile`/`level`/`speed`). `_show_details` special-cases
+  `_DETAIL_FIELDS` includes `resolution` and `fps` (both hidden under
+  `strip_video`, same as `quality`/`profile`/`level`/`speed`). `_show_details` special-cases
   `key == "quality"` for a Downloader task specifically, relabeling that one
   row "Resolution" — the same settings key holds Encoding's own CRF/qscale
   value for an Encoding task, so the row needs to say something different
   depending on which tab queued it. Encoding's `audio_streams` and Muxing's
   `video_tracks`/`audio_tracks` each render one detail row per entry
   (per checked track, for Muxing).
+- The empty state ("No tasks queued yet.") is its own page in `_list_stack`, a
+  `QStackedLayout` beside the real row list (`scroll`) — not a widget sharing
+  the list's layout: a stretch item there stays live after real rows arrive and
+  pushes the populated list off-centre, whereas a stack shows exactly one page,
+  switched explicitly by `add_task` / `remove_task`.
 - `QueueRow(QWidget)` — one painted task row (`set_status`, `set_fraction`;
   signals `clicked`, `removeRequested`).
 - `ProgressStrip(QWidget)` — the flat overall bar (`set_value`).
@@ -1010,36 +1213,62 @@ tells this apart from Encoding's own unrelated `"quality"`.
     `on_leave`;
   - details — `_show_details`, `_go_to_detail_file`;
   - control — `_set_running`, `toggle_queue`, `start_queue`, `pause_queue`,
-    `stop_queue`, `shutdown`, `start_task`, `_running_label`;
+    `stop_queue`, `shutdown`, `start_task`, `_running_label`,
+    `apply_priority` (Settings' Priority Level changed: move the running job to
+    it; later jobs read `app.priority_level` themselves), `_run_when_done`
+    (posted with a zero-delay timer when a batch ends; waits out any open
+    failure dialog and drops out if more work was queued meanwhile, then calls
+    `app.perform_when_done`);
   - jobs — `_process_next`, `_start_download`, `_start_timers` /
     `_stop_timers`, `_poll` (100ms event drain), `_animate_fill` (16ms fill
     easing), `_halt_active`, `_finish_task`, `_fail_task`, `_show_errors`.
 
 ### `ui/tabs/settings.py`
 
-`_Swatch` (a 26px colour chip for the previewed palette). `SettingsTab(QWidget)`
-— a read-only, fixed-width System info label (CPU/GPU/RAM, from
-`core.system_info` / `core.gpu`) in the top-right corner of the title row
-(not a row of its own — a long CPU name sizing to its own content could
-overflow the tab frame); `_settings_snapshot` (now also
-`downloader_separate_save`/`downloader_save_location` — the entry's display
-text while separate-save is off is just the shared default shown as a
-fallback, never itself persisted as a real separate location),
-`_sync_state_from_widgets`, `autosave`, `on_leave`, `on_enter` (refreshes
-disk usage — free space can change while the app sits on another tab),
-`_show_swatches`, `_preview_theme` (hover), `_end_preview` (list closed),
-`_on_theme_change` (commit), `_on_appearance_change`,
-`_browse_save_location`, `_refresh_disk_usage` (total/free space for the
-Default Save Location's drive, in STOP_RED at or below 25GB free),
-`_on_downloader_separate_toggle` (reveals/hides the second save-location
-row, persists via `app.set_downloader_separate_save`),
-`_browse_downloader_location`, `_on_gpu_toggle` (also refreshes the status
-label via `_refresh_gpu_status`, naming the GPU, its encoder brand —
-NVENC/Quick Sync/AMF — and which codecs, or "Off" while unchecked),
-`_on_save`, `_on_reset_defaults` (`ask_yes_no`-confirmed — resets theme,
-appearance mode, default save location, the Downloader's separate-save
-toggle and location, and GPU acceleration all back to their defaults in one
-action, then autosaves).
+`SETTINGS_PAGES` = Appearance / Output / Performance. `_Swatch` (a 26px colour
+chip for the previewed palette). `SettingsTab(QWidget)` — the same `SubTabBar`
+Muxing/Encoding use, over a `QStackedWidget` inside a scroll area (so a revealed
+row can never clip), with a read-only, fixed-width System info label (CPU / GPU /
+RAM, from `core.system_info` / `core.gpu`) sharing the tab bar's row, top-right
+(not a row of its own — a long CPU name sizing to its own content could overflow
+the tab frame). Side padding (`_SIDE_PAD` 10) and the tab bar's top padding
+(`_TOP_PAD` 5) match Muxing/Encoding's, so the bar sits in the same place on every
+tab. Reset to Default / Save are pinned below the pages and act on *every*
+setting, whichever page is showing.
+
+- **Appearance** — Theme (a `Dropdown` + two colour swatches: hovering a row
+  previews that palette across the whole app, picking commits and saves, closing
+  the list without picking reverts) and Appearance Mode (System / Light / Dark).
+- **Output** — Default Save Location (entry + Browse, with the drive's total/free
+  space beneath, in STOP_RED at or below 25GB free), Separate Save for Downloader
+  (reveals a second entry + Browse for the Downloader's own folder), and File
+  Naming (an entry with the token list beneath it turning into a STOP_RED reason
+  while what's typed is invalid; nothing is applied until Enter/focus-out, and
+  never while invalid).
+- **Performance** — Hardware Acceleration (GPU) (a `Switch` with a status line
+  naming the GPU, its encoder brand and the codecs it covers — or that none was
+  found; forced off and greyed out without a dedicated GPU), Priority Level
+  (High … Low, applied to a running job immediately) and When Done (with a
+  "Reset to 'Do Nothing' when the app is relaunched" checkbox, on by default).
+
+Methods: `_settings_snapshot` (persists `app.gpu_preference`, not the
+possibly-forced-off switch; and the Downloader's entry text only while
+separate-save is on — the display text while it's off is the shared default shown
+as a fallback, never itself a real separate location), `_sync_state_from_widgets`,
+`autosave`, `on_leave`, `on_enter` (refreshes disk usage — free space can change
+while the app sits elsewhere), `_show_swatches`, `_preview_theme` (hover),
+`_end_preview` (list closed), `_on_theme_change` (commit), `_on_appearance_change`,
+`_browse_save_location`, `_refresh_disk_usage`, `_on_downloader_separate_toggle`,
+`_browse_downloader_location`, `_validate_naming_text` / `_commit_naming` (against
+`core.naming.template_error`; pushes a valid format to
+`app.set_naming_template`), `_on_priority_change`, `_on_when_done_change`,
+`_on_when_done_reset_toggle`, `_on_gpu_toggle` (also refreshes the status label
+via `_refresh_gpu_status`), `_on_save` (persists and toasts "Settings saved." — no
+jump to the Queue), `_on_reset_defaults` (`ask_yes_no`-confirmed — resets theme,
+appearance mode, default save location, the Downloader's separate-save toggle and
+location, GPU acceleration, file naming, priority level and When Done all back to
+their defaults in one action, then autosaves). Settings also autosave when the tab
+is left and on close.
 
 ### `ui/widgets/controls.py`
 
@@ -1050,13 +1279,21 @@ widest of several button labels), `restyle(widget)`, `set_enabled(widget,
 label, enabled)`, `anim(owner, duration, on_value, curve)`,
 `draw_cross(painter, rect, color)`.
 
-- `IconButton(QPushButton)` — a painted ✕ / ▲ / ▼ glyph.
+- `IconButton(QPushButton)` — a painted ✕ / ▲ / ▼ glyph, or an SVG icon
+  (`select-multiple` / `deselect-multiple`). SVG icons go through `_icon_svg(name,
+  color)`, a cached `QSvgRenderer` whose literal black strokes (both the inline
+  `stroke="#000000"` attribute and a `stroke: #000;` CSS property — each asset
+  uses a different one) and `fill="currentColor"` are string-replaced with the
+  button's own text colour before parsing. Drawn square (0.56 of the shorter
+  side) and centred — `render(rect)` on a wide rect would stretch the icon.
 - `ClickableLabel(QLabel)` — emits `clicked`.
-- `Dropdown(QComboBox)` — self-painted; `picked`, `hovered`, `popupClosed`;
+- `Dropdown(QComboBox)` — self-painted (the `NO_OPTION` placeholder is centred,
+  real text left-aligned); `picked`, `hovered`, `popupClosed`;
   `value`, `values`, `set` (display override for an unlisted value),
   `set_values`, `close`, `width_for`; the popup unrolls via an animated mask.
 - `CheckBox(QAbstractButton)` — `color_key`, fading fill, greyed when
-  disabled.
+  disabled; `set_hover(bool)` lets a caption-less checkbox's row drive its hover
+  shade.
 - `Switch(QAbstractButton)` — sliding knob.
 - `SegmentedButton(QWidget)` — sliding selection pill; `changed`, `value`,
   `set`.
@@ -1064,26 +1301,54 @@ label, enabled)`, `anim(owner, duration, on_value, curve)`,
   accelerating ▲/▼ stepper; `seconds`, `set_seconds`, `valueChanged`.
 - `MarqueeLabel(QWidget)` — scrolls overflowing text; `setText`, `text`,
   `set_color_key`, `doubleClicked`. `MarqueeGroup` — one shared clock several
-  `MarqueeLabel`s can join (`SummaryPanel`'s Video/Audio/Length rows do) so
-  they all sweep and restart in step rather than drifting apart.
+  `MarqueeLabel`s can join (`SummaryPanel`'s Video/Audio/Length rows and every
+  `TrackListBox` row do) so they all sweep and restart in step rather than
+  drifting apart; `unregister(label)` drops a label about to be destroyed, and a
+  label that *starts* scrolling restarts the shared loop rather than landing
+  mid-phase.
 
 ### `ui/widgets/panels.py`
 
 Constants `ASSETS`, `VERSION`, `MEDIA_FILTER`; `local_paths(mime)` (local
 files carried by a drag).
 
-- `SubTabBar(QWidget)` — `changed`, `active`, `set_active`, `set_marked`.
-- `DropBox(QWidget)` — `fileSelected`, `collapse` (leaves only Browse once a
+- `SubTabBar(QWidget)` — `changed`, `active`, `set_active`, `set_marked`. The
+  active tab is `primary` at 30px, inactive `secondary` at 24px, bottom-aligned
+  and standing on a 4px square-ended `primary` line (`_LINE_H`) that runs the
+  bar's whole width — the tabs are drawn a corner-radius taller and clipped so
+  their feet sit flat on it (34px in total).
+- `DropBox(QWidget)` — `fileSelected`, an optional `start_dir` callable (the
+  folder Browse opens in — `MediaTab._output_directory`, not the app's working
+  folder), `collapse` (leaves only Browse once a
   file is chosen), `reset` (the reverse — back to pristine, used when a
   picked file turns out unreadable), `browse`; drag-over highlight.
 - `BorderedFrame(QWidget)` — the border alone; `color_key` defaults to
   `primary`, `TrackListBox` (`ui/widgets/tracklist.py`) passes `secondary`.
 - `SummaryPanel(QWidget)` — `set_values(rows)`.
-- `Sidebar(QWidget)` — `navigate` signal, `buttons` dict, `WIDTH`; the logo
-  (`assets/LlamaMXD-Logo.svg`) is rendered at 4x oversample and re-tinted to
-  `primary_text` via `CompositionMode_SourceIn` (`_load_logo`), so it
-  changes colour with the theme the same way the title text does.
-- `TabIndicator(QWidget)` — `align_to(button, frame_left, animate)`.
+- `Sidebar(QWidget)` — `navigate` signal, `buttons` dict, `WIDTH`,
+  `NAV_BUTTON_WIDTH` (110 — narrower than the sidebar, so the gap the cable runs
+  through is wide enough to see its lead trail out from behind the button); the
+  logo (`assets/LlamaMXD-Logo.svg`) is rendered at 4x oversample and re-tinted to
+  `primary_text` via `CompositionMode_SourceIn` (`_load_logo`), so it changes
+  colour with the theme the same way the title text does.
+- `_cable_base_image()` / `_cable_pixmap(height)` — the RCA cable art
+  (`assets/RCA Cable Yellow.svg`): rendered once at 3x and cropped to its drawn
+  content with numpy (the SVG's viewBox is ~3x wider than the plug, so an
+  uncropped rotation squashed it into one end of its frame), then rotated 90°
+  clockwise so the grey collar faces the tab frame and the cable trails back
+  toward the button, cached per height and oversampled 4x.
+- `_TabPipe(QWidget)` — one nav button's own pipe: the cable sliding out of the
+  button and toward the frame. `extension` (0 hidden … 1 plugged in) slides the
+  whole cable; at 1 the long thin pin (`_PIN_FRAC`) is entirely past the frame's
+  edge, hidden like a real pin in a jack, while the wider base collar right
+  behind it, the yellow shell and the cable stay visible. One per button so an
+  outgoing and an incoming pipe animate at once.
+- `TabIndicator(QWidget)` — owns the pipes (created lazily per button, shown
+  explicitly since a child created after its parent is on screen doesn't inherit
+  that); `set_active(name, buttons, frame_left, animate)` re-lays out every
+  pipe's geometry (a button's position is only final once the window's shown) and
+  animates the outgoing/incoming pair together. Paints nothing of its own and is
+  transparent to the mouse.
 
 ### `ui/widgets/carousel.py`
 
@@ -1134,6 +1399,12 @@ so `info.svg`'s cut-out "i" hole shows it through).
   `show_modal()` returns the pressed label or None. `_build_extra` is the
   subclass hook.
 - `show_message`, `ask_yes_no`, `ask_text`, `confirm_output_path`.
+- `CountdownDialog(MessageDialog)` / `confirm_countdown(parent, title, message,
+  seconds=30, now_label="Now")` — a confirmation that goes ahead by itself:
+  `message` (with `{n}` for the seconds left) counts down once a second and the
+  dialog answers "Now" at zero. The first button acts immediately; Cancel,
+  Escape and the close box call it off. Returns True when it ran out or "Now" was
+  pressed. Used for When Done's Shutdown / Sleep / Hibernate / Log Off.
 - `AudioStreamPickerDialog(MessageDialog)` / `choose_audio_streams` — one
   checkbox per probed stream; never returns an empty set.
 - `ExternalStreamPickerDialog(MessageDialog)` / `pick_external_streams` —
@@ -1149,6 +1420,11 @@ so `info.svg`'s cut-out "i" hole shows it through).
 
 ### `ui/widgets/tracklist.py`
 
+- `_TrackRow(QWidget)` — one row: a text-less `CheckBox` plus a `MarqueeLabel`
+  (Arial 12 bold, matching the checkbox's old caption) joined to the box's one
+  `MarqueeGroup`, so a long label (an `External: …` row) scrolls while short ones
+  sit still. A click anywhere on the row toggles the checkbox, and hover is
+  forwarded through `CheckBox.set_hover`.
 - `TrackListBox(QWidget)` — Muxing's checkable, scrollable track picker
   (replaced the original single `Auto`/`Track N` dropdown): one checkbox row
   per stream, any combination checked maps into the output. `set_items(items,
@@ -1159,7 +1435,8 @@ so `info.svg`'s cut-out "i" hole shows it through).
   mistaken for a carried-over pick). A brand new row defaults to checked
   only in the very first position. `set_checked(row_id, checked)` (the
   programmatic counterpart of clicking a row's own checkbox — doesn't emit
-  `changed`), `item_count()`. `setFixedHeight` — fixed, not a minimum, so a
+  `changed`), `item_count()`, `item_ids()` (every row's id, checked or not —
+  what Select All / Deselect All iterate, unlike `checked_ids()`). `setFixedHeight` — fixed, not a minimum, so a
   heavily-populated box never grows the panel around it (`MuxingTab.
   _track_panel` sets it to exactly `Overview`'s own `sizeHint().height()` —
   see the DropBox-height invariant note under `ui/widgets/panels.py` above).

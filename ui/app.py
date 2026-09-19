@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core import downloader, formats
+from core import downloader, formats, gpu, power, priority
 from core.theme import load_settings
 from core.utilities import extract_hdr_tonemapped_thumbnails, extract_video_thumbnails, probe_media
 from ui import theme as T
@@ -32,7 +32,7 @@ from ui.tabs.media_tab import set_line_text
 from ui.tabs.muxing import MuxingTab
 from ui.tabs.queue import QueueTab
 from ui.tabs.settings import SettingsTab
-from ui.widgets.dialogs import ask_yes_no, show_message
+from ui.widgets.dialogs import ask_yes_no, confirm_countdown, show_message
 from ui.widgets.panels import ASSETS, Sidebar, TabIndicator
 from ui.widgets.toast import ToastManager
 from ui.workers import emit_progress, pil_to_qimage, run_async
@@ -40,7 +40,8 @@ from ui.workers import emit_progress, pil_to_qimage, run_async
 TAB_NAMES = ("Muxing", "Encoding", "Downloader", "Queue", "Settings")
 
 _MEDIA_INFO_KEYS = ("container", "video", "audio", "video_profile", "video_level", "hdr",
-                    "width", "height", "duration", "file_size", "has_video", "has_audio")
+                    "width", "height", "duration", "file_size", "has_video", "has_audio",
+                    "title", "chapters", "bit_rate", "creation_time")
 
 
 def _empty_media_info():
@@ -110,11 +111,24 @@ class MainWindow(QWidget):
         settings = load_settings()
         self.current_file_path = ""
         self.default_save_location = settings["default_save_location"]
-        self.gpu_enabled = bool(settings["gpu_enabled"])
+        # `gpu_preference` is what the user chose (and what gets saved);
+        # `gpu_enabled` is what jobs actually use -- forced off on a machine
+        # with no dedicated GPU, without overwriting the saved choice (a GPU
+        # added later picks the preference back up).
+        self.gpu_preference = bool(settings["gpu_enabled"])
+        self.gpu_enabled = self.gpu_preference and gpu.has_dedicated()
         # The Downloader's own save folder, used instead of the shared
         # default only while separate-save is on and a folder's been set.
         self.downloader_separate_save = bool(settings["downloader_separate_save"])
         self.downloader_save_location = settings["downloader_save_location"] or ""
+        # Settings' output naming format (`core.naming`), the Queue's job
+        # priority, and what to do when the queue empties. "When Done" starts
+        # over at Do Nothing when its reset-on-launch flag is set, so a
+        # Shutdown chosen last session can't surprise this one.
+        self.naming_template = settings["naming_template"]
+        self.priority_level = settings["priority_level"]
+        self.when_done_reset = bool(settings["when_done_reset"])
+        self.when_done = power.DO_NOTHING if self.when_done_reset else settings["when_done"]
         if self.default_save_location:
             try:
                 os.makedirs(self.default_save_location, exist_ok=True)
@@ -202,7 +216,7 @@ class MainWindow(QWidget):
         on_enter = getattr(incoming, "on_enter", None)
         if callable(on_enter):
             on_enter()
-        self.indicator.align_to(self.sidebar.buttons[name], self.tab_frame.x(), animate=animate)
+        self.indicator.set_active(name, self.sidebar.buttons, self.tab_frame.x(), animate=animate)
         if not isinstance(QApplication.focusWidget(), QLineEdit):
             self.setFocus()
         self.toasts.relayout()
@@ -245,6 +259,47 @@ class MainWindow(QWidget):
         if self.downloader_separate_save and self.downloader_save_location:
             return self.downloader_save_location
         return self.default_save_location
+
+    def set_naming_template(self, template):
+        """A new output naming format from Settings: every tab whose Save
+        field still holds an autofilled name re-derives it live."""
+        if template == self.naming_template:
+            return
+        self.naming_template = template
+        for tab in (*self.media_tabs, self.tabs.get("Downloader")):
+            if tab is not None:
+                tab.refresh_auto_output()
+
+    def set_priority_level(self, level):
+        """A new job priority from Settings — applied at once to a job that's
+        already running, and to every job started after."""
+        self.priority_level = level
+        queue_tab = self.tabs.get("Queue")
+        if queue_tab is not None:
+            queue_tab.apply_priority()
+
+    def perform_when_done(self):
+        """The queue just emptied: carry out Settings' "When Done" choice.
+        The four that end or suspend the Windows session get a 30-second
+        cancellable countdown first — nothing is worth a surprise shutdown."""
+        action = self.when_done
+        if action == power.DO_NOTHING:
+            return
+        if action == power.QUIT:
+            self.close()
+            return
+        if action in power.SYSTEM_ACTIONS:
+            what = {power.SHUTDOWN: "shut down", power.SLEEP: "go to sleep",
+                    power.HIBERNATE: "hibernate", power.LOG_OFF: "log off"}[action]
+            if not confirm_countdown(
+                self, action, f"The queue has finished. Your PC will {what} in {{n}} seconds.\n\n"
+                              "Cancel to stay as you are.", seconds=30, now_label=action,
+            ):
+                self.notify(f"{action} cancelled.", go_to_queue=False)
+                return
+        error = power.perform(action)
+        if error:
+            show_message(self, "When Done", error)
 
     def set_downloader_separate_save(self, enabled):
         self.downloader_separate_save = bool(enabled)
@@ -376,6 +431,9 @@ class MainWindow(QWidget):
         for tab in self.media_tabs:
             tab.on_media_info(self.media_info)
             tab.carousel.set_media_info(self.media_info)
+            # The probe may carry a title / chapter count the naming format
+            # uses, which weren't known when the file was first picked.
+            tab.refresh_auto_output()
 
     def _deliver_thumbnails(self, token, path, frames):
         if token != self._thumb_token:

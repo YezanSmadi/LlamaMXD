@@ -20,9 +20,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core import formats, presets
+from core import formats, naming, presets
 from ui.widgets.carousel import ThumbnailCarousel, _ExpandedPreviewOverlay
 from ui.widgets.controls import (
+    NO_OPTION,
     CheckBox,
     Dropdown,
     MarqueeLabel,
@@ -30,6 +31,7 @@ from ui.widgets.controls import (
     button,
     button_width_for,
     labeled,
+    set_enabled,
 )
 from ui.widgets.dialogs import ask_text, ask_yes_no, confirm_output_path, show_message
 from ui.widgets.panels import MEDIA_FILTER, DropBox, SubTabBar, SummaryPanel
@@ -110,7 +112,7 @@ class MediaTab(QWidget):
         # carousel in its place.
         preview = QWidget()
         self._preview_stack = QStackedLayout(preview)
-        self.drop_box = DropBox()
+        self.drop_box = DropBox(start_dir=self._output_directory)
         self.drop_box.fileSelected.connect(app.update_global_file)
         self.carousel = ThumbnailCarousel(host=self)
         self.carousel.reselect.connect(self.select_input_file)
@@ -279,10 +281,54 @@ class MediaTab(QWidget):
         self._sync_controls()
 
     # ------------------------------------------------------------------ #
+    #  Import gate
+    # ------------------------------------------------------------------ #
+    def _apply_import_gate(self, extra=()):
+        """With no file imported, every Overview/Video/Audio dropdown reads
+        '—' and disables — Output Format and Preset here, plus whatever
+        tab-specific dropdowns `extra` names (`(menu, label)` pairs) —
+        rather than showing a default or stale value nothing has actually
+        confirmed yet. Call this last, at the end of `_sync_controls`. Start
+        Time, Clip Duration, A/V Sync and the preset Save/Delete buttons
+        disable with them (their values are left alone).
+
+        Output Format and Preset get their enabled state set *both ways*,
+        unconditionally — unlike every `extra` dropdown, nothing else in
+        either tab ever calls `set_enabled` on them, so once this method
+        had disabled them there was nothing to turn them back on again: a
+        file import left them stuck disabled forever (confirmed: Output
+        Format/Preset stayed greyed with a real file imported and a real
+        container value already showing). `extra` dropdowns don't need
+        that — each one's own enabled state is already recomputed fresh,
+        every pass, by the rest of `_sync_controls` regardless of file
+        presence, so with a file imported this leaves them, and their
+        values, exactly as that earlier logic already derived them."""
+        has_file = bool(self.app.current_file_path)
+        set_enabled(self.format_menu, self.format_label, has_file)
+        set_enabled(self.preset_menu, self.preset_label, has_file)
+        # The rest of the Overview page too — a trim, A/V Sync, or a preset
+        # Save/Delete means nothing without a file to apply it to. Set both
+        # ways for the same reason as Output Format/Preset above: nothing
+        # else ever re-enables them.
+        set_enabled(self.start_time_spinner, self.start_label, has_file)
+        set_enabled(self.duration_time_spinner, self.duration_label, has_file)
+        self.av_sync_check.setEnabled(has_file)
+        self.preset_save_btn.setEnabled(has_file)
+        self.preset_delete_btn.setEnabled(has_file)
+        if has_file:
+            return
+        self.format_menu.set(NO_OPTION)
+        self.preset_menu.set(NO_OPTION)
+        for menu, label in extra:
+            menu.set(NO_OPTION)
+            set_enabled(menu, label, False)
+
+    # ------------------------------------------------------------------ #
     #  File selection / output path
     # ------------------------------------------------------------------ #
     def select_input_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Video File", "", MEDIA_FILTER)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Video File", self._output_directory(), MEDIA_FILTER)
         if path:
             self.app.update_global_file(path)
 
@@ -333,32 +379,83 @@ class MediaTab(QWidget):
         """The app's frame broadcast (QImages)."""
         self.carousel.set_frames(frames)
 
+    def _output_directory(self):
+        """The folder the Save field currently points at — its own folder when
+        it holds a full path (told apart from a bare directory, fresh from
+        Settings, by whether it has an extension), else the default save
+        location. Where the input file dialogs open, and the one part of the
+        Save field an autofill keeps."""
+        current = self.save_entry.text().strip().replace("\\", "/")
+        directory = os.path.dirname(current) if current and os.path.splitext(current)[1] else current
+        return directory or self.app.default_save_location or ""
+
+    def _default_stem(self):
+        """The file name (no extension) Settings' naming format gives the
+        current input: live tokens filled in, queue-time ones (`{date}`, ...)
+        left as literal text until the job is queued (`_resolve_output_tokens`).
+        Falls back to the input's own name when the format comes out empty."""
+        input_file = self.app.current_file_path
+        values = naming.media_live_values(input_file, self.app.media_info)
+        return naming.render_live(self.app.naming_template, values, fallback=values["source"])
+
     def _autofill_output_path(self):
-        """'<directory>/<input basename><suffix><format>' — the FILENAME
-        always follows the newly-selected input; only the DIRECTORY persists
-        (a bare directory, fresh from Settings, is told apart from a full
-        path by whether it has an extension)."""
+        """'<directory>/<naming format><format>' — the FILENAME always follows
+        the newly-selected input (and the naming format from Settings); only
+        the DIRECTORY persists (a bare directory, fresh from Settings, is told
+        apart from a full path by whether it has an extension)."""
         input_file = self.app.current_file_path
         if not input_file:
             return
-        base = os.path.splitext(os.path.basename(input_file.replace("\\", "/")))[0]
-        current = self.save_entry.text().strip().replace("\\", "/")
-        directory = os.path.dirname(current) if current and os.path.splitext(current)[1] else current
-        directory = directory or self.app.default_save_location or ""
-        suggested = os.path.normpath(
-            os.path.join(directory, f"{base}{self.OUTPUT_SUFFIX}{self.format_menu.value()}")
-        )
+        stem = self._default_stem()
+        fmt = self.format_menu.value()
+        directory = self._output_directory()
+        if fmt == NO_OPTION:
+            # This runs the instant a file is picked, before the tab's next
+            # `_sync_controls` has lifted the no-file placeholder off the
+            # Output Format dropdown. Writing the placeholder into the path
+            # left an extension-less name, which the *next* autofill then
+            # mistook for a folder ("...\clip—\clip.mp4").
+            ext = os.path.splitext(input_file)[1].lower()
+            fmt = ext if ext in formats.containers() else (self._auto_format or formats.containers()[0])
+        suggested = os.path.normpath(os.path.join(directory, f"{stem}{fmt}"))
+        # A format with no title/etc. can come out identical to the input's own
+        # name — never suggest overwriting the source, so fall back to the
+        # tab's own suffix in that one case.
+        if os.path.normcase(suggested) == os.path.normcase(os.path.normpath(input_file)):
+            suggested = os.path.normpath(os.path.join(directory, f"{stem}{self.OUTPUT_SUFFIX}{fmt}"))
         set_line_text(self.save_entry, suggested)
         self._auto_output = suggested
+
+    def refresh_auto_output(self):
+        """Re-derive the suggested name — the probe just delivered a title or
+        chapter count, or the naming format changed — but only while the field
+        still holds what was autofilled: a hand-typed or Browsed path is never
+        touched. Compared without the extension, since a container snap
+        rewrites that on its own."""
+        if not self.app.current_file_path or not self._auto_output:
+            return
+        typed = os.path.splitext(self.save_entry.text().strip())[0]
+        if typed == os.path.splitext(self._auto_output)[0]:
+            self._autofill_output_path()
+
+    def _resolve_output_tokens(self, settings):
+        """The queue-time pass: fill `{date}` `{time}` `{creation-time}`
+        `{quality}` `{bitrate}` into the job's output path, from the job's own
+        settings. The Save field keeps showing the tokens, so queueing again
+        later stamps its own time."""
+        path = settings.get("output_path") or ""
+        if "{" in os.path.basename(path):
+            values = naming.media_queue_values(
+                settings.get("input_file"), self.app.media_info, settings)
+            settings["output_path"] = naming.resolve_path(path, values)
 
     def select_save_location(self):
         """Pick a full output FILE path."""
         input_file = self.app.current_file_path
         fmt = self.format_menu.value()
         if input_file:
-            base = os.path.splitext(os.path.basename(input_file.replace("\\", "/")))[0]
             initial_dir = os.path.dirname(input_file)
-            default_name = f"{base}{self.OUTPUT_SUFFIX}{fmt}"
+            default_name = f"{self._default_stem()}{fmt}"
         else:
             initial_dir = self.app.default_save_location
             default_name = f"output{fmt}"
@@ -453,9 +550,9 @@ class MediaTab(QWidget):
 
     @staticmethod
     def _menu_value(menu):
-        """A derived dropdown's value, with the `—` placeholder as ""."""
+        """A derived dropdown's value, with the `NO_OPTION` placeholder as ""."""
         value = menu.value()
-        return "" if value == "—" else value
+        return "" if value == NO_OPTION else value
 
     def _validate_settings(self, settings):
         """Minimum fields, the tab's own checks, then the output-path prompt."""
@@ -489,6 +586,7 @@ class MediaTab(QWidget):
     # ------------------------------------------------------------------ #
     def run_now(self):
         settings = self._gather_settings()
+        self._resolve_output_tokens(settings)
         if not self._validate_settings(settings):
             return
         name = os.path.basename(settings["input_file"].replace("\\", "/"))
@@ -504,6 +602,7 @@ class MediaTab(QWidget):
 
     def add_to_queue(self):
         settings = self._gather_settings()
+        self._resolve_output_tokens(settings)
         if not self._validate_settings(settings):
             return
         name = os.path.basename(settings["input_file"].replace("\\", "/"))

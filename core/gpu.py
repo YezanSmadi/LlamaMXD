@@ -1,5 +1,8 @@
-"""GPU vendor detection and hardware-encoder selection for the Settings
-tab's Hardware Acceleration switch.
+"""GPU detection and hardware-encoder selection for the Settings tab's
+Hardware Acceleration switch. **Only a dedicated (discrete) GPU counts** -- an
+integrated one is still listed in the system info, but never offered for
+acceleration (see `is_dedicated`); with none present the switch is forced off
+and greyed out.
 
 No UI code here -- `ui/tabs/settings.py` reads `display_name()` /
 `summary_label()` for the system-info block, and `core/ffmpeg_vars.derive()`
@@ -17,11 +20,11 @@ from core.tools import tool_path
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-# When a machine has more than one adapter -- an NVIDIA discrete GPU
-# alongside an AMD or Intel integrated one, a real configuration confirmed
-# on this app's own dev machine (see CLAUDE.md's libplacebo/Vulkan section)
-# -- the discrete GPU is almost always the faster, more capable encoder, so
-# NVENC wins over AMF over QSV whenever more than one vendor is present.
+# When more than one *dedicated* adapter is present, NVENC wins over AMF over
+# QSV. (An NVIDIA discrete GPU alongside an AMD or Intel integrated one -- a
+# real configuration confirmed on this app's own dev machine, see CLAUDE.md's
+# libplacebo/Vulkan section -- is just the NVIDIA one, the integrated adapter
+# being ignored here.)
 _VENDOR_PRIORITY = ["nvidia", "amd", "intel"]
 
 _VENDOR_MARKERS = {
@@ -29,6 +32,24 @@ _VENDOR_MARKERS = {
     "amd": ("amd", "radeon", "ati "),
     "intel": ("intel",),
 }
+
+# Which adapters are *dedicated*, by name -- WMI has no reliable "discrete"
+# flag (`AdapterRAM` is a 32-bit field that caps at 4GB and reports an
+# integrated GPU's carve-out as if it were VRAM). NVIDIA has no integrated
+# desktop parts, so every NVIDIA adapter counts. AMD and Intel ship both kinds
+# under near-identical names, told apart as follows:
+#   AMD   integrated: "AMD Radeon(TM) Graphics", "Radeon 780M", "Radeon(TM)
+#         Vega 8 Graphics", "Radeon RX Vega 11 Graphics" (a Ryzen APU) --
+#         a name ending "Graphics", or a bare Radeon 6xx/7xx"M" (the RX-less
+#         mobile iGPU series).
+#   AMD   dedicated: "Radeon RX 7900 XTX", "RX 6600M", "Radeon PRO W7800",
+#         "Radeon VII", "FirePro", "Instinct", "R9 290", "HD 7970".
+#   Intel dedicated: Arc A-/B-series cards ("Arc(TM) A770", "Arc(TM) B580"),
+#         and Data Center GPU / Flex. "Arc(TM) Graphics" (Meteor Lake) and
+#         every UHD / Iris / HD Graphics is integrated.
+_AMD_INTEGRATED = re.compile(r"graphics\s*$|radeon\W*(?:tm\W*)?[67]\d\dm\b", re.I)
+_AMD_DEDICATED = re.compile(r"\brx\b|\bpro\b|\bvii\b|firepro|instinct|\br[579]\s*\d{3}|\bhd\s*\d{4}", re.I)
+_INTEL_DEDICATED = re.compile(r"\barc\b\W*(?:tm\W*)?(?:pro\s+)?[ab]\d{2,3}\b|data center gpu|\bflex\b", re.I)
 
 # Display codec name (formats.VIDEO_ENCODERS) -> {vendor: ffmpeg encoder id}.
 # Limited to the three codecs every vendor's consumer-grade hardware encoder
@@ -46,7 +67,7 @@ _HW_ENCODERS = {
 # run far better than a generic "hardware encoding".
 _ENCODER_BRAND = {"nvidia": "NVENC", "amd": "AMF", "intel": "Quick Sync"}
 
-_vendor = None          # None = not checked yet; "" = checked, none found
+_vendor = None          # None = not checked yet; "" = checked, no dedicated GPU
 _adapter_names = None
 _available_encoders = None
 
@@ -82,35 +103,64 @@ def adapter_names():
     return _adapter_names
 
 
+def _adapter_vendor(name):
+    """"nvidia" / "amd" / "intel" for an adapter name, or "" (not one this
+    app has a hardware encoder for)."""
+    low = name.lower()
+    for v, markers in _VENDOR_MARKERS.items():
+        if any(m in low for m in markers):
+            return v
+    return ""
+
+
+def is_dedicated(name):
+    """Whether the adapter called `name` is a dedicated (discrete) GPU of a
+    vendor this app can hardware-encode on -- see the patterns above."""
+    v = _adapter_vendor(name)
+    if v == "nvidia":
+        return True
+    if v == "amd":
+        return bool(_AMD_DEDICATED.search(name)) and not _AMD_INTEGRATED.search(name)
+    if v == "intel":
+        return bool(_INTEL_DEDICATED.search(name))
+    return False
+
+
+def dedicated_adapters():
+    """The detected adapters that are dedicated GPUs, in detection order."""
+    return [name for name in adapter_names() if is_dedicated(name)]
+
+
 def vendor():
-    """"nvidia" / "amd" / "intel" / "" (nothing recognised) -- whichever
-    vendor's marker appears first in `_VENDOR_PRIORITY` among the detected
-    adapter names. Cached; a WMI failure caches as "" (no hardware path),
-    never raises."""
+    """The vendor to hardware-encode with -- "nvidia" / "amd" / "intel", the
+    first in `_VENDOR_PRIORITY` among the *dedicated* adapters -- or "" when
+    the machine has none (integrated graphics alone never count). Cached; a
+    WMI failure caches as "" (no hardware path), never raises."""
     global _vendor
     if _vendor is None:
-        found = set()
-        for name in adapter_names():
-            low = name.lower()
-            for v, markers in _VENDOR_MARKERS.items():
-                if any(m in low for m in markers):
-                    found.add(v)
+        found = {_adapter_vendor(name) for name in dedicated_adapters()}
         _vendor = next((v for v in _VENDOR_PRIORITY if v in found), "")
     return _vendor
 
 
+def has_dedicated():
+    """Whether Hardware Acceleration can be offered at all: a dedicated GPU
+    of a supported vendor was detected."""
+    return bool(vendor())
+
+
 def display_name():
-    """The GPU name for the Settings system-info block: the vendor this app
-    would actually accelerate with if there's a supported one, else just the
-    first detected adapter (a plain integrated GPU is still worth showing
-    even with no usable hardware encoder), else a placeholder."""
+    """The GPU name for the Settings system-info block: the dedicated adapter
+    this app would accelerate with when there is one, else just the first
+    detected adapter (a plain integrated GPU is still worth showing even
+    though it's never used), else a placeholder."""
     names = adapter_names()
     if not names:
         return "Unknown GPU"
     v = vendor()
     if v:
-        for name in names:
-            if any(m in name.lower() for m in _VENDOR_MARKERS[v]):
+        for name in dedicated_adapters():
+            if _adapter_vendor(name) == v:
                 return name
     return names[0]
 
@@ -179,7 +229,7 @@ def summary_label():
     never a leap of faith about what it actually does."""
     v = vendor()
     if not v:
-        return "No supported GPU detected — encodes will run in software."
+        return "No dedicated GPU detected — hardware acceleration is unavailable."
     codecs = [c for c in _HW_ENCODERS if hw_encoder_for(c)]
     if not codecs:
         return f"{display_name()} detected, but this ffmpeg build has no matching hardware encoder."

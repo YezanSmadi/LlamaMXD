@@ -6,7 +6,7 @@ underneath it. Never open one from inside a recurring
 tick — post it with `QTimer.singleShot(0, ...)` (see QueueTab._show_errors)."""
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
 
@@ -45,6 +45,7 @@ class MessageDialog(QDialog):
         text.setWordWrap(True)
         text.setTextInteractionFlags(Qt.TextSelectableByMouse)
         body.addWidget(text)
+        self.message_label = text
 
         self.entry = None
         if entry is not None:
@@ -114,6 +115,39 @@ def ask_text(parent, title, message, initial="", confirm="Save"):
     if dialog.show_modal() != confirm:
         return None
     return (dialog.entry.text() or "").strip() or None
+
+
+class CountdownDialog(MessageDialog):
+    """A confirmation that goes ahead by itself: `message` (with `{n}` standing
+    for the seconds left) counts down once a second and the dialog answers
+    "Now" at zero. The first button ("Now") acts immediately, Cancel — and
+    Escape / the close box — call it off."""
+
+    def __init__(self, parent, title, message, seconds, now_label="Now"):
+        super().__init__(parent, title, message.format(n=seconds), buttons=(now_label, "Cancel"))
+        self._template, self._remaining, self._now_label = message, seconds, now_label
+        self._timer = QTimer(self)
+        self._timer.setInterval(1000)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def _tick(self):
+        self._remaining -= 1
+        if self._remaining <= 0:
+            self._timer.stop()
+            self._dismiss(self._now_label)
+            return
+        self.message_label.setText(self._template.format(n=self._remaining))
+
+    def _dismiss(self, choice):
+        self._timer.stop()
+        super()._dismiss(choice)
+
+
+def confirm_countdown(parent, title, message, seconds=30, now_label="Now"):
+    """True when the countdown ran out or "Now" was pressed, False when it was
+    cancelled."""
+    return CountdownDialog(parent, title, message, seconds, now_label).show_modal() == now_label
 
 
 def confirm_output_path(parent, output_path, input_file, claimed=False):

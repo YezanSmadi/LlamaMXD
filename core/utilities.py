@@ -49,6 +49,21 @@ _PRORES_PROFILE_NAMES = {
 }
 
 
+def _parse_frame_rate(raw):
+    """ffprobe's `r_frame_rate` is a rational string ("24000/1001", "30/1"),
+    not a decimal -- converted here so `info["fps"]` is a plain float
+    (29.97, not "30000/1001"), or None for anything missing/unparseable
+    (a "0/0" placeholder ffprobe emits for some still-image/data streams)."""
+    if not raw or "/" not in raw:
+        return None
+    num, _, den = raw.partition("/")
+    try:
+        num, den = float(num), float(den)
+    except ValueError:
+        return None
+    return num / den if den else None
+
+
 def _normalize_video_profile(codec_name, profile):
     """ffprobe's raw `profile` string -> this app's display name, for the
     codecs whose naming doesn't already match (see _PRORES_PROFILE_NAMES).
@@ -403,9 +418,16 @@ def probe_media(path):
       "width": 1920, "height": 1080, "duration": 83.4, "file_size": 12345,
       "audio_channels": "Stereo", "audio_sample_rate": "48000 Hz",
       "audio_bitrate": "192k", "has_video": True, "has_audio": True,
-      "video_streams": [{...}, ...], "audio_streams": [{...}, ...],
+      "fps": 29.97, "video_streams": [{...}, ...], "audio_streams": [{...}, ...],
       "mastering_max_nits": None,
-      "mastering_min_nits": None, "max_cll": None, "max_fall": None}`.
+      "mastering_min_nits": None, "max_cll": None, "max_fall": None,
+      "title": "...", "chapters": 12, "bit_rate": 8500000,
+      "creation_time": "2024-03-05T10:20:30.000000Z"}`.
+
+    `title` / `chapters` (a count) / `bit_rate` (the container's overall
+    bits per second) / `creation_time` come from the container itself and
+    back the output-name tokens `{title}` `{chapters}` `{bitrate}`
+    `{creation-time}` (`core.naming`); each is None when the file has none.
 
     The last four are only ever populated for HDR content (see
     `_probe_hdr_static_metadata`) -- ST 2086 mastering-display luminance and
@@ -462,9 +484,11 @@ def probe_media(path):
         "video_profile": None, "video_level": None, "hdr": None,
         "width": None, "height": None, "duration": None, "file_size": None,
         "audio_channels": None, "audio_sample_rate": None, "audio_bitrate": None,
-        "has_video": None, "has_audio": None, "video_streams": [], "audio_streams": [],
+        "has_video": None, "has_audio": None, "fps": None,
+        "video_streams": [], "audio_streams": [],
         "mastering_max_nits": None, "mastering_min_nits": None,
         "max_cll": None, "max_fall": None,
+        "title": None, "chapters": None, "bit_rate": None, "creation_time": None,
     }
     if not path or not os.path.exists(path):
         return unknown
@@ -481,8 +505,9 @@ def probe_media(path):
         completed = subprocess.run(
             [tool_path("ffprobe"), "-v", "error", "-show_entries",
              "stream=codec_type,codec_name,profile,level,channels,sample_rate,"
-             "bit_rate,width,height,color_transfer,color_primaries:"
-             "stream_tags=language:format=duration",
+             "bit_rate,width,height,color_transfer,color_primaries,r_frame_rate:"
+             "stream_tags=language:format=duration,bit_rate:"
+             "format_tags=title,creation_time:chapter=id",
              "-of", "json", path],
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
         )
@@ -507,12 +532,23 @@ def probe_media(path):
     if extension:
         info["container"] = extension
 
-    duration = (payload.get("format") or {}).get("duration")
+    container_info = payload.get("format") or {}
+    duration = container_info.get("duration")
     if duration is not None:
         try:
             info["duration"] = float(duration)
         except ValueError:
             pass
+    try:
+        info["bit_rate"] = int(container_info["bit_rate"])
+    except (KeyError, TypeError, ValueError):
+        pass
+    # Container tag names are case-insensitive in practice (Matroska writes
+    # TITLE, MP4 title), so match them that way.
+    tags = {str(k).lower(): v for k, v in (container_info.get("tags") or {}).items()}
+    info["title"] = (tags.get("title") or "").strip() or None
+    info["creation_time"] = tags.get("creation_time") or None
+    info["chapters"] = len(payload.get("chapters") or []) or None
 
     audio_index = 0
     video_index = 0
@@ -532,6 +568,7 @@ def probe_media(path):
                 info["video_level"] = _ffprobe_level(name, stream.get("level"))
                 info["width"] = stream.get("width")
                 info["height"] = stream.get("height")
+                info["fps"] = _parse_frame_rate(stream.get("r_frame_rate"))
                 info["hdr"] = stream.get("color_transfer") in _HDR_TRANSFERS
                 # Static HDR metadata (ST 2086 mastering luminance, MaxCLL/
                 # MaxFALL) is a separate probe -- see
