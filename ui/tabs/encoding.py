@@ -8,16 +8,18 @@ Encoding never falls back to a silent stream copy: `Select` auto-resolves to
 the source's own codec once probed, and `_validate_specific` blocks a
 present-or-unknown stream left on `Select`."""
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QSlider, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QSlider, QVBoxLayout, QWidget
 
 from core import formats
-from core.utilities import av1_preset_range, supports_libplacebo
+from core.utilities import av1_preset_range, libplacebo_problem_text, supports_libplacebo
+from ui import scale
 from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow
 from ui.widgets.controls import (
     NO_OPTION,
     CheckBox,
     ClickableLabel,
     Dropdown,
+    ScaledLabel,
     Switch,
     button,
     field_label,
@@ -48,7 +50,8 @@ _HDR_TIP = ("Tone-maps HDR (PQ/BT.2020) down to standard SDR (BT.709) using BT.2
             "the only curve this app uses, for accurate color.")
 _PASSTHRU_TIP = ("Copies this stream byte-for-byte instead of re-encoding it — Bitrate/"
                   "Channels/Sample Rate below just show the source's real values.")
-_CHOOSE_STREAMS_TIP = "Pick which of this file's audio tracks are included in the output."
+_CHOOSE_STREAMS_TIP = ("Pick which audio tracks the output includes and in what order (drag to reorder), "
+                       "and add tracks from other files.")
 _CRF_TIP = "Lower = higher quality, larger file. This encoder doesn't target a bitrate — it targets a visual quality level."
 _QSCALE_TIP = "Lower = higher quality, larger file. This is a fixed qscale, not a CRF — this codec has no bitrate-target rate control."
 _RESOLUTION_TIP = ("Downscales the video, keeping its aspect ratio — the width is computed "
@@ -71,13 +74,22 @@ class EncodingTab(MediaTab):
         self._quality_spec = None
         # The auto-picked Encoder (None once the user picks one themselves).
         self._auto_encoder = formats.SELECT
-        # Multi-stream audio: the probe's streams, which are included, which
-        # one the four shared controls are editing, and every stream's own
-        # settings (so switching tracks never loses an edit).
-        self._audio_streams = []
-        self._included_audio_indices = set()
-        self._active_audio_index = None
+        # Multi-stream audio. `_audio_list` is every audio stream on offer, in the
+        # order the Choose Stream(s) popup shows them (which is the output's order):
+        # the source file's own (seeded from the probe) then any added from other
+        # files, each `{"id": "src:0" | "ext:ab12cd34", "source": "primary" |
+        # "external", "file": path | None, "index": N (0-based among that file's own
+        # audio streams — what `-map` addresses), "stream": the probe's description
+        # of it, "name": the other file's name | None}` — the same shape Muxing's
+        # track lists use. `_audio_included` is the ids that go into the output, the
+        # active one is what the four shared controls are editing, and every
+        # stream's own settings are kept by id (so switching tracks never loses an
+        # edit). `_audio_track_ids` maps the Audio Track dropdown's labels back.
+        self._audio_list = []
+        self._audio_included = set()
+        self._active_audio_id = None
         self._audio_stream_settings = {}
+        self._audio_track_ids = {}
         self._audio_streams_source = None
         # HDR→SDR preview: which file this tab is showing and its raw frames
         # (the tone-mapped cache lives on the app).
@@ -93,7 +105,17 @@ class EncodingTab(MediaTab):
         quality slider spanning the row beneath; the right column holds
         HDR→SDR (top) then Strip Video (bottom), right-aligned."""
         page, left, right = self.stream_page()
-        left.setSpacing(0)
+        scale.spacing(left, 0)   # replaces stream_page()'s own 6
+        # This page has no width to spare: the dropdown row needs 527 reference
+        # pixels and the HDR column 112, in a 656px page. It was laid out to fit
+        # with 6px over when text was measured hinted; unhinted text (which is
+        # what is actually painted) measures ~1-3% wider — the dropdowns 6px
+        # more in all, the HDR label 3px — which left it 3px short, so Qt
+        # squeezed the Profile box under its own dropdown and cut its arrow off
+        # (at every scale, since the shortfall scales too). The gutter between
+        # the columns (replacing stream_page()'s 20) and the HDR label/switch
+        # gap (below) give the 9px back.
+        scale.spacing(page.layout(), 14)
         row, rl = hrow(spacing=8)
         # Each dropdown is sized to the longest entry it could ever show,
         # across every encoder — not just whatever's legal right now — so
@@ -156,15 +178,15 @@ class EncodingTab(MediaTab):
         # caption existed at all, rather than fighting to re-centre the
         # slider against a taller box.
         self.fps_label = field_label("FPS:")
-        self.fps_label.setFixedWidth(fps_width)
+        scale.fixed(self.fps_label, w=fps_width)
         caption_row, cpl = hrow(spacing=8, align_bottom=False)
         cpl.addWidget(self.crf_label)
         cpl.addWidget(self.fps_label)
         left.addWidget(caption_row)
         slider_row, sr = hrow(spacing=4, align_bottom=False)
-        self.crf_low_label = QLabel("Low")
+        self.crf_low_label = ScaledLabel("Low")
         self.crf_low_label.setProperty("role", "muted")
-        self.crf_high_label = QLabel("Placebo")
+        self.crf_high_label = ScaledLabel("Placebo")
         self.crf_high_label.setProperty("role", "muted")
         self.crf_high_label.setStyleSheet("font-size: 12px;")
         # Inverted so worst quality sits left and best right, whichever scale
@@ -188,8 +210,8 @@ class EncodingTab(MediaTab):
         # so "Quality (CRF): 22" centres over the slider itself rather than
         # the wider Encoder..Resolution span `left`'s own column spans.
         quality_width = encoder_width + profile_width + level_width + speed_width + 8 * 3
-        slider_row.setFixedWidth(quality_width)
-        self.crf_label.setFixedWidth(quality_width)
+        scale.fixed(slider_row, w=quality_width)
+        scale.fixed(self.crf_label, w=quality_width)
         # FPS sits beside the slider, in the space its fixed width leaves
         # under Resolution's own column — same 8px gap the row above uses
         # before Resolution, and (Resolution's and FPS's value lists both
@@ -204,7 +226,7 @@ class EncodingTab(MediaTab):
         ql.addWidget(self.fps_menu)
         left.addWidget(quality_row)
 
-        hdr_row, hl = hrow(spacing=8, align_bottom=False)
+        hdr_row, hl = hrow(spacing=5, align_bottom=False)
         self.hdr_label = ClickableLabel("HDRtoSDR")
         self.hdr_label.setCursor(Qt.PointingHandCursor)
         self.hdr_label.clicked.connect(self._toggle_hdr)
@@ -217,7 +239,7 @@ class EncodingTab(MediaTab):
         self.strip_video_check = CheckBox("Strip Video", color_key="stop")
         self.strip_video_check.clicked.connect(self._on_control_change)
         tip(self.strip_video_check, STRIP_TIP)
-        right.addSpacing(26)   # aligns HDR with the dropdown row's top
+        scale.spacer(right, 26)   # aligns HDR with the dropdown row's top
         right.addWidget(hdr_row, 0, Qt.AlignRight)
         right.addStretch(1)
         right.addWidget(self.strip_video_check, 0, Qt.AlignRight | Qt.AlignBottom)
@@ -246,8 +268,8 @@ class EncodingTab(MediaTab):
         # a probed stream defaults to a plain copy, not a re-encode.
         passthru = QWidget()
         pl = QVBoxLayout(passthru)
-        pl.setContentsMargins(0, 0, 0, 2)
-        pl.setSpacing(1)
+        scale.margins(pl, 0, 0, 0, 2)
+        scale.spacing(pl, 1)
         self.passthru_label = field_label("Passthru")
         self.passthru_check = CheckBox(checked=True)
         tip(self.passthru_label, _PASSTHRU_TIP)
@@ -263,7 +285,7 @@ class EncodingTab(MediaTab):
         box, self.audio_codec_label = labeled("Audio Codec:", self.audio_codec_menu)
         r2.addWidget(box)
 
-        bitrate_universe = [formats.SELECT] + formats.AUDIO_BITRATES
+        bitrate_universe = [formats.SELECT, formats.LOSSLESS] + formats.AUDIO_BITRATES
         self.audio_bitrate_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(bitrate_universe))
         box, self.audio_bitrate_label = labeled("Bitrate:", self.audio_bitrate_menu)
         r2.addWidget(box)
@@ -282,14 +304,14 @@ class EncodingTab(MediaTab):
             control.picked.connect(self._on_control_change)
         self.passthru_check.clicked.connect(self._on_control_change)
         left.addWidget(row2)
-        left.addSpacing(2)
+        scale.spacer(left, 2)
 
         self.strip_audio_check = CheckBox("Strip Audio", color_key="stop")
         self.strip_audio_check.clicked.connect(self._on_control_change)
         tip(self.strip_audio_check, STRIP_TIP)
         right.addStretch(1)
         right.addWidget(self.strip_audio_check, 0, Qt.AlignRight)
-        right.addSpacing(4)
+        scale.spacer(right, 4)
         return page
 
     # ------------------------------------------------------------------ #
@@ -415,10 +437,10 @@ class EncodingTab(MediaTab):
         # 3b. The Audio Track list mirrors the included streams.
         track_values = self._audio_track_values()
         self.audio_track_menu.set_values(track_values)
-        if self._active_audio_index is not None:
-            prefix = f"Track {self._active_audio_index + 1}"
-            match = next((v for v in track_values if v.split(" (")[0] == prefix), prefix)
-            self.audio_track_menu.set(match)
+        if self._active_audio_id is not None:
+            label = next((l for l, i in self._audio_track_ids.items() if i == self._active_audio_id), None)
+            if label is not None:
+                self.audio_track_menu.set(label)
 
         # 4.
         if passthru_only:
@@ -426,7 +448,10 @@ class EncodingTab(MediaTab):
         passthru = self.passthru_check.isChecked()
         bitrates = [] if passthru else formats.audio_bitrates_for(audio_codec)
         if not passthru:
-            self._retarget(self.audio_bitrate_menu, bitrates)
+            # A lossless codec has no bitrate to set — it says so, rather than
+            # the "—" of "nothing to pick yet" (the control stays disabled).
+            lossless = [formats.LOSSLESS] if formats.is_lossless_audio(audio_codec) else []
+            self._retarget(self.audio_bitrate_menu, bitrates or lossless)
         else:
             self._apply_passthru_values()
 
@@ -447,11 +472,17 @@ class EncodingTab(MediaTab):
         # BT.2390 via libplacebo is the only tone-mapping this app uses, and
         # only for a source actually detected as HDR. Forced *off* (not just
         # greyed) once unavailable, so nothing silently keeps tone-mapping.
-        hdr_enabled = video_live and info.get("hdr") is True and supports_libplacebo()
+        hdr_source = video_live and info.get("hdr") is True
+        hdr_enabled = hdr_source and supports_libplacebo()
         if not hdr_enabled and self.hdr_switch.isChecked():
             self.hdr_switch.setChecked(False)
             self._apply_preview_frames()
         set_enabled(self.hdr_switch, self.hdr_label, hdr_enabled)
+        # A greyed switch on an HDR file is exactly when "why" matters: say
+        # what's missing (ffmpeg build vs. Vulkan), not just the generic blurb.
+        hdr_tip = f"{_HDR_TIP}\n\nUnavailable: {libplacebo_problem_text()}" if hdr_source and not hdr_enabled else _HDR_TIP
+        tip(self.hdr_label, hdr_tip)
+        tip(self.hdr_switch, hdr_tip)
         # Quality stays live on an unresolved Select; a codec with no rate
         # control at all (ProRes / DNxHR / CineForm / FFV1) disables it.
         quality_live = video_live and (encoder == formats.SELECT or self._quality_spec is not None)
@@ -459,7 +490,7 @@ class EncodingTab(MediaTab):
             widget.setEnabled(quality_live)
 
         set_enabled(self.audio_track_menu, self.audio_track_label,
-                    audio_live and bool(self._included_audio_indices))
+                    audio_live and bool(self._audio_included))
         self.choose_streams_btn.setEnabled(audio_live)
         set_enabled(self.passthru_check, self.passthru_label, audio_live and not passthru_only)
         set_enabled(self.audio_codec_menu, self.audio_codec_label, audio_live and not passthru_only)
@@ -578,30 +609,30 @@ class EncodingTab(MediaTab):
     # ------------------------------------------------------------------ #
     #  Multi-stream audio
     # ------------------------------------------------------------------ #
-    def _audio_track_values(self):
-        if not self._included_audio_indices:
-            return [NO_OPTION]
-        codecs = {s["index"]: s.get("codec") for s in self._audio_streams}
-        labels = []
-        for i in sorted(self._included_audio_indices):
-            label = f"Track {i + 1}"
-            if codecs.get(i):
-                label += f" ({codecs[i]})"
-            labels.append(label)
-        return labels
+    def _included_audio(self):
+        """The included audio entries, in list (= output) order."""
+        return [entry for entry in self._audio_list if entry["id"] in self._audio_included]
 
-    @staticmethod
-    def _index_from_track_label(label):
-        try:
-            return int(label.split()[1]) - 1
-        except (IndexError, ValueError):
-            return None
+    def _audio_track_values(self):
+        """The Audio Track dropdown's labels — the included streams, numbered by their place in
+        the Choose Stream(s) list — and, as a side effect, the label -> id map behind them."""
+        self._audio_track_ids = {}
+        labels = []
+        for number, entry in enumerate(self._audio_list, start=1):
+            if entry["id"] not in self._audio_included:
+                continue
+            label = f"Track {number}"
+            if entry["stream"].get("codec"):
+                label += f" ({entry['stream']['codec']})"
+            self._audio_track_ids[label] = entry["id"]
+            labels.append(label)
+        return labels or [NO_OPTION]
 
     def _save_active_audio_stream(self):
         """Bank what the four shared controls show into the active track."""
-        if self._active_audio_index is None:
+        if self._active_audio_id is None:
             return
-        self._audio_stream_settings[self._active_audio_index] = {
+        self._audio_stream_settings[self._active_audio_id] = {
             "codec": self.audio_codec_menu.value(),
             "bitrate": self._menu_value(self.audio_bitrate_menu),
             "channels": self.audio_channels_menu.value(),
@@ -610,24 +641,29 @@ class EncodingTab(MediaTab):
         }
 
     def _active_stream_info(self):
-        for stream in self._audio_streams:
-            if stream.get("index") == self._active_audio_index:
-                return stream
+        for entry in self._audio_list:
+            if entry["id"] == self._active_audio_id:
+                return entry["stream"]
         return None
 
     def _apply_passthru_values(self):
         """Passthru: Bitrate / Channels / Sample Rate mirror the source's own
-        real values (rarely one of the offered options — set as overrides)."""
+        real values (rarely one of the offered options — set as overrides). A
+        lossless source — FLAC, or a probed TrueHD / DTS-HD MA — says so in Bitrate
+        instead of a number (or, for TrueHD, which reports none, a bare `Select`)."""
         stream = self._active_stream_info() or {}
-        self.audio_bitrate_menu.set(stream.get("bitrate_display") or formats.SELECT)
+        if stream.get("lossless") or formats.is_lossless_audio(stream.get("codec")):
+            self.audio_bitrate_menu.set(formats.LOSSLESS)
+        else:
+            self.audio_bitrate_menu.set(stream.get("bitrate_display") or formats.SELECT)
         self.audio_channels_menu.set(stream.get("channels_display") or formats.SELECT)
         self.audio_samplerate_menu.set(stream.get("sample_rate_display") or formats.SELECT)
 
     def _load_active_audio_stream(self):
         """Write the active track's stored settings into the shared controls
         (muted — this is the form being written into, not a user change)."""
-        settings = (self._audio_stream_settings.get(self._active_audio_index, {})
-                    if self._active_audio_index is not None else {})
+        settings = (self._audio_stream_settings.get(self._active_audio_id, {})
+                    if self._active_audio_id is not None else {})
         was_ready, self._ready = self._ready, False
         try:
             codec = settings.get("codec", formats.SELECT)
@@ -649,51 +685,74 @@ class EncodingTab(MediaTab):
 
     def _on_audio_track_change(self, _value=None):
         self._save_active_audio_stream()
-        self._active_audio_index = self._index_from_track_label(self.audio_track_menu.value())
+        self._active_audio_id = self._audio_track_ids.get(self.audio_track_menu.value())
         self._load_active_audio_stream()
         self._sync_controls()
 
     def _open_stream_picker(self):
-        if not self._audio_streams:
-            show_message(self.app, "No Audio Streams", "This file has no audio streams to choose from.")
+        """Choose Stream(s): the popup edits a copy of the list (ticks, order, tracks added
+        from other files or removed); OK swaps the result in, Cancel changes nothing."""
+        result = choose_audio_streams(self.app, self._audio_list, self._audio_included,
+                                     self._output_directory())
+        if result is None:
             return
-        chosen = choose_audio_streams(self.app, self._audio_streams, self._included_audio_indices)
-        if chosen is None:
-            return
+        entries, chosen = result
         self._save_active_audio_stream()
-        self._included_audio_indices = chosen
-        if self._active_audio_index not in chosen:
-            self._active_audio_index = min(chosen) if chosen else None
+        present = {entry["id"] for entry in entries}
+        for entry in entries:
+            self._audio_stream_settings.setdefault(entry["id"], self._default_audio_settings(entry["stream"]))
+        self._audio_stream_settings = {i: v for i, v in self._audio_stream_settings.items() if i in present}
+        self._audio_list = entries
+        self._audio_included = chosen & present
+        self._reactivate_audio_stream()
         self._load_active_audio_stream()
         self._sync_controls()
 
+    def _reactivate_audio_stream(self):
+        """Keeps the active track one that is still included (else the first included)."""
+        if self._active_audio_id not in self._audio_included:
+            included = self._included_audio()
+            self._active_audio_id = included[0]["id"] if included else None
+
+    def _default_audio_settings(self, stream):
+        """A stream's starting settings: its own probed codec/params where this app offers
+        them (DTS / TrueHD are named and forced to Passthru), as a plain copy."""
+        codec = stream.get("codec")
+        legal_codecs = formats.audio_codecs_for(self.format_menu.value())
+        return {
+            "codec": codec if (formats.is_passthru_only(codec) or codec in legal_codecs) else formats.SELECT,
+            "bitrate": stream.get("bitrate_display") or formats.SELECT,
+            "channels": stream.get("channels_display") or formats.SELECT,
+            "sample_rate": stream.get("sample_rate_display") or formats.SELECT,
+            "passthru": True,
+        }
+
     def _auto_select_audio_streams(self, info):
-        """(Re)initialise per-stream audio once per file: every stream
+        """(Re)initialise the source's own audio once per file: every stream
         defaults to its own probed codec/params where this app offers them,
         DTS / TrueHD are named and forced to Passthru, and — Passthru
         defaulting on — every stream starts as a plain copy until the user
-        picks a re-encode. Only the first stream is included. Guarded per
-        path so a re-delivery of the same probe never discards the user's
-        edits."""
+        picks a re-encode. Every stream is included. Streams added
+        from other files stay (with their settings and whether they were
+        included), as Muxing's do. Guarded per path so a re-delivery of the
+        same probe never discards the user's edits."""
         if self.app.current_file_path == self._audio_streams_source:
             return
         self._audio_streams_source = self.app.current_file_path
-        streams = info.get("audio_streams") or []
-        self._audio_streams = streams
-        legal_codecs = formats.audio_codecs_for(self.format_menu.value())
-        self._audio_stream_settings = {}
-        for stream in streams:
-            codec = stream.get("codec")
-            passthru_only = formats.is_passthru_only(codec)
-            self._audio_stream_settings[stream["index"]] = {
-                "codec": codec if (passthru_only or codec in legal_codecs) else formats.SELECT,
-                "bitrate": stream.get("bitrate_display") or formats.SELECT,
-                "channels": stream.get("channels_display") or formats.SELECT,
-                "sample_rate": stream.get("sample_rate_display") or formats.SELECT,
-                "passthru": True,
-            }
-        self._included_audio_indices = {0} if streams else set()
-        self._active_audio_index = 0 if streams else None
+        primary = [{"id": f"src:{stream['index']}", "source": "primary", "file": None,
+                    "index": stream["index"], "stream": stream, "name": None}
+                   for stream in info.get("audio_streams") or []]
+        external = [entry for entry in self._audio_list if entry["source"] == "external"]
+        external_ids = {entry["id"] for entry in external}
+        kept_settings = {i: v for i, v in self._audio_stream_settings.items() if i in external_ids}
+        kept_included = self._audio_included & external_ids
+        self._audio_list = primary + external
+        self._audio_stream_settings = {entry["id"]: self._default_audio_settings(entry["stream"])
+                                       for entry in primary}
+        self._audio_stream_settings.update(kept_settings)
+        self._audio_included = {entry["id"] for entry in primary} | kept_included
+        self._active_audio_id = None
+        self._reactivate_audio_stream()
         self._load_active_audio_stream()
 
     # ------------------------------------------------------------------ #
@@ -733,24 +792,30 @@ class EncodingTab(MediaTab):
             audio = ("— removed —", "stop")
         elif info.get("has_audio") is False:
             audio = ("— no audio stream —", "stop")
-        elif not self._included_audio_indices:
+        elif not self._audio_included:
             audio = ("— no streams selected —", "stop")
         else:
             self._save_active_audio_stream()
-            primary = self._audio_stream_settings.get(min(self._included_audio_indices), {})
+            first = self._included_audio()[0]
+            primary = self._audio_stream_settings.get(first["id"], {})
             if primary.get("codec", formats.SELECT) == formats.SELECT:
                 audio = ("— pick a codec —", "stop")
             else:
                 bits = [primary["codec"]]
                 if primary.get("passthru"):
                     bits.append("copy")
+                stream = first["stream"]
+                lossless = formats.is_lossless_audio(primary["codec"]) or (
+                    bool(primary.get("passthru")) and bool(stream.get("lossless")))
                 for key in ("bitrate", "channels", "sample_rate"):
+                    if key == "bitrate" and lossless:
+                        continue      # the codec already says lossless; a number would only mislead
                     value = primary.get(key, formats.SELECT)
                     if value not in (formats.SELECT, NO_OPTION, ""):
                         bits.append(value)
-                extra = len(self._included_audio_indices) - 1
+                extra = len(self._audio_included) - 1
                 if extra:
-                    bits.append(f"+{extra} more")
+                    bits.append(f"+ {extra} more")
                 audio = (" · ".join(bits), None)
 
         start = self.start_time_spinner.seconds()
@@ -827,22 +892,16 @@ class EncodingTab(MediaTab):
             "max_cll": self.app.media_info.get("max_cll"),
             "strip_video": self.strip_video_check.isChecked(),
             "strip_audio": self.strip_audio_check.isChecked(),
+            # In list order — the output's stream order. `source` / `file` say which
+            # input a track is read from (a stream added from another file has its own).
             "audio_streams": [
-                dict(self._audio_stream_settings.get(i, {}), index=i,
-                     language=self._stream_language(i))
-                for i in sorted(self._included_audio_indices)
+                dict(self._audio_stream_settings.get(entry["id"], {}), id=entry["id"],
+                     index=entry["index"], source=entry["source"], file=entry["file"],
+                     language=entry["stream"].get("language"))
+                for entry in self._included_audio()
             ],
         })
         return settings
-
-    def _stream_language(self, index):
-        """The probed language tag (`_describe_audio_stream`'s `"language"`,
-        an ffprobe/Matroska code like `"eng"`) for source audio stream
-        `index`, or None — snapshotted alongside each gathered audio stream
-        so a re-encoded track's stale per-track statistics can be wiped
-        (`build_encode_command`) without losing the one tag that's still
-        genuinely useful for player track selection."""
-        return next((s.get("language") for s in self._audio_streams if s.get("index") == index), None)
 
     def _apply_settings(self, settings):
         """Write a settings dict in dependency order — container, codecs,
@@ -873,13 +932,14 @@ class EncodingTab(MediaTab):
             if settings.get("fps") and settings["fps"] in self.fps_menu.values():
                 self.fps_menu.set(settings["fps"])
             if "audio_streams" in settings:
+                known = {entry["id"] for entry in self._audio_list}
                 included, stream_settings = set(), {}
                 for entry in settings["audio_streams"] or []:
-                    index = entry.get("index")
-                    if index is None:
+                    row_id = entry.get("id") or (f"src:{entry['index']}" if entry.get("index") is not None else None)
+                    if row_id not in known:
                         continue
-                    included.add(index)
-                    stream_settings[index] = {
+                    included.add(row_id)
+                    stream_settings[row_id] = {
                         "codec": entry.get("codec", formats.SELECT),
                         "bitrate": entry.get("bitrate", formats.SELECT),
                         "channels": entry.get("channels", formats.SELECT),
@@ -887,8 +947,9 @@ class EncodingTab(MediaTab):
                         "passthru": bool(entry.get("passthru")),
                     }
                 self._audio_stream_settings.update(stream_settings)
-                self._included_audio_indices = included
-                self._active_audio_index = min(included) if included else None
+                self._audio_included = included
+                self._active_audio_id = None
+                self._reactivate_audio_stream()
                 self._load_active_audio_stream()
             if "hdr_to_sdr" in settings:
                 self.hdr_switch.setChecked(bool(settings["hdr_to_sdr"]))
@@ -925,9 +986,7 @@ class EncodingTab(MediaTab):
         if settings["hdr_to_sdr"] and not settings["strip_video"] and not supports_libplacebo():
             show_message(
                 self.app, "HDR to SDR Unavailable",
-                "This ffmpeg install doesn't have libplacebo (needed for accurate "
-                "BT.2390 tone-mapping) compiled in. Update ffmpeg, or turn HDR to "
-                "SDR off before continuing.",
+                f"{libplacebo_problem_text()} Or turn HDR to SDR off before continuing.",
             )
             return False
         return True

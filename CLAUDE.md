@@ -3,7 +3,7 @@
 A Windows desktop GUI for video muxing/encoding/downloading, built with
 PySide6 (Qt 6). Wraps ffmpeg and yt-dlp behind a tabbed interface. Repo:
 `https://github.com/YezanSmadi/LlamaMXD`. Public domain (Unlicense). Currently
-v0.5.0-beta.2 (the sidebar footer — `VERSION` in `ui/widgets/panels.py`).
+v0.5.0-beta.3 (the sidebar footer — `VERSION` in `ui/widgets/panels.py`).
 
 ## Running
 
@@ -46,6 +46,9 @@ core/presets.py           named codec/quality recipes, persisted to presets.json
 core/naming.py            output file-name template + its tokens ({source} {title} ...)
 core/power.py             Settings' "When Done" actions (shutdown / sleep / ... via Windows)
 core/priority.py          Settings' "Priority Level" -> Windows process priority classes
+core/window_mode.py       Settings' "Window Mode" names: Windowed / Borderless / Fixed
+core/window_style.py      Win32 window styles Qt leaves stale on a live window: maximize box, dark title bar
+core/startup_tab.py       Settings' "Startup Tab" names: the four main tabs + the Encoding default
 core/theme.py             brand palettes, contrast helpers, settings.json read/write
 core/utilities.py         ffprobe media probe + duration, capability checks, preview frame decode
 core/ffmpeg_vars.py       one queued job's settings flattened into module globals (raw + *_ARG)
@@ -57,17 +60,22 @@ core/ytdlp_runner.py      runs one download off the GUI thread (job object, stag
 ui/app.py                 MainWindow — the hub: shared state, file-selection broadcast, background
                           work, tab routing, keybinds, toasts, close prompt
 ui/theme.py               ThemeManager (live theme + System/Light/Dark) + the generated stylesheet
+ui/scale.py               the one UI scale factor: px()/fpx(), bound setters, design-space painting
 ui/workers.py             run_async: daemon thread → result delivered on the GUI thread; pil_to_qimage
 ui/tips.py                shared hover-tooltip copy (codec / container / audio-format explanations)
 ui/widgets/controls.py    Dropdown, CheckBox, Switch, SegmentedButton, TimeSpinner, MarqueeLabel,
-                          IconButton (✕ / ▲ / ▼ / select-all / deselect-all) + helpers (button, labeled,
-                          set_enabled, draw_cross)
+                          IconButton (✕ / ▲ / ▼ / select-all / deselect-all / undo / redo), ScaledLabel / ScaledButton /
+                          ScaledLineEdit (stock text painted through the scaled painter — see
+                          "UI scale") + helpers
+                          (button, labeled, set_enabled, draw_cross)
 ui/widgets/panels.py      SubTabBar, DropBox, BorderedFrame, SummaryPanel, Sidebar, TabIndicator
 ui/widgets/tracklist.py   TrackListBox — Muxing's checkable, scrollable track picker
 ui/widgets/carousel.py    ThumbnailCarousel + WaveLayer + the info tooltip
 ui/widgets/dialogs.py     MessageDialog, show_message / ask_yes_no / ask_text,
                           confirm_output_path, AudioStreamPickerDialog, ExternalStreamPickerDialog
 ui/widgets/toast.py       Toast / ToastManager
+ui/widgets/frameless.py   ResizeGrips (the borderless window's eight native-resize handles) +
+                          WindowControls (its close / maximise / minimise icons)
 ui/widgets/tooltip.py     tip(widget, text) — the shared themed hover tooltip
 ui/tabs/media_tab.py      MediaTab — the frame Muxing and Encoding share
 ui/tabs/muxing.py, encoding.py, downloader.py, queue.py, settings.py
@@ -117,8 +125,102 @@ frozen.
 - `media_tabs` — Muxing and Encoding, registered by `MediaTab.__init__`
   (`register_media_tab`) as the targets of the file-selection broadcast.
 
-**Window**: fixed at 35% x 37.5% of the screen, centred. Sidebar (200px) on the
-left; the tab frame (`#TabFrame`, rounded, 10px margin) holds the stack.
+**Window**: starts at 35% of the screen's width at the reference aspect
+ratio (896:540 — `scale.window_size`), centred; a 2560x1440 screen gives
+exactly the 896x540 reference window. Its size *is* the UI scale (see "UI
+scale" below), so the layout keeps its proportions on any monitor and at any
+window size. Sidebar (200 reference px) on the left; the tab frame
+(`_TabFrame`, rounded, 10px margin) holds the stack.
+
+**Window mode** (Settings → Appearance → Window Mode, `core/window_mode.py`,
+persisted as `window_mode` + `borderless_fullscreen`, default `Fixed` / off),
+applied live by `MainWindow._apply_window_mode` (also at launch, and
+`present()` shows it — `showFullScreen` for fullscreen — instead of `show()`):
+
+- **Fixed** — the reference-shaped window exactly as it always was: framed,
+  `setFixedSize`, centred on its screen, not resizable (pixel-identical to the
+  pre-mode app).
+- **Windowed** — the normal frame, freely resizable and maximisable; **the
+  default size is also the minimum** (the Fixed size — 896x540 on a 2560x1440
+  screen, `scale.window_size` of the window's screen — set as the window's
+  minimum in `_apply_window_mode`), so the scale never drops below the
+  default's; no upper limit.
+- **Borderless** — `FramelessWindowHint`, resizable like Windowed. With no
+  title bar, a press on the sidebar or the margin around the tab frame (any
+  press a child didn't take — *not* the tab frame itself) starts a native
+  move (`windowHandle().startSystemMove`), and `ResizeGrips` (eight invisible
+  real-pixel strips on the outline) start native resizes. Its **Fullscreen**
+  checkbox (Settings shows it only while Borderless is selected; unchecked by
+  default, and remembered while another mode is on) fills the screen with
+  `showFullScreen`. **`WindowControls`** (`ui/widgets/frameless.py`) stand in for the
+  OS buttons: Close, Maximise, Minimise — in that order — as the bare
+  `assets/close-window.svg` / `maximize-window.svg` / `minimize-window.svg` icons, no
+  shapes behind them, top-left of the sidebar in the 24px strip above the title. A
+  child of the `Sidebar` placed by absolute geometry (`scale.bind`), *not* a layout
+  item, so it cannot move the title — verified: every other sidebar widget keeps its
+  exact rect with the controls shown or hidden. They draw in `primary_text` (black or
+  white by contrast with the theme's primary); each lights up under the pointer by
+  recolouring the icon itself (never a shape behind it) — Close in STOP_RED, Maximise
+  and Minimise in the theme's `secondary` (on Noir that is a dark grey, so hover reads
+  as the white icon dimming). Close is drawn at 20 reference px against the others'
+  16: its X fills 60% of its 24-unit box where the maximise square fills 83%, so equal
+  sizes made it look small (`ICON_SIZES`). **The straight-edged icons are snapped to
+  whole device pixels** (`_icon_rect`, painted in real pixels, not design space): the
+  maximise square is only 2 of 24 units thick (1.33px at the default size) and its
+  position fell on a fractional pixel, so each line straddled two pixels at ~67%
+  coverage — visibly lighter than at 1.1x and up, where a solid pixel row happens to
+  fit. The size moves by under a pixel so the ink's width is whole, and its leading
+  edges are rounded onto the grid (`devicePixelRatioF` aware). Measured as each
+  side's darkest pixel row across 81 scales from 1.0 to 2.6: 4 scales were weak
+  before (1.0, 1.1, 1.14, 1.16 — the default size worst), 0 after, and all four sides
+  match. Judge icons like this by their real pixels: a 1px line magnified with smooth
+  scaling *looks* grey. The three SVGs ship in three colours (black, near-black, navy), so
+  `_tinted_svg` swaps every painted `fill` in the file text and renders it as a vector
+  (smooth at any scale) — not a rendered-then-tinted bitmap. Shown in Borderless only
+  (`MainWindow._sync_window_chrome`), fullscreen included. Close is `MainWindow.close`,
+  so the unfinished-jobs prompt still applies; Maximise toggles `showMaximized` /
+  `showNormal` (a frameless window fills the work area, and the resize grips switch off
+  while it is maximised — `changeEvent` on `WindowStateChange`); Minimise is
+  `showMinimized`. In borderless *fullscreen* Maximise is dimmed and inert, since
+  fullscreen is a Settings choice rather than something to undo from a button.
+  **The maximise guard must read the setting (`_wants_fullscreen()`), not
+  `isFullScreen()`**: a maximised frameless window reports `Maximized|FullScreen`, so
+  the live-state guard swallowed the click that restores it.
+
+Switching flags (`setWindowFlag`) hides a visible window, so the mode change
+re-`show()`s it. Four Windows/Qt quirks in that path were each found by
+measuring the *native* window (`GetClientRect`, `GWL_STYLE`, `SC_MAXIMIZE`
+through `SendMessage`) — Qt's own `width()`/`height()` agreed with itself and
+were wrong:
+
+- Adding or dropping the frame leaves the real client area a title bar and
+  borders smaller than Qt believes (880x501 for 896x540), and Qt, seeing no
+  size change, never corrects it — the page came out cropped at the bottom.
+  `_apply_window_mode` frees the size limits and resizes to `size+1` then
+  `size`, so Qt sends the real one.
+- Qt doesn't keep `WS_MAXIMIZEBOX` in step with the size limits on a live
+  window: Fixed -> Windowed left the button disabled, and Borderless -> Fixed
+  left it enabled on a pinned window, where a click just moved the window to
+  the top-left at the same size. `core/window_style.set_maximize_box` sets it
+  explicitly (off for Fixed, on otherwise).
+- Leaving maximised/fullscreen goes through `showNormal()` and then
+  `QApplication.processEvents()` *before* the flag changes, with the size read
+  from `normalGeometry()` beforehand — otherwise the window is re-shown
+  maximised and swallows the resizes.
+- **The dark title bar.** Qt sets DWM's dark-frame flag only when it creates a native
+  window that *already has* a frame, so a window launched Borderless and then given a
+  frame by Settings came up with the flag off — a white title bar over a dark app, for
+  good (Windows reports dark, Qt reports dark, the app is dark; measured by grabbing
+  the actual on-screen title-bar pixels, not by reading the flag). Launching framed was
+  fine, which is why it hid. `core/window_style.set_dark_titlebar` sets
+  `DWMWA_USE_IMMERSIVE_DARK_MODE` (attribute 20; 19 before Windows 10 2004) from
+  `MainWindow._sync_titlebar`, after every mode change and on every theme change.
+  **Setting the attribute is not enough**: neither `SWP_FRAMECHANGED` nor
+  `RedrawWindow` repaints the caption on Windows 10 (still white, flag correctly 1);
+  bouncing `WM_NCACTIVATE` (off, then on) does, and the window's real active state is
+  put back so a background window doesn't suddenly look focused. Verified on real
+  pixels: every mode-cycle combination, Light staying white, Light <-> Dark and a theme
+  change while framed, and the same with the app in the background (no focus stolen).
 
 **Tab switching** is `show_tab(name)`: calls the outgoing tab's `on_leave`
 if it has one (Settings autosaves; Queue resets a completed 100% bar),
@@ -197,8 +299,10 @@ once made the next autofill mistake the name for a folder.
   tabs' defaults long before the frame seeks finish), then
   `extract_video_thumbnails(path, count=10)` — ten frames at the video's
   *interior* (fractions 1/11 … 10/11, skipping a black first / end-credits
-  last frame). A result whose token is stale (the user picked another file
-  mid-decode) is dropped.
+  last frame): OpenCV first, and **ffmpeg if OpenCV produced nothing at all**
+  (see "A file that reads fine but decodes to no preview frames" below). A
+  result whose token is stale (the user picked another file mid-decode) is
+  dropped.
 
 `_broadcast_media_info` calls each media tab's `on_media_info` and its
 carousel's `set_media_info`; `_broadcast_thumbnails` hands frames to each
@@ -219,6 +323,54 @@ every media tab's carousel/DropBox (`MediaTab.clear_selected_file`,
 HDR render for it is cancelled, and a "Couldn't Read This File" dialog
 explains why — rather than a tab silently showing zeroed-out fields for a
 file that was never actually usable.
+
+**A file that reads fine but decodes to no preview frames is kept, not rejected.**
+`extract_video_thumbnails` is OpenCV, then — only if that produced *zero* frames —
+`_extract_thumbnails_ffmpeg`: one short ffmpeg process per frame at the same fractions of
+the file's real length (`probe_duration`, corrected — see "A file's real length" below), as
+input-side `-ss` seeks (which count from the file's own start whatever its timestamps say),
+scaled to at most 1920 wide, as **rgb24** PPM over a pipe. `format=rgb24` is load-bearing: a
+10-bit source otherwise comes out as a 16-bit PPM, which Pillow needs ~1.4s a frame to read
+(0.01s as 8-bit; 21.7s for ten frames became 5.9s). It gives up after three misses in a row
+with none found, and skips a file whose first video stream is cover art
+(`_has_previewable_video`, `attached_pic`) so an audio file keeps its Wave Loop. OpenCV's own
+loop stops after three failed seeks in a row for the same reason (each failed seek was ~0.3s).
+Only if *both* come back empty does `_deliver_thumbnails` get an empty list for something that
+isn't audio-only (`_is_audio_only` — an audio file legitimately has no frames and gets the Wave
+Loop instead). The file **stays selected and fully usable** — the previews failing says nothing
+about whether ffmpeg can mux/encode it — so nothing is undone: each media tab's
+`show_no_preview()` puts the drop box back over the carousel, now reading **"No Preview
+Available"** in STOP_RED (the `error` label role) where the drag/drop prompt was
+(`DropBox.show_no_preview`: border and Browse stay, "— or —" goes; `collapse()` / `reset()`
+restore the prompt's text and role), and a "No Preview" dialog says "No preview images could
+be generated." plus "The file is still usable but the preview images could not be decoded
+properly." once. A later file that does have frames reveals the carousel normally, because
+`show_no_preview` (like `clear_selected_file`) calls `carousel.forget_populated()` —
+`populated` fires once per carousel, and with the flag left set the drop box stayed up over a
+file that had loaded.
+
+**A file's real length can differ from its header** (`utilities._effective_duration`, used by
+both `probe_media`'s `duration` and `probe_duration`). Found with `GladiatorName.mkv`, a 35s
+clip cut from a film with its original timestamps kept: it starts at 5465.5s and its header
+Duration is 5501.162s — the END timestamp, not the length. ffmpeg itself is unaffected (it
+rebases every output to 0 and writes the real length into the new header — verified on the
+raw EBML Duration field: source 5501.162, mux export 35.659, all 852 video + 1110 audio frames
+kept), but everything the app derives from the number was wrong: the info tooltip
+(01:31:41), the `{bitrate}` token (121 kbps for 18.7 Mbps), the queue's progress denominator
+(the bar stalled at 0.65% until the final snap; 99.65% now), and OpenCV's frame count
+(131,896 frames for ~855, so every interior seek landed before the first frame — the cause of
+the preview failure above). The rule: a start time at or under 1s trusts the header (nearly
+every file, no extra work); otherwise `_tail_end_time` seeks to the last ~10s and reads to the
+end (one ~40ms ffprobe call) for the file's last real timestamp, and the header is treated as
+an end time — length = header − start — only if that timestamp sits at `header` and not at
+`start + header` (an honest header on a late-starting file, e.g. broadcast TS). Anything
+unclear keeps the header, so it is never worse than trusting it. **That probe's interval
+needs an explicit end** (`T%end`): the open-ended `T%` returned an empty result with rc 0 on
+8 of 30 runs of the identical command, where the closed form was 30/30. Checked against
+six real files (five unchanged: 28.5 / 37.6 / 6824.8 / 166.3 / 210.1s) and 40 repeats.
+`_probe_frame_geometry` (the HDR→SDR preview's frame count) applies the same correction only
+when OpenCV's implied length is over 1.5x the real one, so a merely variable-frame-rate file
+keeps cv2's count and its tone-mapped set stays index-for-index aligned with the raw one.
 
 **The scrub position is shared.** A carousel's `indexChanged` →
 `app.sync_preview_index(i)` → every carousel's `sync_index(i)` (an instant
@@ -324,13 +476,224 @@ focusable widget (another line edit, a `_TimeField`) still works exactly as
 Qt's own default already handled it, since `setFocus()` on the new widget
 clears the old one anyway.
 
+### UI scale (`ui/scale.py`)
+
+**Every size in the app is authored in reference pixels — the pixels of the
+896x540 window the layout was designed at — and multiplied by one scale
+factor where it becomes real pixels.** The factor is `min(width/896,
+height/540)` of the window (`scale.fit`), so proportions hold at any window
+size; at the reference size it is exactly 1.0 and every number in the code
+means what it always did. **Tune a size by changing its reference number, and
+never write a bare pixel count into layout, fixed-size or paint code.**
+
+`MainWindow.resizeEvent` sets the factor (`scale.set_factor`) **on every
+resize event — the whole window follows a drag live, with no debounce** —
+which re-runs every bound setter, emits `scale.changed` (`_on_scale_changed`:
+`_restyle`, then `scale.settle()`). **Everything else a resize needs is also
+finished inside `resizeEvent`, not left for later**: `_settle_layout` flushes
+the invalidated layouts (`sendPostedEvents(LayoutRequest)`, three passes — a
+layout activating only posts its parent's request once its own size has
+changed, so one flush leaves a chain behind), then `_replace_overlays` re-places
+the tab pipe and toasts. This is what makes a drag smooth: Windows paints
+between a resize and the next posted event, so anything left to a queued
+`LayoutRequest` or a `singleShot(0)` was painted one frame late — the new
+window size with the previous step's layout (~60 widgets 1-2px off), the tab
+pipe trailing its button. Measured by snapshotting every widget's geometry at
+each paint of a stepped resize and comparing with the settled layout: 58 of 60
+steps were torn before, 0 of 60-120 are now, on every tab, in Windowed and
+Borderless (per-step cost unchanged, ~14ms median). `_schedule_replace`
+(the timer) is still what `_apply_window_mode` uses. What's left is integer
+rounding — each `px()` length flips at a slightly different scale, so a widget
+can step back 1-2px for one step (a handful of 3-7px ones in 500) — which a
+pixel-snapped widget layout can't avoid. A window that isn't the reference
+shape scales by its tighter dimension and the flexible areas (preview, entry
+fields, button rows) take up the slack. Two things keep resizing from
+fighting the scale: the main layout is `SetNoConstraint` (its own minimum at
+the *current* scale would otherwise stop a shrinking window from ever
+lowering it), and it is a `_MainLayout` that opts out of height-for-width — a
+word-wrapped label in a page (Settings has several) otherwise made Qt restore
+a maximised or fullscreen window at the height those labels wanted at the
+*outgoing* scale (1388px on a 540px window, half off-screen).
+
+**What makes live resizing affordable — the stylesheet is the whole cost.**
+Profiled per rescale on a loaded window (~500 widgets): bound setters, layout
+and paint are ~10-15ms together; `QApplication.setStyleSheet` alone was
+~185ms (the same sheet set on the window: ~45ms; on one page: ~13ms). So:
+
+- **`QApplication.setStyleSheet` runs once, at startup** (`main.py`), and is
+  never touched again. It exists so widgets *measured during construction*
+  (tabs are built parentless; a `sizeHint()` taken in a constructor needs the
+  sheet already in force) see the right lengths. After that the sheet is
+  applied **on the widget** — `MainWindow._style(target)` — for the two things
+  on screen, the sidebar and the current page; a page that isn't showing
+  catches up in `show_tab` (`_style` after `setCurrentWidget`, then
+  `scale.settle()`). A widget-level sheet overrides the application-level one
+  (Qt's rule, whatever the specificity), so the stale app-level sheet is
+  harmless. This also covers a **theme or appearance switch**, so Settings'
+  hover-preview of a palette restyles ~13ms of widgets instead of all of them.
+- **`_style` compares stylesheet *text* to decide whether to re-apply the
+  sheet**: every length in it is a whole pixel, so a drag's tiny steps often
+  produce a byte-identical sheet and nothing is re-applied. Measured: a
+  2px-per-step drag costs a median 17ms/step (~58 steps/s), a coarse
+  0.005-scale-per-step one ~38ms. **It is keyed on the scale as well, for the
+  layouts only**: a `ScaledLabel`'s size hint follows the scale continuously,
+  not the sheet's whole pixels, and a hidden page's `updateGeometry` calls
+  reach nothing, so a page's layouts are invalidated whenever the scale moved
+  since it last was (its sheet is left alone when the text is unchanged).
+  Keyed on the text alone, a page came back from a tab switch with hints from
+  an older scale, and Muxing's Overview sized 2px short.
+- **A widget-level sheet on a big container cascades over its whole subtree**,
+  so nothing that contains the pages may carry one: the window background and
+  the tab frame are **painted** (`MainWindow.paintEvent`, `_TabFrame`), not
+  styled by `#Root` / `#TabFrame` rules (pixel-identical to the QSS look), and
+  `MessageDialog` styles itself in its constructor (a dialog built after a
+  rescale must not inherit the stale app-level sheet). Tooltips already carry
+  their own.
+- **Restyling a page invalidates every layout in it** (`_style`): a restyle
+  refreshes the cached size hints of visible widgets only, and a page's
+  *hidden* panels (Encoding's Video/Audio while Overview shows, once they've
+  been shown or grabbed) kept their old-scale hints — `panels.sizeHint()` read
+  116 instead of 91 and the preview stayed the wrong height until that panel
+  was next shown. The same reason a hidden *page* is restyled only after it
+  is made current, never before: a hidden widget restyled doesn't invalidate
+  its parent's layout.
+- A rejected idea worth recording: building each `Dropdown`'s popup lazily
+  (24 dropdowns x ~8 hidden widgets) — `QComboBox` creates its popup on the
+  first `addItems`/row insertion whatever you do, so it would mean owning the
+  item storage; not needed once the stylesheet was scoped.
+
+**Verified end to end**: a simulated border drag (a file loaded, every
+sub-tab browsed first, then 70-300 resize steps with no waiting, at several
+target sizes) ends **pixel-identical to a window resized once to the same
+size**, on every page including those hidden during the drag; a live theme +
+appearance-mode switch matches a launch in that theme; and everything from
+"Verified" below still holds.
+
+Three rules cover every kind of size:
+
+- **Layout, fixed sizes, margins, spacing, spacer items** go through the
+  bound helpers — `scale.fixed(widget, w=, h=)`, `scale.bounds(...)`,
+  `scale.margins(layout, l, t, r, b)`, `scale.spacing(layout, n)`,
+  `scale.spacer(layout, n)` (in place of `addSpacing`), `scale.grid_spacing`
+  — each of which applies the value now *and* again on every scale change.
+  `button()`, `IconButton`, `Dropdown`, `labeled()` and `hrow()` take
+  reference sizes and bind them for you. Anything else set once that depends
+  on a size takes `scale.bind(widget, fn)`.
+  A bound setter is **keyed** (`"spacing"`, `"fixed-w"`, ...): binding the
+  same thing on the same widget again *replaces* the earlier one. A raw
+  `layout.setSpacing()` after a bound one is a bug — the bound value comes
+  back on the next rescale (Encoding's `left.setSpacing(0)` after
+  `stream_page()` did exactly this and left every row 9px too far apart).
+- **Sizes measured off other widgets' size hints** (Muxing's track box takes
+  the Overview page's height, then Select/Deselect All take what's left)
+  use `scale.bind_after`, which re-runs once the stylesheet has been
+  re-applied — measured earlier, the hint still reflects the old scale.
+- **Custom-painted widgets are authored in design space**: `scale.begin(p)`
+  right after creating the painter, then `scale.ref_rect(self)` /
+  `scale.ref_size(self)` for the widget's size and `scale.ref_pos(e.position())`
+  for mouse hits, and every literal in the paint code stays a reference
+  number. Fonts inside a painter are `ui_font(px)` — a *reference*-size
+  font, which the painter scales — and text measured for a fixed size or a
+  marquee is measured with that same font in reference pixels. **Text on a
+  stock widget goes through the same painter**: use `ScaledLabel` (never a bare
+  `QLabel` with text), `button()` (a `ScaledButton`) and `ScaledLineEdit` (never a
+  bare `QLineEdit`), whose stylesheet font
+  size is in *reference* pixels (`font-size: 12px`, not `font_px(12)`) and
+  which paint their text in design space and turn Qt's reference-size size
+  hints into real ones ("text part x scale + the stylesheet's box"). Why:
+  **Qt snaps every widget font to a whole pixel size, whatever the family,
+  font engine, hinting or strategy** (`setPointSizeF(12.5)` is 13px; verified
+  for Roboto, Arial and Segoe UI), so stock text hopped between sizes as the
+  window was dragged. Measured on a sentence swept over scale 1.0-1.5: a word's
+  position wandered 5.5px rms (worst 16px, one step 29px) as a widget font,
+  0.32px rms (worst 0.8px, one step 1.4px) through the scaled painter. Fonts
+  are **unhinted** (`main.py`'s app font, `ui_font`, and the two widgets force
+  it themselves): hinted glyph advances are irregular (a line is 227 / 236 /
+  262px at 12 / 13 / 14px against a linear 224 / 242 / 261) and hinted glyphs
+  are placed on whole pixels, which put 0.4px of unevenness into letter and
+  word gaps once painted at a fractional scale (0.07px unhinted). Still on
+  the whole-pixel path, so still stepping: only the combo popup's rows (the
+  stylesheet's `font_px(13)` base rule), which are open for a click and never
+  on screen while the window is being dragged. A rich-text
+  `ScaledLabel` (Settings' system info) paints through a `QTextDocument`.
+  **`ScaledLineEdit`** can't route Qt's own painting through a painter (`QLineEdit`
+  opens one internally), so it takes over exactly the two things that touch the
+  font — painting (the stylesheet still draws the box, focus border and disabled
+  colour; text, placeholder, selection band and caret are drawn from the reference
+  font, with its own scroll-to-caret and blink) and mouse-to-character mapping
+  (press, drag, double-click, shift-click, by the same metrics as the painting) —
+  and leaves keys, undo, the clipboard, the selection model and every signal to
+  Qt. Measured like the labels: 5.2px rms (worst 14.6px, one step 26px) as a
+  `QLineEdit`, 0.53px (worst 1.6px, one step 1.8px) as a `ScaledLineEdit`. Not
+  reimplemented: dragging selected text out of the field, IME pre-edit drawing.
+  **A size hint from Qt cannot be scaled whole**: the stylesheet's `min-height` is
+  real pixels and Qt folds it into `sizeHint()` — and into a label's
+  `heightForWidth()` — so multiplying the hint by the scale multiplied the
+  minimum too (a 26px caption box came out 104px at 2x; every control under a
+  caption sat that much lower, buttons came out 76px instead of 57, the preview
+  above was squeezed). It is invisible at scale 1.0, which is why it shipped, and
+  only obvious in fullscreen. **Qt folds `min-width` into the hint too** — a
+  fixed-width label's fixed width, so a `setFixedWidth(872)` label reported 1744.
+  So none of the three widgets takes a size from Qt any more: each measures its own
+  text with the reference font (`ScaledLabel._unwrapped_hint`, `_wrap_widths`;
+  `ScaledButton` / `ScaledLineEdit` the same, with the padding taken from the style's
+  contents rect) and applies `minimumHeight()` last.
+  **A word-wrapped `ScaledLabel` computes its own width hints** (`_wrap_widths`, from
+  the reference font: ideal = about 4:1 wide, minimum = the longest word, minimum
+  height = one line) rather than converting Qt's. Qt picks a wrapped label's ideal
+  width by aspect ratio with reference-size text and real-pixel padding mixed
+  together, so the answer drifted with the scale (a 132px-wide tooltip at 1x came
+  out 220 at 1.9x, where 250 is proportional), and its minimum hint is the tall,
+  narrowest wrapping — which a *top-level* window enforces as a floor on its height:
+  the shared tooltip, reused across scales, came out 450x287 for a two-line tip
+  (only on a window already created at another size, hence "sometimes"). The tooltip
+  manager also sizes the popup itself (width clamped to its maximum, then
+  `heightForWidth` *at that width*) instead of `adjustSize`, which works the height out
+  at the unclamped hint width and cuts the last lines off a long tip. Verified by
+  driving the real manager over every tip string and 7 scale changes on one reused
+  window (259 sizings, 0 bad; the previous logic fails 191 of them) — reuse across
+  scales is the state that matters, so test that, not a fresh window per size.
+  **The regression test for this whole class of bug is a proportions check**:
+  every visible widget's rect at scale K must be K x its rect at scale 1 (client
+  size set with `resize`, exactly K x 896x540 — `SetWindowPos` sets the *outer*
+  frame and changes the aspect), across every tab and sub-page. 531 widgets, 0
+  deviations at 1.5x / 2x / 2.6x; the old code deviates by up to 104px (a check
+  that can't fail proves nothing — confirm it fails on the broken code). The
+  stylesheet's lengths (padding, radius, min-height) stay `px()` / `font_px()`
+  calls inside `ui.theme.stylesheet()` (regenerated on a scale change), and a
+  real widget's other font needs go through `set_font_px(widget, px)` (which
+  the stylesheet's own font rules override on a label — it does nothing
+  there). Widths from
+  `Dropdown.width_for` / `button_width_for` are reference pixels too.
+  The carousel is the exception: it paints in real pixels (its frame and
+  hit-testing are fractions of a real rect), with `px()` / `fpx()` on its few
+  absolute constants — margins, dot sizes, badge floors.
+
+**Verified**: a harness that renders every page (Muxing/Encoding x
+Overview/Video/Audio with and without a file, Downloader, Queue with rows and
+the details popup, Settings' three pages, a toast, and the hover chevrons,
+expanded preview, Wave Loop, open dropdown, tooltips and dialogs) is
+**pixel-identical to the pre-scale code at scale 1.0**, and a live rescale
+(1.0 → 1.5, 1.0 → 0.75, 0.75 → 2.0, 1.5 → 1.0) is pixel-identical to a fresh
+launch at the target scale. That equivalence is the regression test for any
+sizing change: capture pages at 1.0 before and after; a difference means a
+number moved. (The "Selected File:" marquee scrolls on the wall clock, so
+that one strip differs run to run — mask it.) That equivalence was established
+before `ScaledLabel` / `ScaledButton`; since, stock text is unhinted and drawn
+through the scaled painter, so glyph pixels differ from a hinted whole-pixel
+render even at 1.0 — compare *geometry* (widget rects) and mask text, or
+re-baseline once.
+
 ### Theming (`core/theme.py` + `ui/theme.py`)
 
 **`core/theme.py` is the source of truth for brand colour.** `THEMES` holds
-seven palettes — `Lemon` (`#FDCA3C` primary / `#3B8ED0` secondary, the
+ten palettes — `Lemon` (`#FDCA3C` primary / `#3B8ED0` secondary, the
 original look), `Cupid` (`#FA6E99` / `#780219`), `Lilac` (`#a58fd7` /
 `#3e6d04`), `Ranger` (`#F98524` / `#104E4B`), `Noir` (`#131317` / `#5A5B63`),
-`Luck` (`#ADBCDE` / `#0E5914`), `Vaporwave` (`#3B41B8` / `#ED72D4`). Every
+`Luck` (`#ADBCDE` / `#0E5914`), `Vaporwave` (`#3B41B8` / `#ED72D4`),
+`Dreamsicle` (`#f9be90` / `#f97c9c`), `Funk` (`#3dbcc1` / `#4b3383`) and
+`Terminal` (`#000000` / `#44fe2c`) — the last two carry the extra keys described
+below (`sidebar_text`, `swap_subtabs`, `swap_action_buttons`, `primary_hover`). Every
 colour is a **flat hex string, not a (light, dark) pair** — appearance mode
 never changes a theme's colours. Hover shades are auto-derived by `_darken()`
 (~0.87 brightness) except Lemon's primary hover, kept at its historical
@@ -340,6 +703,23 @@ never changes a theme's colours. Hover shades are auto-derived by `_darken()`
 - `primary_text` / `secondary_text` — `readable_text_on()`: black or white,
   whichever has the higher WCAG contrast against that fill (Noir's near-black
   primary gets white; Lemon's `#3B8ED0` secondary gets black).
+- `sidebar_text` — the colour of the sidebar's **title and logo only** (the
+  `sidebarTitle` role and `Sidebar._load_logo`'s tint). It is `primary_text`
+  unless the theme names its own `sidebar_text` in `THEMES` — **Funk** does
+  (`"white"`: its `#3dbcc1` teal derives black everywhere, but the title and llama
+  read better in white) and so does **Terminal** (`"secondary"` — the keyword form,
+  resolved in `get_theme`, so it tracks the theme's secondary, `#44fe2c` green). The
+  sidebar footer, the Borderless window controls and everything else on a primary
+  fill keep using `primary_text`.
+- `subtab_active` / `subtab_inactive` (+ `_hover` / `_text` each) — the fills the
+  `SubTabBar` uses for the selected tab and the others: primary / secondary, or
+  **swapped for a theme with `swap_subtabs`** — **Terminal**, whose black primary
+  vanishes as a selected tab on the dark frame, so its selected tab is the green
+  and the others black (the line under the bar follows `subtab_active` too, so it is
+  the green there and primary everywhere else). Terminal also names a
+  `primary_hover` (`#1c1c1c`): black's derived hover is black again, which would
+  leave the now-black inactive tabs (and every primary button) with no hover
+  feedback.
 - `primary_disabled_text` / `secondary_disabled_text` —
   `disabled_text_on()`: a grey solved to hit 3:1 contrast against *that*
   fill, on the side `readable_text_on` would pick. A disabled button or
@@ -360,11 +740,12 @@ track, menu, row, disabled, tooltip, warning…) plus the `stop*` and
 OS colour-scheme change while in System mode. Read colours with
 `T.theme.color(key)` (QColor) or `T.theme.hex(key)`.
 
-On `changed`, `MainWindow._restyle` re-applies `ui.theme.stylesheet()`
-(~140ms, almost all stylesheet re-polish) and every custom-painted widget
-repaints from `T.theme` — each connects `T.theme.changed` to its own
-`update()`. Nothing is destroyed, so no form state is lost, and Settings can
-preview a theme across the whole window on hover.
+On `changed`, `MainWindow._restyle` re-applies `ui.theme.stylesheet()` to the
+sidebar and the page on screen (~13-20ms; the rest catch up when shown — see
+"UI scale" above) and every custom-painted widget repaints from `T.theme` —
+each connects `T.theme.changed` to its own `update()`. Nothing is destroyed,
+so no form state is lost, and Settings can preview a theme across the whole
+window on hover.
 
 `_rebuild_colors` also drives the native title bar through
 `QStyleHints.setColorScheme` (Qt 6.8+). **System mode must call
@@ -376,13 +757,28 @@ rather than the OS setting. A `_rebuilding` guard stops the resulting
 **The stylesheet styles stock widgets only**, keyed by a dynamic `role`
 property:
 - `QPushButton` — secondary by default; `role` = `primary`, `danger`
-  (STOP_RED), `ghost` (transparent), `stepper` (the TimeSpinner arrows).
+  (STOP_RED), `ghost` (transparent), `stepper` (the TimeSpinner arrows), and two
+  that **a theme can swap**: `action` (the do-it-now / affirmative buttons — Mux /
+  Encode / Download, Start / Pause Queue, Settings' Save, the Downloader's Fetch and a
+  dialog's first button) and `queue` (their quieter partners — Queue Task, the
+  Downloader's Paste and a dialog's decline buttons, No / Cancel). They are primary and
+  secondary respectively — pixel-identical to the old `primary` / default — except
+  in a theme with `swap_action_buttons` (**Terminal**: black primary, so its
+  Mux / Encode / Download / Start Queue / Save / Fetch / a dialog's Yes-OK are the green
+  and Queue Task / Paste / No-Cancel are the black).
+  `ui/theme.py`'s `_rebuild_colors` aliases `action_btn*` / `queue_btn*` (fill,
+  `_hover`, `_pressed`, `_text`, `_disabled_text`) from whichever colour the theme
+  assigns. Any *other* primary-role button is deliberately not swapped.
   After changing a role at runtime call `controls.restyle(widget)`.
 - `QLabel` — `field` / `field11` (bold Arial captions, 26px min-height, which
   gives the airy label-above-control rhythm), `muted`, `meta`, `hint`,
   `title`, `dialogTitle`, `detailTitle`, `detailKey`, `error`, `empty`,
   `warn`, `sidebarTitle`, `sidebarFooter`. `QLabel:disabled` dims captions.
-- `QLineEdit`, `QSlider` (incl. disabled handle/fill), `QScrollBar`, and the
+- `QLineEdit`, `QSlider` (incl. disabled handle/fill; **the knob's size, margin
+  and radius are derived together in `stylesheet()`** — Qt's handle box is
+  groove + 2 x margin, and rounding `px(16)` / `px(4)` / `px(-6)` separately left
+  it a pixel off the knob at ~16 scales in 0.6-3.0, drawn as a square instead of a
+  circle; scan pixels across scales after touching it), `QScrollBar`, and the
   combo popup (`QComboBox { combobox-popup: 0 }` so the list drops below the
   button instead of over it; the private container transparent; rounded
   view; 28px rows).
@@ -394,11 +790,14 @@ rows, toasts) paints itself.
 **Persistence.** `settings.json` (repo root, gitignored): `theme`,
 `appearance_mode`, `default_save_location`, `gpu_enabled`,
 `downloader_separate_save`, `downloader_save_location`, `naming_template`,
-`priority_level`, `when_done`, `when_done_reset`; missing keys or a
+`priority_level`, `when_done`, `when_done_reset`, `window_mode`,
+`borderless_fullscreen`, `startup_tab`; missing keys or a
 missing/corrupt file — or a stored `naming_template` / `when_done` /
-`priority_level` that's no longer valid (a hand-edited file) — fall back to `Lemon` / `System` / `~/Videos/LlamaMXD
-Export` / `True` / `False` / `""`. The last two back Settings' "Separate
-Save for Downloader" — see "Tabs → Settings" below. **Presets**
+`priority_level` / `window_mode` / `startup_tab` that's no longer valid (a hand-edited file) —
+fall back to their defaults: `Lemon` / `System` / `~/Videos/LlamaMXD
+Export` / `True` (GPU) / `False` / `""` (the last two back Settings' "Separate
+Save for Downloader" — see "Tabs → Settings" below), then the naming format,
+`Normal`, `Do Nothing` / `True`, `Fixed` / `False` and `Encoding`. **Presets**
 (`core/presets.py`) live in a gitignored
 `presets.json`, shaped `{tab: {name: settings}}`. A preset is a **recipe, not
 a job**: `PRESET_KEYS` limits it to the container and codec/quality choices
@@ -518,16 +917,22 @@ ffmpeg compute it from the source's own aspect ratio rather than this
 module trying to precompute both dimensions.
 
 **`FPS_VALUES`/`fps_values_for`/`fps_arg_for`** are the same idea for frame
-rate: `SOURCE_FPS` (`"Source"`) plus a fixed ladder of round numbers (`"60"`
-… `"24"`, then `"12"`/`"8"` for deliberately choppy/stop-motion-style output
-— deliberately not the NTSC-exact 29.97/23.976; ffmpeg's `-r`
-happily retimes onto a plain integer without this app reproducing
-broadcast drop-frame arithmetic in the UI). `fps_values_for(source_fps)`
-caps the list to `SOURCE_FPS` plus every rung **at or below** the source's
-own rate — never a speed-up — with a 0.1 tolerance so a true 29.97/23.976
-source still offers the round 30/24 sitting just above it, and falls back
-to the full ladder when the rate isn't known yet. `fps_arg_for` is the
-reverse lookup `ffmpeg_vars._fps_arg` uses to build the actual `-r` value.
+rate: `SOURCE_FPS` (`"Source"`) plus a fixed descending ladder — `120`, `60`,
+`59.94`, `50`, `48`, `30`, `29.97`, `25`, `24`, `23.976`, then `12` / `8` for
+deliberately choppy/stop-motion-style output. **The three NTSC rungs are exact
+rationals on the command line**: `fps_arg_for` maps `"23.976"` / `"29.97"` /
+`"59.94"` to `24000/1001` / `30000/1001` / `60000/1001` (`-r` accepts them), since
+the rounded decimal would retime a true NTSC source a hair off and drift audio sync
+over a long file. Because that value is no longer a bare number, comparisons go
+through `fps_number_for` (`float("24000/1001")` doesn't parse — `ffmpeg_vars._fps_arg`
+used to call it). `fps_values_for(source_fps)` caps the list to `SOURCE_FPS` plus
+every rung **at or below** the source's own rate — never a speed-up — with a 0.1
+tolerance so a true 29.97/23.976 source still offers the round 30/24 sitting just
+above it, and falls back to the full ladder when the rate isn't known yet.
+`fps_arg_for` is the reverse lookup `ffmpeg_vars._fps_arg` uses to build the actual
+`-r` value. **The FPS dropdown must stay exactly as wide as Resolution's** (83
+reference px — `"23.976"` fits inside it): the Video page has ~4px of slack and FPS
+lands under Resolution by having the same width.
 
 ### Tabs
 
@@ -563,7 +968,8 @@ They share one frame, `MediaTab`, top to bottom:
   worked examples (`TrackListBox`'s fixed height on Muxing, the
   Video-panel layout on Encoding) below.
 - **Save row** (entry + Browse) and the **actions** (`Queue Task` secondary,
-  `Mux` / `Encode` primary — queue *and* start).
+  `Mux` / `Encode` primary — queue *and* start; by role `queue` / `action`, which a
+  theme can swap — see Theming).
 
 Subclasses set `TAB`, `ACTION_TEXT`, `OUTPUT_SUFFIX` (`_muxed` / `_encoded` — now only
 the fallback when the naming format would name the output after the input itself),
@@ -598,8 +1004,9 @@ Asking at queue time is what lets the queue run without ever prompting.
 
 **Queue hand-off**: `add_to_queue` toasts "… job added to queue."; `run_now`
 also calls `start_task`, whose result (`started` / `next` / `paused`) picks
-the toast. The Queue/Go buttons are never disabled — validation happens on
-click.
+the toast. Queue Task / Mux / Encode are greyed until a file is selected
+(`_apply_import_gate`, both ways — same as the Downloader's until a fetch
+succeeds); everything else is validated on click.
 
 **Muxing / Video** and **Muxing / Audio**: a `TrackListBox`
 (`ui/widgets/tracklist.py`) — a scrollable box bordered in the theme's
@@ -620,59 +1027,176 @@ every row in the box — `TrackListBox.item_ids()`, every row regardless of
 current state, vs. `checked_ids()`'s already-checked-only — without adding
 or removing anything, the non-destructive counterpart to `Remove
 Stream(s)`), then `Add Stream(s)` beneath them, then `Remove Stream(s)`
-(`role="danger"`, STOP_RED) sharing a line with the Strip checkbox below
-that — the two-button rows (`Select All`/`Deselect All`, `Remove
-Stream(s)`/Strip) each share one line rather than each getting its own
-full row, which is what keeps this now-four-row column short enough to
-still fit under the box's own fixed height (a fourth *full* row would
-have pushed the column past it — see the panel-height paragraph below for
-why that specifically breaks). `Add Stream(s)`/`Remove Stream(s)` share
-one width (`button_width_for`) so that pair lines up flush; `Select All`/
-`Deselect All` are sized the same way against each other. `Select All`/`Deselect All` stretch
-vertically to fill whatever column height is left (box height − two 28px
-button rows − two 6px gaps), reaching the box's top edge and coming out
-near-square — done by fixing their *row's* height and giving the buttons an
-Expanding vertical policy, since the QPushButton stylesheet's `min-height:
-28px` defeats a `setFixedHeight` on the button itself.
+(`role="danger"`, STOP_RED) at the same width, then on the bottom line
+**`Undo` / `Redo`** — two more icon buttons (`undo.svg` / `redo.svg`, kinds `undo` /
+`redo`) with the **Strip checkbox to their right**. The two-button rows
+(`Select All`/`Deselect All`, `Undo`/`Redo`) each share one line rather than each getting
+their own full row, which is what keeps this four-row column short enough to still fit
+under the box's own fixed height (see the panel-height paragraph below for why that
+specifically breaks). `Add Stream(s)`/`Remove Stream(s)` share one width
+(`button_width_for`); each icon pair is half that width less half a 4px gap, so the pair
+lines up under them and sits as tight as the rows do (4px between the buttons, the same as
+the column's vertical gap — it was 8).
+
+**Icon sizes.** `IconButton` draws its SVG in a square of `_ICON_FRACTION` × the button's
+shorter side (default 56%, 72% for a `compact` button). Undo/redo override it to **100%**
+(140%, then 120%, each judged a little too big; the default drew them tiny): their arrow only
+fills ~16×8 of a 24-unit viewBox, so at the default the arrow was too small, and at 100% the
+box is the button's height.
+
+**Greyed when there's nothing to act on.** `Select All` / `Deselect All` / `Remove
+Stream(s)` and the box itself are disabled while the box is empty (no file yet, or every
+track removed); `Add Stream(s)` stays live. A disabled `role="danger"` button now dims its
+text (`stop_disabled_text`, `disabled_text_on(STOP_RED)`) — the danger rule used to
+override `QPushButton:disabled`, so a disabled Remove Stream(s) looked enabled.
+
+**Even four rows only just fit**: Overview is 118px, and 28 + 28 (Add, Remove) +
+24 (the Undo/Redo/Strip row — the checkbox's own height) + 12 (three 4px gaps) leaves 26 for
+Select/Deselect All. So Undo/Redo and Select/Deselect All are `role="compact"` (stylesheet
+`min-height: 22px` — the stock 28px `min-height` defeats any fixed height, so a
+shorter button needs its own role), the column's gaps are 4px (they were 6 with three rows),
+and Select/Deselect All take whatever height the box has left
+(`size_box`: `box.height() − 2·px(28) − px(24) − 3·px(4)`, floor `px(22)`; a fixed
+row height with Expanding buttons, since the button's own `min-height` overrides a
+`setFixedHeight`). **The gap change is what makes it safe, not cosmetic**: with 6px
+gaps the column had 0px to spare at 1.0x and, at 1.25x, five independently-rounded
+`px()` lengths made it 3px taller than the box — the whole page 3px taller than
+Overview, i.e. a smaller preview on Muxing than on Encoding. With 4px, the Video and
+Audio pages are never taller than Overview at any of 42 scales checked from 0.8x to
+2.6x (re-checked after Strip moved onto the Undo/Redo row). Re-run that scan (Video/Audio
+`sizeHint().height()` against Overview's, showing
+each page before measuring — a hidden page is restyled lazily, so its hint is stale)
+after touching this column.
 
 **Row text marquees, the checkbox doesn't.** Each row is a `_TrackRow`
 (`ui/widgets/tracklist.py`): a text-less `CheckBox` plus a `MarqueeLabel`
 (Arial 12 bold, matching the checkbox's old caption) joined to one
-`MarqueeGroup` per box, so a long label (an `External: …` row) scrolls while
-short ones sit still, and every loop restarts together only after the longest
-sweep finishes — same as the Overview rundown. A click anywhere on the row
+`MarqueeGroup` per box, so a long label (a video row's full details, an
+`External: …` row) scrolls while short ones sit still, and every loop restarts
+together only after the longest sweep finishes — same as the Overview rundown.
+**The group owns the one 16ms timer and reads the clock once per tick**
+(`MarqueeGroup.now`); every label paints from that snapshot and all of them are
+`update()`d in the same tick. Each label used to run its own timer and read
+`perf_counter()` at its own paint, so rows that started together were painted on
+different ticks and crept relative to each other. The group also caches its
+`period()` (it was recomputed — a font measurement per member — by every label on
+every frame). A standalone `MarqueeLabel` gets a private group, so there is one
+code path. The timer is **parented to the `QApplication`**: a parentless `QTimer`
+owned by a Python object was torn down after the application at exit and crashed
+the interpreter about half the time (10/10 clean once parented). A click anywhere on
+the row
 toggles the checkbox (`CheckBox.set_hover` forwards the hover shade);
 `MarqueeGroup.unregister` runs when a row is removed so `period()` never
 touches a deleted label.
+
+**Drag a row to reorder it — any row, checked or not.** A left press that moves further
+than `QApplication.startDragDistance()` is a drag instead of a click (`_TrackRow`'s
+press/move/release; letting go after a drag toggles nothing, and a press-and-release
+without moving still toggles the checkbox). The row's `CheckBox` is transparent for mouse
+events so a drag can start *on* it — a press on a widget that takes it never reaches the
+row. `TrackListBox._begin_drag` leaves the row in the layout as a 28%-opacity placeholder
+and puts a `_DragGhost` (a snapshot of the row on a rounded slab in the `window` colour —
+the box has no background of its own, so a bare snapshot printed over the rows beneath)
+on the scroll viewport. **The ghost's corners are rounded (`px(6)`)**: the slab is painted
+and the snapshot clipped to one rounded path, and the snapshot is rendered onto a
+*transparent* pixmap (`_DragGhost.snapshot`, `render(..., DrawChildren)`) rather than
+`QWidget.grab()`, which fills the row with its own opaque window-colour rectangle — on
+Windows that rectangle covered the rounded backing and showed as a sharp-cornered band;
+checked by pixel (all four corners of the ghost transparent, also with the old opaque
+`grab()` forced back in, which is what the clip is for); `_follow_cursor` keeps the ghost under the
+cursor (clamped to the viewport, keeping the grab offset) and moves the placeholder
+through the layout to the slot the ghost's centre is over, so the other rows make room
+live — the slot is worked out from the ghost's centre in *host* coordinates
+(`host.mapFrom(viewport, …)`; `viewport.mapTo(host, …)` is backwards, host being the
+child, and returned garbage that clamped to the last slot, which an assertion on a
+drag-to-the-bottom did not catch). A 16ms timer scrolls the list while the cursor is
+within 22px of the viewport's top or bottom edge, faster the deeper it is. The drop
+reports every id in its new order through `TrackListBox.reordered`; nothing is reported
+for a drag that ends where it began. `MuxingTab._reorder_tracks` reorders `_tracks[kind]`
+through `_edit_tracks`, so a move is **one undo step** like Add and Remove, the
+renumbering comes from `_items_for` as it does after a removal, and `_track_args` — which
+follows the box's order — makes it the output's stream order. Verified by driving real
+mouse events into a row (click still toggles; a checked row and an unchecked row dragged
+to the bottom / top; undo ×2 and redo; mux args follow the order; a drag that ends where
+it began adds no history). **Tooltips are held for the length of a drag**
+(`tooltip.hold_tips(True)` in `_begin_drag`, `False` in `_finish_drag`): the box's own tip
+is registered on the box, but a press on a row goes to the *row*, so the manager's
+press-hides rule never saw it and the tip could appear (or stay) mid-drag. While held, the
+popup is hidden, an Enter arms nothing and `_show` is a no-op; on release the hover delay is
+re-armed if the cursor is still over the last-hovered widget, so the tip returns after its
+usual 400ms of stillness rather than the instant the row drops.
+
+**A row's text is "Track N  ·  details", N being its place in the box** (so
+removing a track renumbers the ones below it) and a track from another file says
+`External: <name>` after the number. **Video details are `codec · profile · level ·
+size · fps · HDR kind · bit depth + chroma · bit rate · language`**
+(`H.265 · Main 10 · L3.1 · 1280x720 · 23.976 fps · HDR10 · 10-bit 4:2:0 · eng`), from
+`core.utilities._describe_video_stream` — which now also asks ffprobe for `pix_fmt` /
+`bits_per_raw_sample` and reuses the codec-aware `_ffprobe_level`. `hdr_display` is
+`HDR10` (PQ), `HLG` or `SDR` — anything that isn't PQ/HLG, the same call
+`probe_media`'s `hdr` makes; a stream's own bit rate is absent from most Matroska
+files, and then simply isn't shown. Audio rows are unchanged (codec · channels ·
+rate · language). The "Add Stream(s)" picker is a fixed 400px dialog of plain
+checkbox captions, so it gets `compact=True` (codec · profile · size · HDR only when
+it is · language) and its "Track N" is the stream's number in *its own file*.
 
 `Add Stream(s)` browses a second file, probes it off the GUI thread
 (`core.utilities.probe_media` via `run_async` — never on the GUI thread,
 same rule as everywhere else), and either adds its lone matching-kind stream
 straight away or — when it has more than one — opens
 `ExternalStreamPickerDialog` (`ui/widgets/dialogs.py`) to choose which. Each
-added stream becomes its own row tagged `External: <name> — Track N · codec
-· ...`, kept in `MuxingTab._video_external` / `_audio_external`
-(`{row_id: {"file", "index", "label"}}`) — independent of the primary input,
-so switching the primary file later doesn't clear them. **`Remove Stream(s)`
-acts on every currently-checked row** — there's no per-row ✕ any more;
-checking a row still means "include it" as always, and pressing this button
-re-reads that same checked state as "actually, get rid of these": a row
-living in `_video_external`/`_audio_external` is dropped from the box
-outright, while a source row — the file's own track, which can't actually be
-deleted — is simply unchecked instead (`TrackListBox.set_checked`, the
-programmatic counterpart of clicking its own checkbox off). Either kind
-ends up excluded from the output either way; the difference is only whether
-the row itself survives. Pressing it with *nothing* checked at all shows a
-message rather than silently doing nothing. The red Strip checkbox
-still sits beside `Remove Stream(s)` and still means "drop this stream kind
-entirely" — kept as an explicit, separate control rather than being inferred
-from "the box happens to have nothing checked" (see the box's own "no
-streams selected" rundown state below for that case). Settings keys
-`video_tracks`, `strip_video`, `audio_tracks`, `strip_audio` — each
+added stream becomes its own row at the bottom, independent of the primary input,
+so switching the primary file later doesn't clear it.
+
+**`MuxingTab._tracks` is the list each box shows — not the probe.**
+`{"video": [...], "audio": [...]}`, each entry `{"id": "src:N" | "ext:xxxxxxxx",
+"source": "primary" | "external", "file", "index", "stream", "name"}` (`index` is
+0-based among that file's own streams of the kind — what `-map` addresses;
+`stream` is the probe's description of it, kept so a label can be re-rendered
+whenever the number changes). `_reseed_tracks` builds it from `media_info` —
+the source's streams first, any external entries kept after — whenever a **new
+probe result** arrives (`info is not self._tracks_info`: the object changes per file,
+not per broadcast), and clears the undo history with it, since its snapshots describe
+the old file. Entries are never mutated, so a snapshot of a list is just a copy.
+`_track_args` maps the checked rows *in the box's order* (the output's stream order).
+
+**`Remove Stream(s)` removes every checked row from the list — the source file's
+own tracks included** (the source file is untouched; the track just isn't offered any
+more). It used to uncheck a source row it "couldn't delete"; that distinction is gone.
+The rows below move up, so **track numbers ripple** (remove track 2 and track 3
+becomes track 2 — `_items_for` numbers by position, and `TrackListBox.set_items`
+refreshes every surviving row's label). Pressing it with nothing checked shows a
+message. Removing everything from both kinds (or everything left but a stripped
+kind) is caught at queue time: `_validate_specific` refuses a job with no track to
+map anywhere ("Nothing to Mux"), since "no rows" no longer means "the file has none"
+and ffmpeg would refuse to write an empty file. Verified end to end: removing the first
+source video + audio track and running the real Mux gave an output of exactly the kept
+tracks, language tags intact. The red Strip checkbox still sits beside `Remove
+Stream(s)` and still means "drop this stream kind entirely" — an explicit, separate
+control rather than inferred from an empty box.
+
+**Undo / Redo** step through every edit to a box — Add Stream(s), Remove Stream(s), a
+drag-reorder **and which rows are ticked** (clicking a row's checkbox, Select All,
+Deselect All) — per kind (the Video and Audio panels each have their own pair and
+history). A step is a snapshot `{"entries", "checked"}`, capped at 50. List edits go
+through `_edit_tracks`; a tick goes through `_track_toggled`; Select All / Deselect All
+push a step only if they would change something. `_push_history` also clears redo.
+**A tick's step is the state from *before* the click**: the box reports a click after it
+happened, so `_checked_baseline` (the ticked ids as of the last `_sync_controls`) supplies
+the "before". `_travel` swaps the whole box with the top of one stack and parks the
+current one on the other, and **restores the ticks of every row, not just a returning
+one** (`_restore_checked` → `set_items(checked=...)`, which now applies to existing rows
+too, consumed by the next `_sync_controls`) — an earlier version left surviving rows as
+they were, which was right only while ticks weren't tracked. A returning row
+lands **where it was**: `set_items` orders the rows to match its item list (it used to
+append), and `checked_ids()` follows that order. The buttons enable from the stacks
+in `_sync_controls` and are also off while the panel is stripped/absent.
+Settings keys `video_tracks`, `strip_video`, `audio_tracks`, `strip_audio` — each
 `*_tracks` a list of `{"source": "primary"/"external", "file": path|None,
 "index": N}`, one entry per *checked* row, `N` 0-based among that file's own
 streams of that kind (what `-map <input>:v:<index>` / `:a:<index>`
-addresses).
+addresses). The Queue's details popup therefore shows a track's number *in its
+file*, which after a removal differs from the number the box showed.
 
 **The sizing rule, stated generally (this is what the INVARIANT above rests
 on): neither tab's Video or Audio page may size taller than that tab's own
@@ -726,22 +1250,24 @@ height.
 
 `TrackListBox.set_items` is the box's own single constraint pass, matching
 `_sync_controls`'s own idempotent-recompute philosophy: called on every
-`_sync_controls` pass with the source's current streams plus whatever's in
-`_video_external`/`_audio_external`, it diffs by row id — an id already
+`_sync_controls` pass with `MuxingTab._items_for(kind)` (the tab's own track list —
+see above), it diffs by row id — an id already
 present keeps its checked state and just gets its label refreshed, so
 clicking one checkbox (which itself triggers `_sync_controls` through the
 same `_on_control_change`/`changed` wiring every other control uses) never
-disturbs another row. It only tears every row down and rebuilds from scratch
+disturbs another row — and puts the rows in the order of the list it was given
+(a row is moved only when it isn't already in place). It only tears every row down
+and rebuilds from scratch
 (`reset=True`) when `app.current_file_path` itself changed since the last
 sync — a new file's stream indices don't mean what the old file's meant, so
 a same-named `src:0` row from a *different* file must never be mistaken for
 a carried-over pick. A brand new row (first appearance, whether from a reset
-or a fresh "Add Stream(s)" pull) defaults to checked only when it lands in
-the very first position — every other stream starts unchecked, mirroring
-Encoding's own multi-track audio picker defaulting to just the first stream
-(see "Multi-stream audio" below) rather than "check everything", since a
-checked box here means a real, copied stream in the output, not a dial to
-tune later.
+or a fresh "Add Stream(s)" pull) **starts checked — every track is selected by
+default**, in Muxing and in Encoding's Choose Stream(s) alike (it used to be only the
+first, on the theory that a tick means a real stream in the output; changed by
+request, so nothing is silently left out and a track just added is not forgotten). A
+default is not an undo step. Unless the caller passes `checked` (a set of ids), which an
+undo uses to put every row's tick back as it was.
 
 `_validate_specific` blocks a job only when a box actually has rows (a real,
 probed stream exists) but the panel isn't stripped and nothing in it is
@@ -781,6 +1307,28 @@ the encoder's own recommended default (`speed_default_for`), not the first
 (`core.utilities.av1_preset_range`), since SVT-AV1's preset ceiling varies by
 ffmpeg build (confirmed: 0–8 before an update, -2 to 13 after). The slider
 keeps its value across a codec switch while it still fits the new range.
+
+**The Video page has no width to spare, by design — and text metrics can eat what
+slack it has.** The dropdown row needs 527 reference px (98+115+102+97+83 plus 4x8)
+and the HDR column 112, in a 656px page. With text measured *hinted* it fitted with
+6px over (row 521, HDR 109); once fonts became unhinted — what is actually painted —
+the dropdowns measured 6px wider and the HDR label 3px wider, leaving it 3px short
+(and 11px short at 2.6x, since the shortfall scales too). Qt squeezed the Profile
+box under its own fixed-width dropdown and cut its arrow section off; `Level`
+appeared to encroach on it. The dropdown widths stay as measured (they must match
+the painting); the slack came back from the gutter between the columns (`20` -> `14`,
+`build_video`) and the HDR label/switch gap (`8` -> `5`): 4px minimum spare at every
+scale from 1.0 to 2.6, in exact, wider and taller windows. **A width change to any
+control on this page, or to how text is measured, must re-run the squeeze scan**
+(below).
+
+**The check for this class of bug is a squeeze scan**: for every visible widget that
+has a layout, `layout().totalMinimumSize()` must fit inside the widget's size — a
+layout squeezed below its own minimum is what clips a control. Run it over every
+page at several scales and window shapes (2286 layout checks: 0 squeezed; with the
+old spacing put back it flags exactly the Encoding Video page, so it can fail). The
+proportions check does not catch this — a row that is 3px short is 3px short *in
+proportion*.
 
 **Encoding's own worked example of the sizing rule above, since revised
 four times before landing here.** Resolution originally floated free of the
@@ -858,13 +1406,25 @@ before trusting a layout "looks about right."
 `Passthru` on row one; `Audio Codec` / `Bitrate` / `Channels` / `Sample Rate`
 on row two, each dropdown sized to its longest *possible* entry
 (`Dropdown.width_for`); `Strip Audio` on the right. The row edits whichever
-included stream Track shows. `_save_active_audio_stream` banks the controls
-into `_audio_stream_settings[index]` before a track switch or a gather, so
-switching never loses an edit; `_load_active_audio_stream` writes one back in
-(muted). `_auto_select_audio_streams` initialises every probed stream once
-per file (guarded by path, so a re-delivered probe can't discard edits): each
-defaults to its own codec/params where offered, DTS / Dolby TrueHD are named
-and forced to Passthru, and only the first stream is included. **Passthru**
+included stream Track shows. **The audio streams are a list of entries, not probe
+indices**: `_audio_list` (every stream on offer, in the popup's order, which is the
+output's), `_audio_included` (the ids that go into the output), `_active_audio_id`, and
+`_audio_stream_settings[id]`; an entry is `{"id": "src:N" | "ext:xxxxxxxx", "source":
+"primary" | "external", "file", "index", "stream", "name"}` — Muxing's shape. The Audio Track
+dropdown lists the included ones as `Track N (codec)`, **N being the stream's place in the
+Choose Stream(s) list** (`_audio_track_ids` maps a label back to its id).
+`_save_active_audio_stream` banks the controls into `_audio_stream_settings[id]` before a
+track switch or a gather, so switching never loses an edit; `_load_active_audio_stream` writes
+one back in (muted). `_auto_select_audio_streams` re-seeds the *source's* streams once per
+file (guarded by path, so a re-delivered probe can't discard edits; streams added from other
+files stay, with their settings and whether they were included, as in Muxing): each
+defaults to its own codec/params where offered (`_default_audio_settings`), DTS / Dolby TrueHD
+are named and forced to Passthru, and every stream is included (each starts as a plain
+copy, so a stream whose codec the container can't carry — left on `Select` — blocks the
+job until it is given a codec or unticked). **Choose Stream(s)**
+(`_open_stream_picker`) opens the popup below on `_audio_list`; on OK the result replaces the
+list, prunes settings of removed streams and keeps the active track an included one
+(`_reactivate_audio_stream`). **Passthru**
 makes the stream a copy, so Bitrate / Channels / Sample Rate mirror the
 source's real values as display overrides (`_apply_passthru_values`) and
 disable.
@@ -895,8 +1455,20 @@ Encoding's rules, in dependency order:
 2. **Container → codec lists** (`video_codecs_for` / `audio_codecs_for`). A
    probe-only passthru codec (DTS / TrueHD) is never snapped away.
 3. **Video codec → profile / level / speed / quality.**
-4. **Audio codec → bitrate**: lossless codecs and `Select` have no bitrate;
-   Passthru mirrors the source instead.
+4. **Audio codec → bitrate**: `Select` has no bitrate (the dropdown reads `—`);
+   the lossless codecs (`formats.LOSSLESS_AUDIO`: FLAC / ALAC / PCM) have none either
+   and **say `Lossless`** (`formats.LOSSLESS`) instead — still disabled, and only for a
+   *resolved* lossless codec, never for an unresolved `Select`. `Lossless` is a display
+   placeholder like `—`: `_menu_value` reports it as `""`, so a job never carries the
+   text, and the rundown leaves the bitrate out for a lossless codec (the codec name
+   already says it; a probed "768 kbps" would only mislead). Passthru mirrors the
+   source instead — and mirrors `Lossless` for a lossless source stream, which is
+   the probe's per-stream `lossless` flag (`formats.probed_audio_is_lossless`, from
+   ffprobe's codec name *and* profile), not just `LOSSLESS_AUDIO`: it also covers
+   **Dolby TrueHD** (always lossless, and reports no bitrate at all — it used to fall
+   through to `Select`) and **DTS-HD MA** (`profile` "DTS-HD MA"; a DTS core or
+   DTS-HD HRA is lossy and keeps its real bitrate). The rundown drops the bitrate
+   for those too.
 5. **Enabled state** for everything a removed, absent or unresolved stream
    makes meaningless. Channels / Sample Rate reset to `Select` and disable
    while the audio codec is unresolved. HDR→SDR needs a live video stream, a
@@ -909,7 +1481,7 @@ Encoding's rules, in dependency order:
 6. **The rundown** — the one cross-panel view: `H.264 · Main · L4.1 · CRF22 ·
    1080p · 30fps · SDR` (the Resolution/FPS segments only appear once a real
    downscale/retime's picked — omitted entirely at `Source`), the first
-   included audio stream (`+N more`), and the trim; problems in STOP_RED
+   included audio stream (`+ N more`, spaced), and the trim; problems in STOP_RED
    (`— removed —`, `— no video stream —`, `— pick an encoder —`,
    `— pick a codec —`, `— no streams selected —`).
 
@@ -929,7 +1501,8 @@ centred (unlike a real value, which stays left-aligned — `Dropdown.
 paintEvent`'s own `NO_OPTION` check) — and disables**, run last in every
 `_sync_controls` via `MediaTab._apply_import_gate(extra=...)`: Output
 Format and Preset (and, unconditionally both ways like those two, the Start Time/Clip
-Duration spinners, A/V Sync and the preset Save/Delete buttons), plus whatever tab-specific dropdowns the subclass names
+Duration spinners, A/V Sync, the preset Save/Delete buttons and the Queue Task /
+Mux / Encode action buttons), plus whatever tab-specific dropdowns the subclass names
 (Encoding: Encoder, Profile, Level, Encoder Preset, Resolution, FPS —
 see "Tabs" below — Audio Track, Audio Codec, Bitrate, Channels, Sample
 Rate). The override itself is `menu.set(NO_OPTION)` (a display override,
@@ -955,7 +1528,11 @@ stayed disabled forever, showing a real container value (`.mp4`) greyed
 out as if it weren't legitimate. Fixed by having the gate set
 `set_enabled(self.format_menu, ..., has_file)` (and Preset's) unconditionally
 on every call, both directions, before checking whether to also blank their
-values. The Downloader's equivalent lives in its own `_sync_controls`
+values. **The same gate must also un-blank Preset on import**: its option list never
+changes afterwards, so nothing else clears the `—` the no-file pass left in it, and an
+enabled Preset dropdown read `—` (`presets.NONE_LABEL`, `— none —`, is "no preset
+applied"). Output Format is un-blanked by `on_media_info` setting the source's container.
+The Downloader's equivalent lives in its own `_sync_controls`
 (nothing fetched → every dropdown blanked the same way) rather than sharing
 this helper, since it isn't a `MediaTab`
 subclass.
@@ -966,7 +1543,15 @@ above for the reset-on-file-change/diff-otherwise logic); **the container
 inversion** — the source's own codecs decide which containers are reachable
 (`formats.containers_for`), with a toast when the pick snaps and the save
 path's extension following it; a stripped or absent stream disables its
-panel; the rundown (`copy · H.264 · 1 track`, or `· 2 tracks` once more than
+panel — and so does an **emptied** one (the user removed every track of a kind the source
+has; only once the probe says `has_video`/`has_audio` is `True`, since the lists are empty
+before it lands): the sub-tab goes red, the carousel shows the Wave Loop (video) / mute
+badge (audio) exactly as for Strip, the box, Select/Deselect All and Remove grey out and
+the rundown reads `— removed —`. `Add Stream(s)` and Undo/Redo stay live on an emptied
+panel — they are the ways back, and disabling them as Strip does would strand it — and the
+*other* kind's Strip checkbox is disabled (an output can't drop both); a job left with no
+track to map anywhere is refused by `_validate_specific`. The rundown (`copy · H.264 · 1 track` — the codec is the first *checked* track's, not
+the source's first stream — or `· 2 tracks` once more than
 one is checked, and the trim with a `· keyframe` caveat, since a copied
 stream can only be cut on a keyframe).
 
@@ -1122,9 +1707,10 @@ Video + Audio only (absent otherwise, so the details popup skips it).
 
 **Three sub-tabs** (the same `SubTabBar` Muxing/Encoding use, over a
 `QStackedWidget` inside a scroll area so a revealed row can never clip):
-**Appearance** (Theme, Appearance Mode), **Output** (Default Save Location +
+**Appearance** (Theme, Appearance Mode, Window Mode + its Borderless-only
+Fullscreen checkbox), **Output** (Default Save Location +
 disk space, Separate Save for Downloader, File Naming), **Performance**
-(Hardware Acceleration, Priority Level, When Done). Reset to Default / Save are
+(Hardware Acceleration, Priority Level, When Done, Startup Tab). Reset to Default / Save are
 pinned below the pages and act on *every* setting, whichever page is showing.
 Side padding is 10px (`_SIDE_PAD`) and the tab bar's top padding 5px
 (`_TOP_PAD`), both matching Muxing/Encoding's, so the tab bar sits in the same
@@ -1176,9 +1762,10 @@ flow's own autofill touches it again" rule as `_autofill_output_path`, only
 a post-fetch save path from underneath a completed fetch would be exactly
 the kind of "why did my path change" surprise this app avoids everywhere
 else). **Reset to Default** (`role="danger"`, `ask_yes_no` confirmation)
-resets theme, appearance mode, default save location, the Downloader's
+resets theme, appearance mode, window mode (back to Fixed, Fullscreen off),
+default save location, the Downloader's
 separate-save toggle and location, GPU acceleration, file naming, priority
-level and When Done all back to their defaults in one action, then autosaves — the one Settings control that
+level, When Done and Startup Tab all back to their defaults in one action, then autosaves — the one Settings control that
 touches every persisted key at once rather than just its own. **File
 Naming** (an entry under the output paths, with the token list beneath it
 turning into a STOP_RED reason while what's typed is invalid — unknown
@@ -1202,20 +1789,29 @@ open failure dialog and drops out if more work was queued meanwhile, then
 `core.power.perform`; Lock and Quit act at once. It runs after every batch,
 not just once. Its checkbox ("Reset to 'Do Nothing' when the app is
 relaunched", on by default) makes `MainWindow` start on Do Nothing whatever
-was saved. **Save**
+was saved. **Startup Tab** (Muxing / Encoding / Downloader / Queue — never
+Settings; `core/startup_tab.py`, default **Encoding**, held on
+`app.startup_tab`) is which tab `MainWindow` opens on: `current_tab` starts as
+it. Picking one only changes the *next* launch — the running session stays
+where it is. **Save**
 persists and toasts "Settings saved." (no jump to the Queue). Settings also
 autosave when the tab is left and on close.
 
 ### Widgets (`ui/widgets/`)
 
 - **Dropdown** (`QComboBox` subclass, self-painted): opens straight down 3px
-  below the button, unrolling + fading in by animating a *mask* on the popup
-  (no per-frame resize). `picked(str)` fires on a user pick only;
+  below the button — or straight up, 3px above it, when the list would run off
+  the screen's available area and there's more room above (a tall list near the
+  bottom, most obviously in fullscreen) — unrolling + fading in from the button's
+  edge by animating a *mask* on the popup (no per-frame resize). `picked(str)` fires on a user pick only;
   `hovered(str)` reports row hover; `popupClosed` fires only for a popup that
   was genuinely open (Qt also calls `hidePopup` on style changes). `set(value)`
   shows a value even when it isn't in the list (a display override) — always
   read with `value()`, never `currentText()`. `set_values(values)` no-ops when
-  unchanged, keeps a still-legal pick, else snaps to the first; an empty list
+  unchanged *and no override is showing*, keeps a still-legal pick, else snaps to the
+  first (**an override is not a legal pick**: it used to survive an unchanged list, so
+  Resolution kept its no-file `—` after a 2160p+ source was imported — its list only
+  changes for shorter sources — and FPS did the same at 120fps+); an empty list
   shows `—` (`NO_OPTION`, an em dash — long enough to read as a deliberate
   placeholder glyph rather than a stray hyphen; centred in the box rather
   than left-aligned like real text, see `paintEvent` below).
@@ -1223,7 +1819,7 @@ autosave when the tab is left and on close.
 - **CheckBox** — 24px box, `color_key` `secondary` or `stop`; fill fades
   (120ms); disabled greys the box too. **Switch** — the knob slides (160ms).
   **SegmentedButton** — the selection pill slides (180ms); `set` is silent.
-  **ClickableLabel** — a `QLabel` with a `clicked` signal (only while
+  **ClickableLabel** — a `ScaledLabel` with a `clicked` signal (only while
   enabled); Encoding's `HDRtoSDR` caption is one, so clicking the text
   toggles the switch beside it, not just the switch itself.
 - **TimeSpinner** — a self-painted HH:MM:SS field (`_TimeField`) plus stacked
@@ -1234,18 +1830,26 @@ autosave when the tab is left and on close.
   nearest digit, and a block cursor shows while focused. `valueChanged` fires
   on **every** change, typing and `set_seconds` included.
 - **MarqueeLabel** — scrolls sub-pixel and time-based (40px/s, 1.5s hold per
-  loop) only when the text overflows; its timer runs only while shown.
-  **MarqueeGroup** — one shared clock several `MarqueeLabel`s can join (e.g.
-  `SummaryPanel`'s Video/Audio/Length rows) so they all sweep and restart in
-  step, rather than the shortest one finishing and holding while a longer
-  one keeps drifting out of sync with it.
+  loop) only when the text overflows, and only while shown.
+  **MarqueeGroup** — one shared clock *and timer* several `MarqueeLabel`s can
+  join (e.g. `SummaryPanel`'s Video/Audio/Length rows, a track box's rows) so
+  they all sweep and restart in step, rather than the shortest one finishing and
+  holding while a longer one keeps drifting out of sync with it. Labels paint from
+  the group's per-tick clock snapshot, not the clock (see "Muxing / Video" above).
 - **Tooltips** (`ui/widgets/tooltip.py`) — `tip(widget, text)` attaches a
   shared, themed hover tooltip (`_Tooltip`, fade-in only) to any widget via
-  a single app-wide `_TooltipManager` event filter (400ms hover delay);
+  a single app-wide `_TooltipManager` event filter. **A tip shows only once the cursor has hovered AND stopped** for
+  `TIP_DELAY_MS` (400ms) — any move restarts the wait, so tips never pop up under a moving mouse. Stillness is
+  judged by sampling `QCursor.pos()` every 30ms while a tip is pending (`_arm` / `_tick`; a drift of ≤1px counts as
+  still), not from mouse-move events, which a registered container widget (the track box) never receives for its
+  children and which need mouse tracking anyway. Once shown, moving within the widget doesn't hide it; leaving,
+  clicking or disabling does. The carousel's own info-badge tip is **deliberately not** on this rule — it shows the moment the cursor
+  is over the badge, as it always did (a delay was tried and reverted by request);
   works even on a disabled widget (exactly where an explanation is often
   most needed) and syncs the cursor to a plain arrow while disabled, since
   the widget's own hover cursor wouldn't otherwise reflect that it can't be
-  interacted with. Distinct from the carousel's own `_InfoTooltip` above,
+  interacted with. `hold_tips(bool)` suspends every tooltip (hiding the shown one) until
+  released — used for the length of a track drag. Distinct from the carousel's own `_InfoTooltip` above,
   which shows structured probe data rather than a line of static copy.
   `ui/tips.py` holds the shared copy this app's dropdowns tip themselves
   with — `VIDEO_CODEC_TIPS`/`AUDIO_CODEC_TIPS`/`CONTAINER_TIPS`/
@@ -1254,21 +1858,36 @@ autosave when the tab is left and on close.
   Encoding, Muxing, Downloader and Settings.
 - **IconButton** — a stylesheet button whose ✕ / ▲ / ▼ is painted, so it
   never depends on a font having the glyph (`draw_cross` does the same for
-  painted widgets).
-- **SubTabBar** — active tab primary at 30px, inactive secondary at 24px,
-  bottom-aligned, standing on a 4px square-ended `primary` line (`_LINE_H`) that runs the
+  painted widgets); also the SVG icons (select / deselect / undo / redo, recoloured
+  to the button's text colour). `role="compact"` is the 22px-tall variant.
+- **SubTabBar** — active tab primary at 30px, inactive secondary at 24px (through
+  the palette's `subtab_active` / `subtab_inactive`, which a theme with
+  `swap_subtabs` — Terminal — reverses),
+  bottom-aligned, standing on a 4px square-ended line (`_LINE_H`, in the selected tab's
+  colour — `subtab_active`) that runs the
   whole bar's width — the tabs are drawn a corner-radius taller and clipped so
   their feet sit flat on it (the bar is 34px tall in total); height and colour ease (170ms) including hover;
-  `set_marked(name, bool)` cross-fades a tab to STOP_RED.
+  `set_marked(name, bool)` cross-fades a tab to STOP_RED. **The tabs' feet and
+  the line's top edge (`foot` in `paintEvent`) are snapped to a whole device
+  pixel** — at a scale where 30 reference px lands mid-pixel (0.7, 0.85, 1.05,
+  1.2, ... — never at 1.0, 1.5, 2.0 or 2.667), the tab clip and the line's own
+  antialiased edge each covered part of the same row and the window colour
+  showed through as a thin seam under the selected tab. Confirmed by pixel
+  colours (a row of exactly 60% primary over the frame grey); after the fix the
+  worst deviation across 241 scales from 0.6 to 3.0 is 2/765.
 - **DropBox** — primary rounded border; drop / double-click / Browse (which, like
-  the file label's and carousel's reselect dialog, opens in the tab's current
+  the file label's and carousel's reselect dialog, and both **Add Stream(s)** buttons —
+  Muxing's and Encoding's Choose Stream(s) popup, which is handed the folder as
+  `start_dir` — opens in the tab's current
   output folder — `MediaTab._output_directory` — not the app's working folder);
   lights up
   on drag-over; `collapse()` leaves only Browse once a file is chosen,
   `reset()` is the reverse — back to its pristine pre-import state, used
   when a picked file turns out to be unreadable (`app._reject_file`, see
   "File selection is a broadcast" above) rather than leaving the box
-  stranded mid-import.
+  stranded mid-import. `show_no_preview()` is the third state: the border
+  and Browse with "No Preview Available" in place of the prompt, for a file that
+  is selected but has no preview frames.
   **BorderedFrame** is the border alone, `color_key` defaulting to `primary`
   (Muxing's `TrackListBox`, `ui/widgets/tracklist.py`, passes `secondary` for
   a visually distinct blue-on-Lemon box). **SummaryPanel** —
@@ -1312,6 +1931,13 @@ autosave when the tab is left and on close.
   crossed into the dark gap before the frame), and a static always-visible notch per
   button.
 
+  **Stacking order** (`MainWindow._restack`, bottom to top): the tab pipe, an
+  expanded preview overlay, the toasts, the resize grips. `TabIndicator` calls
+  `raise_()` on itself every time it is re-laid out — a tab switch, and any
+  window resize — so left alone it climbed above an expanded preview and drew
+  the cable across the picture; `_restack` runs after every such re-layout
+  (`show_tab`, `_replace_overlays`) to put the rest back on top of it.
+
   A `_TabPipe` is created lazily per button on first use and must be shown
   explicitly (`.show()`) right away — a child widget created after its
   parent is already on screen doesn't inherit that visibility, so skipping
@@ -1353,9 +1979,42 @@ autosave when the tab is left and on close.
     top of it: the hole lets the glyph-coloured circle underneath show
     through as the "i". Dark mode: dark disc, white glyph. Light mode: white
     disc, dark glyph. Hovering the info badge shows `_InfoTooltip` — container, video
-    (codec · profile · level · size · HDR), an HDR mastering line (ST 2086 peak
-    and MaxCLL/MaxFALL — a literal 0 reads as "not tagged"), audio (+ track
-    count), duration and size — refreshed live if a probe lands while open.
+    (codec · profile · level · size · **fps** right after the size · HDR), an HDR mastering line (ST 2086 peak
+    and MaxCLL/MaxFALL — a literal 0 reads as "not tagged"), audio (`+ N tracks`
+    when the file has more than one — N is the total count, e.g. `+ 5 tracks`), duration and size — refreshed live if a probe lands while open. **With the Wave Loop showing (video stripped, or an audio-only import) the tip reads audio
+    only** — container, audio (codec · channels · rate · bitrate · `+ N tracks`), duration, size; no Video line,
+    no mastering line, not even `Video: none` (`_info_text` checks `_wave_mode()`). A tip that is open when
+    the mode flips is re-worded and re-anchored on the spot (`_refresh_open_tooltip`).
+    **The tip is anchored to the badge, above it (`_badge_global_rect`), never over it.** It
+    used to hang off the carousel's own bottom-left corner at a fixed offset: just above the
+    badge in the small preview, but *on top of it* in the expanded one (bigger badge, further
+    from that corner) — the popup window under the cursor, so the carousel lost the mouse,
+    faded, hid the tooltip and the loop flickered without ever showing the info (found by
+    computing the two rects: overlap in the expanded preview, none in the small one). The
+    gap clears the badge's hit area (`max(px(12), 0.4 × the badge)`), and the popup is clamped to the
+    screen (beside the badge if there is no room above). The badge's rect comes from the Wave Loop
+    layer in wave mode, where it is drawn. **The hover hit test
+    in wave mode maps the pointer onto that layer through screen coordinates**: it used
+    `self.mapTo(self.wave, …)`, but the layer is a *sibling* of the carousel (both children of the tab),
+    not an ancestor, so the mapping had nowhere to arrive and the badge never registered a hover while
+    the video was stripped or for an audio-only file (the same `mapTo`-toward-a-non-ancestor mistake as
+    the track drag's). Checked by putting the pointer on the badge as drawn, in the normal preview and
+    both wave cases: hit-test and tooltip now agree. The layer bleeds ~2px past the carousel's left edge,
+    so only that sliver of the badge's hover margin can't receive the mouse. Moving within the badge once the tip is up doesn't re-show
+    it (a redundant `show()` per move made the popup itself flicker). Checked at the badge's hit
+    edge in the small, expanded and wave modes.
+    **The pointer can move onto the tip and keep it up.** The tip is an interactive window
+    (`_InfoTooltip` emits `entered` / `left`; it was briefly made `WindowTransparentForInput`,
+    the wrong fix for the flicker — the tip was in the wrong place — and it made hovering it
+    impossible). Mouse-driven hides wait `_TIP_GRACE_MS` (50ms — it was 250, then 120, then 80, each judged to leave the tip hanging after the pointer had gone): leaving the badge, leaving the
+    carousel or leaving the tip only *starts* `_tooltip_grace`, which the badge's hover, the tip's
+    `entered` or `_show_tooltip` cancels, so the pointer can cross the gap from badge to tip. When
+    it fires, `_grace_expired` decides from where the cursor is *now* — on the tip or back on
+    the badge means stay — so a missed enter/leave can't strand or kill it. A change of state
+    (file, collapse, hide, teardown) still hides it at once (`_hide_tooltip`). Checked in the small
+    and expanded previews: leaving hides after the grace, not instantly; the pointer resting on
+    the tip for a second keeps it; leaving the tip hides it after the grace; tip -> back onto the
+    badge keeps it; hiding the carousel closes it.
   - **Expand/shrink** — a corner icon (`assets/expand.svg`/`shrink.svg`,
     `_paint_expand_icon`) toggles `_expanded` and emits `expandToggled(bool)`;
     the listening tab (`MediaTab._on_expand_toggled`, `ui/tabs/media_tab.py`)
@@ -1389,20 +2048,75 @@ autosave when the tab is left and on close.
     `QImage`; the dot band (`_WAVE_BAND_LO..HI` of the height) is scaled to
     `_WAVE_FILL` and tinted with a primary→secondary gradient via
     `CompositionMode_SourceIn`. Playback is time-based (frame index from wall
-    clock), repainted only when the index moves, on a 16ms timer that runs
-    only while visible. Falls back to a faint gradient wash without rlottie.
+    clock) and only visible while shown. Falls back to a faint gradient wash without rlottie.
+    **The loop is 238 frames, not the file's 240** (`_loop_length`): frames 238 and 239 of
+    `Wave Loop.json` are frames 0 and 1 again (pixel difference 0.001 against a normal step of
+    1.7), so playing all 240 went ... 237, 0, 1, 0, 1, 2 ... — a step *backwards* at every
+    restart, the jitter seen there. The length is found at load, not hard-coded: the shortest
+    length within the last 8 frames whose frame matches frame 0 (and the next one frame 1),
+    judged on a 96x54 render of the alpha channel (a few ms, once); the file's own count if
+    nothing repeats. Found by checking the artwork itself rather than the player: the mean
+    frame-to-frame difference is *equal* at the seam (1.715 vs 1.715, so a mean can't show it);
+    the two-step / one-step ratio can — ~1.95 everywhere except the seam frames, where
+    `|f238 − f0|` was 0.001 (ratio 0). After the fix the ratio is 1.93–1.98 at every frame,
+    seam included. **Frames are also paced to their own due time**: a single-shot timer re-armed
+    for the next frame boundary (`_schedule`, rounded up), not a 16ms poll that showed each ~33ms
+    frame for 2 or 3 ticks (measured 25–54ms per frame; 24–45ms in the same harness after, whose own
+    5ms sleeps add jitter).
+    **The split down the middle of the dots is fixed in the parsed JSON, not the file
+    (`_close_wave_seam`).** The picture is one 1920px precomp of 25 "Main Dot" columns (80px
+    apart, each starting 10 frames after its neighbour) placed twice at 50% side by side
+    (`double dots`). The last column (`Main Dot 49`, x 1922.6) is the wrap-around twin of the first
+    (x 2.6) — one comp width away — so it must be in the same phase, but the columns bob with a
+    period of **238** frames and its start time is **240**: the two halves met 2 frames out of phase,
+    each showing half of every dot in the centre column, ~2px apart vertically (the same 238-vs-240
+    slip as the loop length). The fix moves that one layer 2 frames (start time, out point and every
+    keyframe, `_shift_layer_time`) to 238. Guarded on the structure it was found in (layers named
+    `Main Dot …`, the last exactly one comp width — read from the layers that reference the precomp,
+    which has no size of its own — from the first, its start not already a whole number of periods),
+    idempotent, and a no-op for any other animation. Measured as the rows where the two columns either
+    side of the centre disagree, over 34 frames: 61.5 before (21x the ~3 of an ordinary neighbouring
+    column), 11.8 after (the rest is genuinely touching dots); a crop of the centre column through
+    the real widget shows whole dots.
   - Signals: `reselect`, `populated` (first frames or audio-only — the tab
     reveals the carousel), `indexChanged` (user scrubs only), `fileDropped`,
     `expandToggled(bool)`. `step(delta)` is the keybind stepper; `sync_index`
     jumps silently.
 - **Dialogs** — `MessageDialog` (a `QDialog`: bold title, wrapped message,
   optional entry, buttons right-aligned; the **first button is the affirmative
-  one** and gets primary). Enter confirms; Escape and the close box decline,
-  so a dismissed confirmation can never destroy work. `show_message`,
+  one** and gets the `action` role — primary — the rest the `queue` role, i.e.
+  secondary, both swappable by a theme like the tab buttons). Enter confirms; Escape (and Alt+F4) decline,
+  so a dismissed confirmation can never destroy work. **Every popup is
+  borderless** (`Qt.FramelessWindowHint`, all subclasses inherit it): a
+  translucent window whose `paintEvent` draws the rounded panel — the window
+  colour outlined 2px in the theme's `primary`, 8px radius — and, with no title
+  bar, a left-press on the panel (any part a child didn't take) drags it with
+  `startSystemMove`, like the Borderless window mode. Its own stylesheet clears
+  the `QDialog` background (`QDialog { background: transparent; }` appended after
+  `T.stylesheet()`), otherwise the sheet's square fill shows at the corners.
+  Verified on the real desktop: no `WS_CAPTION`, `frameGeometry == geometry`.
+  The OS file pickers (`QFileDialog`) are Windows' own and stay native. `show_message`,
   `ask_yes_no` (True only on an explicit Yes), `ask_text` (stripped text or
   None), `confirm_output_path`. `AudioStreamPickerDialog` /
-  `choose_audio_streams` — one checkbox per probed stream; OK never returns an
-  empty set ("no audio" is Strip Audio's job), Cancel returns None.
+  `choose_audio_streams` — Encoding's **Choose Stream(s)**, which holds nothing but the
+  tracks: no title and no explanation (`MessageDialog.SHOW_HEADER = False` skips both), a
+  `TrackListBox` (one checkbox per audio stream, drag a row to reorder, marquee for a long
+  label), then **one row of buttons at the bottom: Add Stream(s), Remove Stream(s), OK,
+  Cancel, left to right** (the first two at the left edge, OK / Cancel at the right). The row
+  is wider than a standard dialog's, so this popup is 500 reference px wide rather than 400
+  (`MessageDialog.WIDTH`; the four buttons need ~450 plus margins). The left-end buttons come
+  from the `_build_leading_buttons(row)` hook, called before the stretch that pushes the
+  standard buttons right. It edits a *copy* of the list, so Cancel discards ticks, added/removed tracks and
+  order alike. Rows are the same shape of entry Muxing's boxes use (`{"id", "source", "file",
+  "index", "stream", "name"}`) and are labelled with the shared `tracklist.row_label`
+  (`Track N  ·  [External: name  ·]  codec · channels · rate · language`, N by position).
+  Add browses another file (audio files, or All Files for an audio track inside a video),
+  probes it off the GUI thread (`run_async`; a probe landing after OK/Cancel is dropped) and
+  appends its audio stream(s) **ticked** — several ask which via
+  `ExternalStreamPickerDialog` — as Muxing does. Remove takes every ticked row out of the
+  list, the source file's own included. OK returns `(entries, chosen ids)`; with rows but none
+  ticked it ticks the first instead of closing ("no audio" is Strip Audio's job); Cancel /
+  Escape returns None.
   `ExternalStreamPickerDialog` / `pick_external_streams` — the same
   checkbox-per-stream shape, for choosing which stream(s) of a *second*
   browsed-in file Muxing's "Add Stream(s)" pulls in (see "Muxing / Video"
@@ -1479,12 +2193,19 @@ picks the toast. **Only one ffmpeg runs at a time.**
   `SCALE_VF`-style filter-string composition — `build_encode_command` just
   sets `output_kwargs["r"]` directly alongside `-fps_mode cfr` (A/V Sync).
 - **Multi-stream audio** ("Choose Stream(s)" on Encoding's Audio panel,
-  `ui/widgets/dialogs.py`'s `AudioStreamPickerDialog`) — one
-  checkbox per stream `probe_media`'s `audio_streams` reports, pre-checked to
-  match what's currently included; OK returns the chosen index set (refusing
-  to ever return empty — see its `_dismiss`, since "no audio at all" is Strip
+  `ui/widgets/dialogs.py`'s `AudioStreamPickerDialog`, described under Dialogs) — a
+  list of the source's audio streams plus any added from **other files**, ticked = included,
+  in a drag-reorderable order that is the output's; OK returns the edited list and the
+  ticked ids (never none ticked while rows exist — "no audio at all" is Strip
   Audio's job, not a second door to the same outcome), Cancel/close returns
-  `None` so the caller can tell "nothing changed" apart from "chose zero".
+  `None` so the caller can tell "nothing changed" apart from "chose zero". **A stream from
+  another file is mapped from that file's own input**: `build_encode_command` takes each
+  audio entry's `source`/`file` through `_mux_input` (the helper Muxing's tracks use — one
+  `ffmpeg.input` per distinct path, cached, trimmed exactly like the primary), so the
+  external audio is assumed to line up with the primary's timeline. Verified with a real
+  encode: an `.m4a` added as Track 4, ticked, ordered after a source track, produced
+  `-i multi.mkv -i ext.m4a -map 0:v -map 0:a:0 -map 1:a:0`, and the output's audio streams
+  were the source's stereo track then the 22.05kHz external one.
   The Audio Track dropdown then shows one included stream at a time; its own
   Codec/Bitrate/Channels/Sample Rate row + Passthru checkbox edit whichever
   stream is currently selected there, and `EncodingTab._gather_settings`
@@ -1581,8 +2302,19 @@ picks the toast. **Only one ffmpeg runs at a time.**
     confirmed via `ffmpeg -h filter=tonemap`, no BT.2390 among them) was
     tried first and removed once a real Vulkan/libplacebo setup was
     confirmed working (see below) — don't reintroduce it as a fallback.
-    `core.utilities.supports_libplacebo()` (cached, parses `ffmpeg
-    -filters`) gates this two ways instead: `EncodingTab._sync_controls`
+    `core.utilities.supports_libplacebo()` gates this two ways instead. It is
+    `libplacebo_problem() is None`, and that is **two checks, not one**: the
+    filter is listed by `ffmpeg -filters` (else `LIBPLACEBO_MISSING`), *and* a
+    one-frame probe of the real `libplacebo_tonemap_vf()` on an explicit
+    `VULKAN_DEVICE_FLAGS` device actually runs (else `LIBPLACEBO_NO_VULKAN` —
+    a build with the filter but no usable Vulkan driver). Cached per process
+    behind a lock; the probe is a real ffmpeg run (~0.7s here), so `MainWindow`
+    warms it on a worker at startup. Verified against a real failure by
+    pointing `VK_DRIVER_FILES` / `VK_ICD_FILENAMES` at a nonexistent driver
+    (ffmpeg exits nonzero → `vulkan`; a crash or hang counts the same).
+    `libplacebo_problem_text()` is the one wording used by the switch's
+    tooltip (on an HDR file with the switch greyed), the queue-time dialog and
+    the builder's `ValueError`. `EncodingTab._sync_controls`
     disables `hdr_switch` — and forces it off — when it's False, so the
     control simply can't be on; and `build_encode_command` raises a
     `ValueError` if `HDR_TO_SDR` somehow reaches it anyway (e.g. a preset
@@ -1739,6 +2471,23 @@ picks the toast. **Only one ffmpeg runs at a time.**
   is, so simply dropping it costs nothing real), a wrong or missing
   language tag on an audio track is a genuine, player-visible regression
   (track selection reads it).
+  **`-map_metadata:s:v:0 -1` has a side effect on every stream, so a copied audio
+  track's tags are mapped back explicitly.** ffmpeg turns off its default per-stream
+  metadata copy for *all* streams as soon as any `-map_metadata` of that type exists;
+  with only the video wipe above, a Passthru (`-c:a copy`) audio track came out with no
+  language or title (confirmed: the same command without the option kept `eng`/`jpn`; it
+  predates the multi-input work). So for every straight-copy `AUDIO_STREAMS` entry
+  `build_encode_command` adds `-map_metadata:s:a:{i} <input>:s:a:{src_index}` — tags from
+  the stream actually mapped. **`<input>` is the input's real `-i` position, not `0`**:
+  ffmpeg-python numbers inputs by the topological order of the graph and drops any input
+  nothing maps, so with the video stripped and the first audio track from another file,
+  that file is input `0` and the primary is `1` (`_input_positions` rebuilds the order
+  with the same `topo_sort` `ffmpeg._run.get_args` uses). A re-encoded track is unchanged:
+  wiped (`-map_metadata:s:a:{i} -1`) and only its language reapplied. Verified on real
+  encodes, reading the tags back with ffprobe: two copied tracks (`eng`, `jpn`), a
+  source track plus an external `.m4a`, video stripped with the external track first
+  (`0:s:a:0` / `1:s:a:1`), a re-encoded track beside a copied one (the re-encoded one has
+  `language` but no `title`/`BPS`), and audio stripped.
   **The Resolution downscale chains onto the same `-vf` the HDR→SDR tonemap
   uses**, added after it when both are active — `video_filters` collects
   the tonemap string (if any) then `SCALE_VF` (above) and joins them with a
@@ -1786,7 +2535,9 @@ picks the toast. **Only one ffmpeg runs at a time.**
   internally). Only one job is ever active at once by design, so this is at
   most 2 extra threads alive at a time, not a pool to size or tune.
   - The progress denominator *starts* as the job's `duration_secs`, else
-    `probe_duration(input) − start_secs`, probed in the worker thread — but
+    `probe_duration(input) − start_secs` (the corrected real length — see "A file's real
+    length" above; a raw header once made a clip whose header said 5501s read 0.65% for
+    its whole 35s), probed in the worker thread — but
     it's only a starting guess where it comes from a probe: `_watch`
     stretches it upward on the fly (`total = seconds * 1.05`) whenever
     `out_time` runs past it, rather than clamping to 1.0 and freezing the
@@ -1866,14 +2617,16 @@ strip_audio, audio_streams`.
 **Audio is a list, not four scalar keys**, because an Encoding job can carry
 more than one *output* audio stream (the Audio Track dropdown + "Choose
 Stream(s)" dialog — see "Multi-stream audio" above): `audio_streams` is
-`[{"index": 0, "codec": "AAC", "bitrate": "192 kbps", "channels": "Stereo",
-"sample_rate": "48000 Hz", "passthru": False, "language": "eng"}, ...]`, one
-entry per *included* source stream, built by `_gather_settings` from
+`[{"id": "src:0", "source": "primary", "file": None, "index": 0, "codec": "AAC",
+"bitrate": "192 kbps", "channels": "Stereo", "sample_rate": "48000 Hz", "passthru": False,
+"language": "eng"}, ...]` (`source`/`file` say which input a stream is read from — a stream
+added from another file has its own; `index` is its position among *that file's* audio
+streams), one entry per *included* stream in list order, built by `_gather_settings` from
 `_audio_stream_settings` (the per-stream dict last edited through the Audio
 Codec/Bitrate/Channels/Sample Rate row + Passthru checkbox for whichever
 stream the Audio Track dropdown currently shows) plus every other included
-stream's own last-saved values, with `language` looked up fresh each time
-from the probe (`_stream_language`) rather than stored per-stream like the
+stream's own last-saved values, with `language` read fresh each time
+from the entry's probe description rather than stored per-stream like the
 rest — it's a fact about the source stream, not something the user edits.
 `mastering_max_nits`/`max_cll` are a fact snapshotted from the probed source
 at queue time (see the HDR→SDR bullet above), not a user choice — carried
@@ -2021,6 +2774,10 @@ without an app release; a frozen app has no `python -m yt_dlp` anyway.
 - Layout goes through layouts (`hrow`, `labeled`, `stream_page`), never
   absolute positioning, except overlays that must float: the tab pipe, the
   Wave Loop layer, toasts.
+- **Sizes are reference pixels through `ui/scale.py`** — never a bare pixel
+  count in layout, fixed-size or paint code (see "UI scale" above): bound
+  helpers for what's set once, design-space painting for what's painted,
+  `px()` / `font_px()` in the stylesheet.
 - Every non-trivial method gets a one-line docstring; comments explain *why*
   (especially verified ffmpeg / yt-dlp / Windows behaviour).
 - There are no `__init__.py` files; the subfolders work as implicit namespace
@@ -2055,12 +2812,37 @@ without an app release; a frozen app has no `python -m yt_dlp` anyway.
 - **A QDialog's `exec()` spins a nested event loop**; timers (the queue poll)
   keep firing under it. Post dialogs with `QTimer.singleShot(0, …)` from
   timer-driven code.
+- **A parentless widget that is made visible becomes its own top-level window** —
+  so `setVisible(True)` / `show()` in a constructor must come *after* the widget
+  is added to a layout. Settings' Fullscreen row did it in the wrong order and
+  flashed a small "LlamaMXD" window at every launch whenever the saved Window Mode
+  was Borderless (Fixed/Windowed never showed it). Found by launching under
+  `pythonw` and logging every top-level `QEvent.Show` with its stack (an app-level
+  event filter) while polling `EnumWindows` for visible windows system-wide; the
+  Vulkan probe's ffmpeg only ever creates hidden 1x1 helper windows.
 - **Setting Python attributes on a PySide object before `super().__init__()`**
   is unsafe — use class-level defaults for immutables or `_init_state()` (on
   MediaTab) for per-instance state.
+- **Text on a `ScaledLabel` / `ScaledButton` / `ScaledLineEdit` / painted widget
+  scales continuously; what's left is the combo popup rows, which
+  Qt snaps to a whole pixel size** (13px at scale 0.75 is 10px, not 9.75), and
+  the whole-pixel rounding of the integer layout sizes (~1px per stacked row —
+  each `px()` length flips at its own scale, so a widget can step back 1-2px
+  for one step of a drag). A bare `QLabel` with text would render at its
+  *reference* size at every scale (the stylesheet's label sizes are unscaled
+  now): make it a `ScaledLabel` (and a `QLineEdit` a `ScaledLineEdit`). The
+  pixmap-only logo `QLabel` is the one plain one.
+- **A script that builds a `MainWindow` can overwrite the user's real
+  `settings.json`.** Settings autosaves from many places (leaving its tab,
+  every control handler, close), through `ui.tabs.settings.save_settings`; a
+  harness that sets a window mode or tours the tabs left `window_mode` at
+  whatever it had tested. Neutralise it before building the window:
+  `import ui.tabs.settings as st; st.save_settings = lambda *a, **k: None`
+  (patching one `on_leave` is not enough — three runs proved it).
 - **Headless testing**: `QT_QPA_PLATFORM=offscreen` works for scripted runs and
   `widget.grab()` screenshots, but its virtual screen is tiny (the window came
-  out 280px wide) — pin the window to 896x540 first. It has no system fonts,
+  out 280px wide) — pin the window to 896x540 first (or, on a real display,
+  patch `scale.window_size` to force a scale). It has no system fonts,
   so register `assets/fonts` (as `main.py` does) or text renders as boxes.
   Offscreen can't exercise popup-window animation, DPI scaling or OS
   drag-and-drop; verify those on a real display. **A harness that skips

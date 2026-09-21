@@ -9,12 +9,16 @@ from PySide6.QtGui import QFontMetricsF, QImage, QPainter, QPainterPath, QPen, Q
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QFileDialog, QGridLayout, QLabel, QVBoxLayout, QWidget
 
+from ui import scale
 from ui import theme as T
-from ui.widgets.controls import MarqueeGroup, MarqueeLabel, button, ui_font
+from ui.scale import px
+from ui.widgets.controls import (
+    MarqueeGroup, MarqueeLabel, ScaledLabel, button, restyle, set_font_px, ui_font,
+)
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ASSETS = os.path.join(_REPO_ROOT, "assets")
-VERSION = "v0.5.0-beta.2"
+VERSION = "v0.5.0-beta.3"
 
 MEDIA_FILTER = (
     "Media files (*.mp4 *.mkv *.mov *.webm *.avi *.m4v *.mxf *.ts *.vob "
@@ -34,8 +38,8 @@ def local_paths(mime):
 # --------------------------------------------------------------------------- #
 class SubTabBar(QWidget):
     """Overview / Video / Audio. Active = `primary` at full height, inactive =
-    `secondary` at 80%, bottom-aligned like tabs on a shelf, standing on a
-    thin `primary` line that runs the whole length of the bar (the tabs' bottom
+    `secondary` at 80% (swapped for a theme with `swap_subtabs`), bottom-aligned like tabs on a shelf, standing on a
+    thin line in the selected tab's colour that runs the whole length of the bar (the tabs' bottom
     rounding is clipped away so each one sits flat on it). Height and fill
     ease between states; hover shades fade too. `set_marked` cross-fades a
     button to STOP_RED — a stream removed on a panel the user can't see."""
@@ -60,7 +64,7 @@ class SubTabBar(QWidget):
         fm = QFontMetricsF(self._bold13)
         self._widths = [max(58.0, fm.horizontalAdvance(n) + 2 * self._PAD_X) for n in self._names]
         total = sum(self._widths) + self._GAP * (len(self._names) - 1)
-        self.setFixedSize(int(total + 0.999), int(self._ACTIVE_H + self._LINE_H))
+        scale.fixed(self, int(total + 0.999), int(self._ACTIVE_H + self._LINE_H))
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
 
@@ -95,9 +99,9 @@ class SubTabBar(QWidget):
         if name in self._marked:
             key = "stop"
         elif name == self._active:
-            key = "primary"
+            key = "subtab_active"      # primary, or secondary for a theme that swaps them
         else:
-            key = "secondary"
+            key = "subtab_inactive"
         fill = th.color(f"{key}_hover" if name == self._hover else key)
         height = self._ACTIVE_H if name == self._active else self._INACTIVE_H
         return fill, height, th.color(f"{key}_text")
@@ -130,7 +134,7 @@ class SubTabBar(QWidget):
         return None
 
     def mouseMoveEvent(self, e):
-        h = self._hit(e.position().x())
+        h = self._hit(scale.ref_pos(e.position()).x())
         if h != self._hover:
             self._hover = h
             self._animate()
@@ -141,19 +145,26 @@ class SubTabBar(QWidget):
             self._animate()
 
     def mousePressEvent(self, e):
-        n = self._hit(e.position().x())
+        n = self._hit(scale.ref_pos(e.position()).x())
         if n:
             self.set_active(n)
 
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        scale.begin(p)
+        width, height = scale.ref_size(self)
+        # Where the tabs' feet meet the line, snapped to a whole device pixel:
+        # at a scale where 30 reference px lands mid-pixel, the clip cutting
+        # the tabs and the line's own edge each cover part of that row and the
+        # window colour shows through the rest — a thin seam under the tab.
+        foot = round(self._ACTIVE_H * scale.factor()) / scale.factor()
         edge = 0.0
         p.save()
-        p.setClipRect(QRectF(0, 0, self.width(), self._ACTIVE_H))
+        p.setClipRect(QRectF(0, 0, width, foot))
         for n, w in zip(self._names, self._widths):
             fill, h, text = self._cur[n]
-            rect = QRectF(edge, self._ACTIVE_H - h, w, h)
+            rect = QRectF(edge, foot - h, w, h)
             # Drawn a radius taller than visible: the clip above cuts off the
             # bottom corners' rounding, leaving the tab's foot flat on the line.
             path = QPainterPath()
@@ -164,8 +175,10 @@ class SubTabBar(QWidget):
             p.drawText(rect, Qt.AlignCenter, n)
             edge += w + self._GAP
         p.restore()
-        # Square-ended, not a rounded stroke.
-        p.fillRect(QRectF(0, self._ACTIVE_H, self.width(), self._LINE_H), T.theme.color("primary"))
+        # Square-ended, not a rounded stroke. The selected tab's own colour, so the
+        # tab and the line under it read as one piece (primary, except in a theme
+        # that swaps the tabs — Terminal's is its green).
+        p.fillRect(QRectF(0, foot, width, height - foot), T.theme.color("subtab_active"))
 
 
 # --------------------------------------------------------------------------- #
@@ -185,19 +198,20 @@ class DropBox(QWidget):
         directory was this app's working folder)."""
         super().__init__(parent)
         self._start_dir = start_dir
+        self._prompt_text = prompt
         self.setAcceptDrops(True)
         self._dragging = False
         self._collapsed = False
 
         lay = QVBoxLayout(self)
         lay.setAlignment(Qt.AlignCenter)
-        lay.setSpacing(14)
-        self.prompt = QLabel(prompt)
-        self.prompt.setFont(ui_font(14))
+        scale.spacing(lay, 14)
+        self.prompt = ScaledLabel(prompt)
+        set_font_px(self.prompt, 14)
         self.prompt.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.prompt)
-        self.or_label = QLabel("— or —")
-        self.or_label.setFont(ui_font(14))
+        self.or_label = ScaledLabel("— or —")
+        set_font_px(self.or_label, 14)
         self.or_label.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.or_label)
         self.browse_btn = button("Browse File", width=140)
@@ -205,9 +219,26 @@ class DropBox(QWidget):
         lay.addWidget(self.browse_btn, 0, Qt.AlignCenter)
         T.theme.changed.connect(self.update)
 
+    def _set_prompt(self, text, role=""):
+        """The prompt's wording and stylesheet role (`error` is STOP_RED), restyled."""
+        self.prompt.setText(text)
+        self.prompt.setProperty("role", role)
+        restyle(self.prompt)
+
     def collapse(self):
         self._collapsed = True
+        self._set_prompt(self._prompt_text)
         self.prompt.hide()
+        self.or_label.hide()
+        self.update()
+
+    def show_no_preview(self):
+        """A file was picked and is in use, but no preview frames could be made
+        for it: the box stays up with its border, saying so in red where the
+        drag/drop prompt was ("— or —" goes), and Browse stays."""
+        self._collapsed = False
+        self._set_prompt("No Preview Available", "error")
+        self.prompt.show()
         self.or_label.hide()
         self.update()
 
@@ -216,6 +247,7 @@ class DropBox(QWidget):
         exactly as before any file was ever picked (a rejected/unreadable
         import never leaves the box looking like one was)."""
         self._collapsed = False
+        self._set_prompt(self._prompt_text)
         self.prompt.show()
         self.or_label.show()
         self.update()
@@ -252,7 +284,8 @@ class DropBox(QWidget):
         th = T.theme
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        scale.begin(p)
+        rect = scale.ref_rect(self).adjusted(1, 1, -1, -1)
         path = QPainterPath()
         path.addRoundedRect(rect, 10, 10)
         if self._dragging:
@@ -275,8 +308,9 @@ class BorderedFrame(QWidget):
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        scale.begin(p)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 10, 10)
+        path.addRoundedRect(scale.ref_rect(self).adjusted(1, 1, -1, -1), 10, 10)
         p.setPen(QPen(T.theme.color(self._color_key), 2))
         p.drawPath(path)
 
@@ -293,18 +327,17 @@ class SummaryPanel(QWidget):
         super().__init__(parent)
         grid = QGridLayout(self)
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(0)
-        grid.setVerticalSpacing(12)
+        scale.grid_spacing(grid, 0, 12)
         self._values = []
         # One shared clock for all rows: whichever value is shortest finishes
         # its scroll first and holds at rest until the slowest one catches
         # up, so all rows sweep and restart in step instead of drifting.
         marquee_group = MarqueeGroup()
         for row, text in enumerate(labels):
-            lab = QLabel(text)
+            lab = ScaledLabel(text)
             lab.setProperty("role", "muted")
             lab.setStyleSheet("font-weight: bold;")
-            lab.setFixedWidth(72)
+            scale.fixed(lab, w=72)
             grid.addWidget(lab, row, 0)
             val = MarqueeLabel("—", pixel_size=11, group=marquee_group)
             grid.addWidget(val, row, 1)
@@ -325,16 +358,18 @@ class _AccentBar(QWidget):
 
     def __init__(self, width, height=4, parent=None):
         super().__init__(parent)
-        self.setFixedSize(width, height)
+        scale.fixed(self, width, height)
         T.theme.changed.connect(self.update)
 
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        scale.begin(p)
         p.setPen(Qt.NoPen)
         p.setBrush(T.theme.color("secondary"))
-        r = self.height() / 2
-        p.drawRoundedRect(self.rect(), r, r)
+        rect = scale.ref_rect(self)
+        r = rect.height() / 2
+        p.drawRoundedRect(rect, r, r)
 
 
 # --------------------------------------------------------------------------- #
@@ -350,42 +385,42 @@ class Sidebar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(self.WIDTH)
+        scale.fixed(self, w=self.WIDTH)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 24, 0, 10)
+        scale.margins(lay, 0, 24, 0, 10)
         lay.setSpacing(0)
 
-        title = QLabel("LlamaMXD")
+        title = ScaledLabel("LlamaMXD")
         title.setProperty("role", "sidebarTitle")
         title.setAlignment(Qt.AlignCenter)
         lay.addWidget(title)
-        lay.addSpacing(0)
 
         title_width = QFontMetricsF(ui_font(36, bold=True, family="Oswald")).horizontalAdvance("LlamaMXD")
         underline = _AccentBar(round(title_width))
         lay.addWidget(underline, 0, Qt.AlignHCenter)
-        lay.addSpacing(20)
+        scale.spacer(lay, 20)
 
         self.logo = QLabel()
-        self.logo.setFixedSize(self.LOGO_SIZE, self.LOGO_SIZE)
+        scale.fixed(self.logo, self.LOGO_SIZE, self.LOGO_SIZE)
         self._load_logo()
         lay.addWidget(self.logo, 0, Qt.AlignHCenter)
-        lay.addSpacing(10)
+        scale.spacer(lay, 10)
 
         self.buttons = {}
         for name in ("Muxing", "Encoding", "Downloader", "Queue"):
-            lay.addSpacing(10)
+            scale.spacer(lay, 10)
             self._add_nav(lay, name)
-            lay.addSpacing(10)
+            scale.spacer(lay, 10)
         lay.addStretch(1)
         self._add_nav(lay, "Settings")
-        lay.addSpacing(8)
+        scale.spacer(lay, 8)
 
-        footer = QLabel(f"© {datetime.now().year} Yezan Smadi     {VERSION}")
+        footer = ScaledLabel(f"© {datetime.now().year} Yezan Smadi     {VERSION}")
         footer.setProperty("role", "sidebarFooter")
         footer.setAlignment(Qt.AlignCenter)
         lay.addWidget(footer)
         T.theme.changed.connect(self._load_logo)
+        scale.changed.connect(self._load_logo)
         T.theme.changed.connect(self.update)
 
     NAV_BUTTON_WIDTH = 110  # narrower than the sidebar itself, so the pipe's
@@ -394,7 +429,7 @@ class Sidebar(QWidget):
 
     def _add_nav(self, lay, name):
         btn = button(name)
-        btn.setFixedSize(self.NAV_BUTTON_WIDTH, 28)
+        scale.fixed(btn, self.NAV_BUTTON_WIDTH, 28)
         btn.clicked.connect(lambda _=False, n=name: self.navigate.emit(n))
         lay.addWidget(btn, 0, Qt.AlignHCenter)
         self.buttons[name] = btn
@@ -405,10 +440,10 @@ class Sidebar(QWidget):
         renderer = QSvgRenderer(os.path.join(ASSETS, "LlamaMXD-Logo.svg"))
         if not renderer.isValid():
             return
-        box = self.LOGO_SIZE * self._LOGO_OVERSAMPLE
+        box = px(self.LOGO_SIZE) * self._LOGO_OVERSAMPLE
         native = renderer.defaultSize()
-        scale = box / max(native.width(), native.height())
-        w, h = native.width() * scale, native.height() * scale
+        k = box / max(native.width(), native.height())
+        w, h = native.width() * k, native.height() * k
         x, y = (box - w) / 2, (box - h) / 2
         img = QImage(box, box, QImage.Format_ARGB32_Premultiplied)
         img.fill(Qt.transparent)
@@ -417,14 +452,15 @@ class Sidebar(QWidget):
         renderer.render(p, QRectF(x, y, w, h))
         p.end()
 
-        # Tint the rendered ink to the sidebar's readable-on-primary colour —
-        # the same one the title text uses — so the logo goes white on a dark
-        # primary (Noir, Vaporwave) exactly like the title does, and stays
-        # black elsewhere. SourceIn keeps the source's alpha (the art's own
+        # Tint the rendered ink to the sidebar's text colour — the same one the
+        # title text uses (`sidebar_text`: readable-on-primary, unless the theme
+        # names its own) — so the logo goes white on a dark primary (Noir,
+        # Vaporwave) or on Funk exactly like the title does, and stays black
+        # elsewhere. SourceIn keeps the source's alpha (the art's own
         # anti-aliased shape) and replaces only its RGB.
         tint = QPainter(img)
         tint.setCompositionMode(QPainter.CompositionMode_SourceIn)
-        tint.fillRect(img.rect(), T.theme.color("primary_text"))
+        tint.fillRect(img.rect(), T.theme.color("sidebar_text"))
         tint.end()
 
         pix = QPixmap.fromImage(img)
@@ -454,8 +490,8 @@ def _cable_base_image():
     if not renderer.isValid():
         return None
     native = renderer.defaultSize()
-    scale = 3
-    w, h = round(native.width() * scale), round(native.height() * scale)
+    k = 3
+    w, h = round(native.width() * k), round(native.height() * k)
     img = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
     img.fill(Qt.transparent)
     p = QPainter(img)
@@ -550,7 +586,7 @@ class _TabPipe(QWidget):
     def paintEvent(self, _event):
         if self._extension <= 0:
             return
-        pix = _cable_pixmap(max(1, self.height() - self._MARGIN))
+        pix = _cable_pixmap(max(1, self.height() - px(self._MARGIN)))
         if pix is None:
             return
         dpr = pix.devicePixelRatio()

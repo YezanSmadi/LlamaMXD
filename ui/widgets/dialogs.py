@@ -5,68 +5,126 @@ A QDialog's `exec()` spins a nested event loop, so timers keep firing
 underneath it. Never open one from inside a recurring
 tick — post it with `QTimer.singleShot(0, ...)` (see QueueTab._show_errors)."""
 import os
+import uuid
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
+from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtGui import QIcon, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QDialog, QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 
-from ui.widgets.controls import CheckBox, button
+from core import formats
+from core.utilities import probe_media
+from ui import scale
+from ui import theme as T
+from ui.widgets.controls import CheckBox, ScaledLabel, ScaledLineEdit, button, button_width_for
 from ui.widgets.panels import ASSETS
+from ui.widgets.tracklist import TrackListBox, describe_stream, row_label
+from ui.workers import run_async
 
 _DIALOG_WIDTH = 400
+_BORDER = 2     # the outline's width, reference px
+_RADIUS = 8     # the panel's corner radius, reference px
 
 
 class MessageDialog(QDialog):
     """A bold title, a wrapped message, an optional single-line entry, and one
     or two buttons. The FIRST button is the affirmative one (primary); the
-    rest are declines (secondary). Enter confirms; Escape and the title-bar
-    close box both count as declining, so a dismissed confirmation can never
-    destroy work. `.result_label` is the pressed button's label or None."""
+    rest are declines (secondary). Enter confirms; Escape (and Alt+F4) count
+    as declining, so a dismissed confirmation can never destroy work.
+    `.result_label` is the pressed button's label or None.
+
+    **Borderless**: no OS title bar or frame, like the app's own Borderless
+    window mode. It paints its own rounded panel (the window colour, outlined
+    in the theme's primary) over a translucent window, and — with no title bar
+    to grab — a press on any part of it that a child didn't take drags it
+    (`startSystemMove`).
+
+    A subclass with a body of its own and nothing to say above it sets
+    `SHOW_HEADER = False`: no bold title and no message are built (the window
+    title is still set, for the taskbar)."""
+
+    SHOW_HEADER = True
+    WIDTH = _DIALOG_WIDTH        # reference px; a dialog with a lot on its button row is wider
 
     def __init__(self, parent, title, message, buttons=("OK",), entry=None):
         super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        # Styled here, not left to the window's own sheets: a window restyles
+        # only what's on screen when the scale or theme changes (see
+        # `MainWindow._restyle`), and a dialog built later must not inherit a
+        # stale application-level sheet. Its `QDialog` background is cleared:
+        # `paintEvent` draws the rounded panel, and a square sheet fill would
+        # show at the corners.
+        self.setStyleSheet(T.stylesheet() + "QDialog { background: transparent; }")
         self.setWindowTitle(title)
         icon = os.path.join(ASSETS, "llama.ico")
         if os.path.exists(icon):
             self.setWindowIcon(QIcon(icon))
         self.setModal(True)
-        self.setFixedWidth(_DIALOG_WIDTH)
+        scale.fixed(self, w=self.WIDTH)
         self.result_label = None
         self._buttons = buttons
 
         body = QVBoxLayout(self)
-        body.setContentsMargins(20, 18, 20, 14)
+        scale.margins(body, 20, 18, 20, 14)
         body.setSpacing(0)
-        heading = QLabel(title)
-        heading.setProperty("role", "dialogTitle")
-        body.addWidget(heading)
-        body.addSpacing(6)
-        text = QLabel(message)
-        text.setWordWrap(True)
-        text.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        body.addWidget(text)
-        self.message_label = text
+        self.message_label = None
+        if self.SHOW_HEADER:
+            heading = ScaledLabel(title)
+            heading.setProperty("role", "dialogTitle")
+            body.addWidget(heading)
+            scale.spacer(body, 6)
+            text = ScaledLabel(message)
+            text.setWordWrap(True)
+            text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            body.addWidget(text)
+            self.message_label = text
 
         self.entry = None
         if entry is not None:
-            body.addSpacing(10)
-            self.entry = QLineEdit(entry)
-            self.entry.setFixedHeight(28)
+            scale.spacer(body, 10)
+            self.entry = ScaledLineEdit(entry)
+            scale.fixed(self.entry, h=28)
             body.addWidget(self.entry)
         self._build_extra(body)
 
-        body.addSpacing(16)
+        scale.spacer(body, 16)
         row = QHBoxLayout()
-        row.setSpacing(8)
+        scale.spacing(row, 8)
+        self._build_leading_buttons(row)
         row.addStretch(1)
         for index, label in enumerate(buttons):
-            btn = button(label, role="primary" if index == 0 else None, width=90)
+            btn = button(label, role="action" if index == 0 else "queue", width=90)
             btn.clicked.connect(lambda _=False, choice=label: self._dismiss(choice))
             row.addWidget(btn)
         body.addLayout(row)
 
     def _build_extra(self, body):
         """Hook for subclasses that need more than a message."""
+
+    def _build_leading_buttons(self, row):
+        """Hook: widgets for the *left* end of the button row (the standard buttons sit
+        at the right, after a stretch)."""
+
+    def paintEvent(self, _event):
+        """The rounded, outlined panel a frameless window doesn't get for free."""
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        border = scale.fpx(_BORDER)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()).adjusted(border / 2, border / 2, -border / 2, -border / 2),
+                            scale.fpx(_RADIUS), scale.fpx(_RADIUS))
+        p.fillPath(path, T.theme.color("window"))
+        p.setPen(QPen(T.theme.color("primary"), border))
+        p.drawPath(path)
+
+    def mousePressEvent(self, e):
+        """No title bar to drag by: a press on the panel itself moves the window."""
+        handle = self.windowHandle()
+        if e.button() == Qt.LeftButton and handle is not None:
+            handle.startSystemMove()
+        else:
+            super().mousePressEvent(e)
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -121,7 +179,7 @@ class CountdownDialog(MessageDialog):
     """A confirmation that goes ahead by itself: `message` (with `{n}` standing
     for the seconds left) counts down once a second and the dialog answers
     "Now" at zero. The first button ("Now") acts immediately, Cancel — and
-    Escape / the close box — call it off."""
+    Escape — call it off."""
 
     def __init__(self, parent, title, message, seconds, now_label="Now"):
         super().__init__(parent, title, message.format(n=seconds), buttons=(now_label, "Cancel"))
@@ -187,66 +245,135 @@ def confirm_output_path(parent, output_path, input_file, claimed=False):
     return True
 
 
-class AudioStreamPickerDialog(MessageDialog):
-    """"Choose Stream(s)": one checkbox per probed audio stream, pre-checked to
-    match what's included. OK returns the chosen index set — never empty ("no
-    audio" is Strip Audio's job); Cancel/close returns None."""
+# Audio-only, built off the app's own audio-extension list (same as Muxing's Add Stream(s));
+# "All Files" so an audio track inside a video file can be picked too.
+_AUDIO_BROWSE_FILTER = "Audio Files (%s);;All Files (*.*)" % " ".join(
+    "*" + ext for ext in sorted(formats.AUDIO_EXTENSIONS))
+_PICKER_LIST_HEIGHT = 150     # reference px: room for about five rows before it scrolls
 
-    def __init__(self, parent, streams, included):
-        self._streams = streams
-        self._included = set(included)
-        self._checks = {}
-        super().__init__(
-            parent, "Choose Audio Streams",
-            "Pick which of this file's audio streams to include in the output. "
-            "Each included stream keeps its own codec settings — select it from "
-            "the Audio Track dropdown to edit them.",
-            buttons=("OK", "Cancel"),
-        )
+
+class AudioStreamPickerDialog(MessageDialog):
+    """Encoding's "Choose Stream(s)": nothing in it but the tracks — a
+    `TrackListBox` (one checkbox per audio stream, ticked = included in the
+    output, drag a row to reorder), then **one row of buttons** — Add Stream(s),
+    Remove Stream(s), OK, Cancel, left to right (the first two at the left edge, the
+    standard two at the right). No title, no explanation.
+
+    It edits a *copy* of the list, so Cancel discards everything — ticks, added
+    and removed tracks, the order. Rows are the same shape of entry Muxing's
+    boxes use, `{"id", "source", "file", "index", "stream", "name"}`, so both
+    label them with `tracklist.row_label`. Add Stream(s) browses another file,
+    probes it off the GUI thread and appends its audio stream(s) (a file with
+    several asks which, via `ExternalStreamPickerDialog`) ticked, as in Muxing;
+    Remove Stream(s) takes every ticked row out of the list, the source file's
+    own included. The track numbers follow the order, which is the output's.
+
+    OK gives `chosen` (the ticked ids) and `result_entries` (the list as it now
+    is); with rows but none ticked, the first is ticked instead of closing — "no
+    audio" is Strip Audio's job. Cancel/Escape gives None."""
+
+    SHOW_HEADER = False
+    WIDTH = 500      # one row holds Add, Remove, OK and Cancel; 400 was two buttons short
+
+    def __init__(self, parent, entries, included, start_dir=""):
+        self._entries = list(entries)
+        self._initial_checked = set(included)
+        self._start_dir = start_dir  # where Add Stream(s)'s file dialog opens (the tab's output folder)
+        self._finished = False       # an Add Stream(s) probe landing after OK/Cancel is dropped
+        self.chosen = None
+        self.result_entries = None
+        super().__init__(parent, "Choose Audio Streams", "", buttons=("OK", "Cancel"))
 
     def _build_extra(self, body):
-        body.addSpacing(10)
-        box = QWidget()
-        lay = QVBoxLayout(box)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
-        for stream in self._streams:
-            index = stream["index"]
-            check = CheckBox(self._describe(stream), checked=index in self._included)
-            check.setFont(check.font())
-            lay.addWidget(check)
-            self._checks[index] = check
-        if not self._streams:
-            empty = QLabel("This file has no audio streams.")
-            empty.setProperty("role", "empty")
-            lay.addWidget(empty)
-        body.addWidget(box)
+        self.box = TrackListBox()
+        scale.fixed(self.box, h=_PICKER_LIST_HEIGHT)
+        self.box.reordered.connect(self._on_reordered)
+        body.addWidget(self.box)
+        self._refresh(self._initial_checked)
 
-    @staticmethod
-    def _describe(stream):
-        bits = [f"Track {stream['index'] + 1}"]
-        for key in ("codec", "channels_display", "sample_rate_display", "language"):
-            if stream.get(key):
-                bits.append(str(stream[key]))
-        return "  ·  ".join(bits)
+    def _build_leading_buttons(self, row):
+        """Add Stream(s) then Remove Stream(s), on the left of the one bottom row
+        (OK and Cancel follow at the right)."""
+        add_btn = button("Add Stream(s)", width=button_width_for(["Add Stream(s)"]))
+        add_btn.clicked.connect(self._add_stream)
+        row.addWidget(add_btn)
+        remove_btn = button("Remove Stream(s)", role="danger", width=button_width_for(["Remove Stream(s)"]))
+        remove_btn.clicked.connect(self._remove_streams)
+        row.addWidget(remove_btn)
+
+    def _refresh(self, checked=None):
+        """Shows `self._entries` in the box, numbered by position; `checked` (default:
+        whatever is ticked now) says which rows are ticked."""
+        if checked is None:
+            checked = set(self.box.checked_ids())
+        items = [{"id": entry["id"], "label": row_label("audio", entry, number)}
+                 for number, entry in enumerate(self._entries, start=1)]
+        self.box.set_items(items, checked=checked)
+
+    def _on_reordered(self, ids):
+        by_id = {entry["id"]: entry for entry in self._entries}
+        self._entries = [by_id[row_id] for row_id in ids if row_id in by_id]
+        self._refresh()
+
+    def _remove_streams(self):
+        ticked = set(self.box.checked_ids())
+        if not ticked:
+            show_message(self, "Nothing to Remove",
+                         "Check the track(s) you want removed, then press Remove Stream(s) again.")
+            return
+        self._entries = [entry for entry in self._entries if entry["id"] not in ticked]
+        self._refresh(set(self.box.checked_ids()) - ticked)
+
+    def _add_stream(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select Audio Source", self._start_dir, _AUDIO_BROWSE_FILTER)
+        if path:
+            run_async(probe_media, lambda info: self._stream_probed(path, info), path)
+
+    def _stream_probed(self, path, info):
+        """The browsed-in file's probe landed: append its audio stream(s)."""
+        if self._finished:
+            return
+        streams = (info or {}).get("audio_streams") or []
+        if not streams:
+            show_message(self, "No Matching Streams",
+                         f"\u201c{os.path.basename(path)}\u201d has no audio streams to add.")
+            return
+        if len(streams) > 1:
+            picked = pick_external_streams(self, "audio", streams, lambda s: describe_stream("audio", s))
+            if picked is None:
+                return
+            streams = [s for s in streams if s["index"] in picked]
+        name = os.path.basename(path.replace("\\", "/"))
+        added = [{"id": f"ext:{uuid.uuid4().hex[:8]}", "source": "external", "file": path,
+                  "index": stream["index"], "stream": stream, "name": name}
+                 for stream in streams]
+        self._entries += added
+        self._refresh(set(self.box.checked_ids()) | {entry["id"] for entry in added})
+        # The new rows are at the bottom: bring them into view once the list has laid out.
+        bar = self.box.scroll.verticalScrollBar()
+        QTimer.singleShot(0, lambda: bar.setValue(bar.maximum()))
 
     def _dismiss(self, choice):
         if choice == "OK":
-            chosen = {i for i, check in self._checks.items() if check.isChecked()}
-            if not chosen and self._checks:
-                self._checks[min(self._checks)].setChecked(True)
+            chosen = set(self.box.checked_ids())
+            if not chosen and self.box.item_ids():
+                self.box.set_checked(self.box.item_ids()[0], True)
                 return
             self.chosen = chosen
-        else:
-            self.chosen = None
+            self.result_entries = list(self._entries)
+        self._finished = True
         super()._dismiss(choice)
 
 
-def choose_audio_streams(parent, streams, included):
-    """Opens the picker; the chosen index set, or None if cancelled."""
-    dialog = AudioStreamPickerDialog(parent, streams, included)
+def choose_audio_streams(parent, entries, included, start_dir=""):
+    """Opens the picker on `entries` (ticked = `included`, a set of ids), its Add
+    Stream(s) browsing from `start_dir`; `(entries, chosen ids)` as edited, or None
+    if cancelled."""
+    dialog = AudioStreamPickerDialog(parent, entries, included, start_dir)
     dialog.show_modal()
-    return getattr(dialog, "chosen", None)
+    if dialog.chosen is None:
+        return None
+    return dialog.result_entries, dialog.chosen
 
 
 class ExternalStreamPickerDialog(MessageDialog):
@@ -255,7 +382,7 @@ class ExternalStreamPickerDialog(MessageDialog):
     straight away, no dialog needed). One checkbox per track, all unchecked
     to start — unlike `AudioStreamPickerDialog`, there's no "already
     included" set to pre-check, since every row here is brand new. OK/"Add"
-    never returns an empty set; Cancel/close returns None."""
+    never returns an empty set; Cancel/Escape returns None."""
 
     def __init__(self, parent, kind, streams, describe):
         self._streams = streams
@@ -269,11 +396,11 @@ class ExternalStreamPickerDialog(MessageDialog):
         )
 
     def _build_extra(self, body):
-        body.addSpacing(10)
+        scale.spacer(body, 10)
         box = QWidget()
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        scale.spacing(lay, 6)
         for stream in self._streams:
             index = stream["index"]
             check = CheckBox(self._describe(stream), checked=(index == 0))

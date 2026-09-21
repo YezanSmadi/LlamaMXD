@@ -1,8 +1,10 @@
+import io
 import json
 import os
 import re
 import subprocess
 import tempfile
+import threading
 
 import cv2
 from PIL import Image
@@ -14,12 +16,19 @@ from core.tools import tool_path
 # the GUI. Absent on other platforms, hence the getattr default.
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-# Lazy, process-lifetime caches for supports_fps_mode()/supports_libplacebo()/
+# Lazy, process-lifetime caches for supports_fps_mode()/libplacebo_problem()/
 # av1_preset_range() -- None means "not checked yet"; a real value once it
-# has been (True/False for the first two, an (lo, hi) tuple for the third).
+# has been (True/False for the first, an (lo, hi) tuple for the third).
+# libplacebo's answer is None itself when nothing is wrong, so it has its own
+# "not checked yet" sentinel.
 _fps_mode_supported = None
-_libplacebo_supported = None
+_UNCHECKED = object()
+_libplacebo_problem = _UNCHECKED
+_libplacebo_lock = threading.Lock()
 _av1_preset_range = None
+
+LIBPLACEBO_MISSING = "missing"        # this ffmpeg build lacks the libplacebo filter
+LIBPLACEBO_NO_VULKAN = "vulkan"       # it has it, but can't run it (no usable Vulkan)
 
 
 # AV1's raw ffprobe `level` is a seq_level_idx table index (0-based), not an
@@ -354,18 +363,90 @@ def _probe_hdr_static_metadata(path):
     return result
 
 
+_CHROMA_SUBSAMPLING = re.compile(r"(?:yuvj?|yuva)(4[1-4][0-4])")
+_PIX_FMT_DEPTH = re.compile(r"(\d+)(?:le|be)$")
+# Semi-planar / packed-YUV names that carry no "420"-style digits of their own.
+_CHROMA_BY_PIX_FMT = {"nv12": "4:2:0", "nv21": "4:2:0", "p010le": "4:2:0", "p016le": "4:2:0",
+                      "nv16": "4:2:2", "p210le": "4:2:2", "nv24": "4:4:4", "p410le": "4:4:4"}
+
+
+def _describe_pix_format(pix_fmt, bits_per_raw_sample):
+    """ffprobe's `pix_fmt` (`yuv420p10le`) -> "10-bit 4:2:0", or None when it
+    says nothing useful. Bit depth prefers the stream's own
+    `bits_per_raw_sample`; else it is read off the pixel-format name (a name
+    with no depth suffix is 8-bit — only for the planar/YUV/gray families,
+    since a packed RGB name's digits are total bits per pixel, not depth)."""
+    if not pix_fmt:
+        return None
+    depth = None
+    try:
+        depth = int(bits_per_raw_sample)
+    except (TypeError, ValueError):
+        match = _PIX_FMT_DEPTH.search(pix_fmt)
+        if match and int(match.group(1)) <= 16:
+            depth = int(match.group(1))
+        elif pix_fmt.startswith(("yuv", "nv", "gray", "gbrp")):
+            depth = 8
+    chroma = _CHROMA_BY_PIX_FMT.get(pix_fmt)
+    if chroma is None:
+        match = _CHROMA_SUBSAMPLING.match(pix_fmt)
+        if match:
+            chroma = ":".join(match.group(1))
+        elif pix_fmt.startswith("gbrp"):
+            chroma = "4:4:4"
+    return " ".join(bit for bit in (f"{depth}-bit" if depth else None, chroma) if bit) or None
+
+
+def fps_text(fps):
+    """23.976023... -> "23.976", 30.0 -> "30", 29.97003 -> "29.97"."""
+    return f"{fps:.3f}".rstrip("0").rstrip(".") if fps else None
+
+
+def _bitrate_text(bits_per_second):
+    """A stream's own bit rate as shown in a track row: "8.4 Mbps" / "640 kbps"."""
+    if not bits_per_second or bits_per_second <= 0:
+        return None
+    if bits_per_second >= 1_000_000:
+        return f"{bits_per_second / 1_000_000:.1f} Mbps"
+    return f"{round(bits_per_second / 1000)} kbps"
+
+
 def _describe_video_stream(index, stream):
     """One entry of `probe_media`'s `video_streams` list -- the video-side
     counterpart of `_describe_audio_stream`, for Muxing's track box and its
     "Add Stream" picker (see CLAUDE.md's Muxing/Video panel). `index` is the
-    stream's position among video streams only, matching `-map 0:v:<index>`."""
+    stream's position among video streams only, matching `-map 0:v:<index>`.
+
+    Carries everything a row shows to tell two video tracks apart: profile,
+    level (`_ffprobe_level`, codec-aware), frame rate, bit depth + chroma,
+    HDR kind and the stream's own bit rate (absent from most Matroska
+    files, which only tag it per container). `hdr_display` is "SDR" for
+    anything that isn't PQ/HLG — the same call `probe_media`'s own `hdr`
+    makes, so a source with no transfer tag counts as SDR here too."""
     name = stream.get("codec_name")
     width, height = stream.get("width"), stream.get("height")
+    fps = _parse_frame_rate(stream.get("r_frame_rate"))
+    try:
+        bit_rate = int(stream.get("bit_rate"))
+    except (TypeError, ValueError):
+        bit_rate = None
+    transfer = stream.get("color_transfer")
+    hdr_display = {"smpte2084": "HDR10", "arib-std-b67": "HLG"}.get(transfer, "SDR")
     return {
         "index": index,
         "codec": formats.FFPROBE_VIDEO.get(name),
+        # The raw ffprobe name, for a codec this app has no display name for.
+        "codec_name": name.upper() if name else None,
         "resolution_display": f"{width}x{height}" if width and height else None,
         "profile": _normalize_video_profile(name, stream.get("profile")),
+        "level": _ffprobe_level(name, stream.get("level")),
+        "fps": fps,
+        "fps_display": fps_text(fps),
+        "bitrate": bit_rate,
+        "bitrate_display": _bitrate_text(bit_rate),
+        "color_format": _describe_pix_format(stream.get("pix_fmt"), stream.get("bits_per_raw_sample")),
+        "hdr": transfer in _HDR_TRANSFERS,
+        "hdr_display": hdr_display,
         "language": (stream.get("tags") or {}).get("language"),
     }
 
@@ -407,6 +488,8 @@ def _describe_audio_stream(index, stream):
         ),
         "bitrate": bit_rate_int,
         "bitrate_display": formats.bitrate_display_for(bit_rate_int) if bit_rate_int else None,
+        # Lossless has no bitrate worth showing (TrueHD reports none at all).
+        "lossless": formats.probed_audio_is_lossless(name, stream.get("profile")),
         "language": (stream.get("tags") or {}).get("language"),
     }
 
@@ -505,8 +588,9 @@ def probe_media(path):
         completed = subprocess.run(
             [tool_path("ffprobe"), "-v", "error", "-show_entries",
              "stream=codec_type,codec_name,profile,level,channels,sample_rate,"
-             "bit_rate,width,height,color_transfer,color_primaries,r_frame_rate:"
-             "stream_tags=language:format=duration,bit_rate:"
+             "bit_rate,width,height,color_transfer,color_primaries,r_frame_rate,"
+             "pix_fmt,bits_per_raw_sample:"
+             "stream_tags=language:format=duration,start_time,bit_rate:"
              "format_tags=title,creation_time:chapter=id",
              "-of", "json", path],
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
@@ -533,12 +617,10 @@ def probe_media(path):
         info["container"] = extension
 
     container_info = payload.get("format") or {}
-    duration = container_info.get("duration")
+    duration = _to_float(container_info.get("duration"))
     if duration is not None:
-        try:
-            info["duration"] = float(duration)
-        except ValueError:
-            pass
+        info["duration"] = _effective_duration(
+            path, duration, _to_float(container_info.get("start_time")))
     try:
         info["bit_rate"] = int(container_info["bit_rate"])
     except (KeyError, TypeError, ValueError):
@@ -598,25 +680,109 @@ def probe_media(path):
     return info
 
 
+def _to_float(value):
+    """`float(value)`, or None for a missing / "N/A" / unparseable one."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+# A start time at or under this is ordinary (muxer padding, an edit list): the
+# container's duration is trusted without a second look.
+_START_TRUST_SECS = 1.0
+# How close the file's real last timestamp must be to one of the two candidate
+# ends (see `_effective_duration`) to count as matching it.
+_END_MATCH_SECS = 1.0
+
+
+def _tail_end_time(path, start, header):
+    """Where the file's last packet ends (largest `pts + duration` over every
+    stream), or None if it can't be told. Seeks to the last ~10s and reads on to
+    the end -- roughly one GOP of packets, never the whole file -- so it costs
+    tens of milliseconds even on a feature-length file.
+
+    The interval is given an explicit end (past both candidate ends, so the file's
+    own end still stops it): an open-ended `T%` came back empty, with no error, on
+    about a third of runs of the same command on the same file (8 of 30, then 8 of
+    30 again), where a closed one succeeded 30 of 30. One retry covers what's left."""
+    seek = max(start, header - 10.0)
+    interval = f"{seek:.3f}%{start + header + 1.0:.3f}"
+    packets = []
+    for _attempt in range(2):
+        try:
+            completed = subprocess.run(
+                [tool_path("ffprobe"), "-v", "error", "-read_intervals", interval,
+                 "-show_entries", "packet=pts_time,duration_time", "-of", "json", path],
+                capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
+            )
+            packets = json.loads(completed.stdout or "{}").get("packets") or []
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+        if packets:
+            break
+    end = None
+    for packet in packets:
+        pts = _to_float(packet.get("pts_time"))
+        if pts is None:
+            continue
+        stop = pts + (_to_float(packet.get("duration_time")) or 0.0)
+        end = stop if end is None else max(end, stop)
+    return end
+
+
+def _effective_duration(path, header, start):
+    """The file's real length, given the container's own `header` duration and
+    `start` time.
+
+    Some files (a clip cut out of a longer one with its original timestamps kept)
+    start far into the timeline -- `start` is minutes in -- and carry a header
+    duration that is the END timestamp rather than the length: a 35s clip starting
+    at 5465s says 5501s. ffmpeg itself is unaffected (it rebases every output to 0
+    and writes the real length back), but everything the app derives from the number
+    is wrong: the tooltip, the `{bitrate}` token, the queue's progress denominator,
+    the preview sample positions. A file starting at ~0 is trusted as is. Otherwise
+    the last real timestamp decides between the two readings -- it sits at `header`
+    when the header is an end time (length = header - start) and at `start + header`
+    when the header is honest -- and anything that can't be told keeps the header,
+    so this is never worse than trusting it."""
+    if start is None or start <= _START_TRUST_SECS:
+        return header
+    end = _tail_end_time(path, start, header)
+    if end is None:
+        return header
+    as_end_time = abs(end - header)
+    as_length = abs(end - (start + header))
+    if as_end_time <= _END_MATCH_SECS and as_end_time < as_length and header > start:
+        return header - start
+    return header
+
+
 def probe_duration(path):
     """Best-effort length of `path` in seconds (a float), or None.
 
     Same contract as `probe_media`: every failure path (no ffprobe, an
     unreadable file, a container that reports no duration) returns None
-    rather than raising. The queue's job runner uses it as the progress
-    denominator for an untrimmed job. Runs a subprocess, so keep it off the
-    GUI thread (`FfmpegJob` calls it from its worker)."""
+    rather than raising, and it gives the same corrected length
+    (`_effective_duration`). The queue's job runner uses it as the progress
+    denominator for an untrimmed job, and the preview fallback to place its
+    frames. Runs a subprocess, so keep it off the GUI thread (`FfmpegJob` calls
+    it from its worker)."""
     if not path or not os.path.exists(path):
         return None
     try:
         completed = subprocess.run(
-            [tool_path("ffprobe"), "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            [tool_path("ffprobe"), "-v", "error", "-show_entries", "format=duration,start_time",
+             "-of", "json", path],
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
         )
-        return float(completed.stdout.strip())
+        container = json.loads(completed.stdout or "{}").get("format") or {}
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
+    duration = _to_float(container.get("duration"))
+    if duration is None:
+        return None
+    return _effective_duration(path, duration, _to_float(container.get("start_time")))
 
 
 def verify_hdr_sdr_tag(path):
@@ -677,30 +843,86 @@ def supports_fps_mode():
     return _fps_mode_supported
 
 
+def _libplacebo_listed():
+    """Whether `ffmpeg -filters` lists `libplacebo` (i.e. it was compiled in)."""
+    try:
+        completed = subprocess.run(
+            [tool_path("ffmpeg"), "-hide_banner", "-filters"],
+            capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "libplacebo" in (completed.stdout or "")
+
+
+def _libplacebo_runs():
+    """Whether the real tonemap filter actually runs on this machine: one
+    black frame through `libplacebo_tonemap_vf()` on an explicitly created
+    Vulkan device, exactly the way a real HDR->SDR job launches it. Being
+    listed by `-filters` proves nothing about that -- it says the filter was
+    compiled in, not that a Vulkan driver is there to run it on. A crash
+    (the dev machine's implicit-device segfault gave a nonzero exit and no
+    stderr), a hang and a missing ffmpeg all count as "doesn't run"."""
+    try:
+        completed = subprocess.run(
+            [tool_path("ffmpeg"), "-hide_banner", "-loglevel", "error", *VULKAN_DEVICE_FLAGS,
+             "-f", "lavfi", "-i", "color=c=black:s=128x72:r=1:d=1",
+             "-vf", libplacebo_tonemap_vf(), "-frames:v", "1", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if completed.returncode != 0:
+        lines = (completed.stderr or "").strip().splitlines()
+        print(f"libplacebo probe failed (exit {completed.returncode}): {lines[-1] if lines else 'no output'}")
+    return completed.returncode == 0
+
+
+def libplacebo_problem():
+    """Why HDR->SDR isn't available, or None when it is: `LIBPLACEBO_MISSING`
+    (this ffmpeg build doesn't have the `libplacebo` filter) or
+    `LIBPLACEBO_NO_VULKAN` (it does, but the filter can't run on this machine
+    -- no usable Vulkan driver/device). libplacebo is what gets a real BT.2390
+    curve (`tonemapping=bt.2390`) rather than the classic `zscale`+`tonemap`
+    chain's fixed algorithm list (none/linear/gamma/clip/reinhard/hable/
+    mobius, no BT.2390 among them), and it needs a build compiled with it in
+    *and* a working Vulkan setup at runtime. Checked once per process and
+    cached, same reasoning as `supports_fps_mode` -- the Vulkan probe is a
+    real ffmpeg run (about a second, shader compile included), so
+    `MainWindow` warms it on a worker at startup. Behind a lock: a caller
+    that arrives mid-probe waits for that answer rather than starting a
+    second one."""
+    global _libplacebo_problem
+    with _libplacebo_lock:
+        if _libplacebo_problem is _UNCHECKED:
+            if not _libplacebo_listed():
+                _libplacebo_problem = LIBPLACEBO_MISSING
+            elif not _libplacebo_runs():
+                _libplacebo_problem = LIBPLACEBO_NO_VULKAN
+            else:
+                _libplacebo_problem = None
+        return _libplacebo_problem
+
+
+def libplacebo_problem_text():
+    """`libplacebo_problem()` as one sentence for a dialog, error or tooltip
+    ('' when there's no problem)."""
+    problem = libplacebo_problem()
+    if problem == LIBPLACEBO_MISSING:
+        return ("This ffmpeg install doesn't have libplacebo (needed for accurate BT.2390 "
+                "tone-mapping) compiled in. Update ffmpeg.")
+    if problem == LIBPLACEBO_NO_VULKAN:
+        return ("ffmpeg has libplacebo, but it couldn't run on this machine — HDR to SDR "
+                "needs a working Vulkan driver. Update your graphics driver.")
+    return ""
+
+
 def supports_libplacebo():
-    """Whether the installed ffmpeg has the `libplacebo` filter compiled in
-    -- it's what gets a real BT.2390 tone-mapping curve (`tonemapping=
-    bt.2390`) rather than the classic `zscale`+`tonemap` filter chain's
-    fixed algorithm list (none/linear/gamma/clip/reinhard/hable/mobius, no
-    BT.2390 among them). This app's own dev machine doesn't have it (a 2020
-    ffmpeg build; libplacebo needs a build compiled with it in *and* a
-    working Vulkan setup at runtime) -- gyan.dev's current "full" build
-    does. Checked once per process (`ffmpeg -filters`' own listing) and
-    cached, same reasoning as `supports_fps_mode`. A filter that's merely
-    *listed* but fails at runtime (e.g. no usable Vulkan device) still
-    surfaces as a normal Failed job with ffmpeg's own reason -- same safety
-    net as guessing wrong on any other capability check."""
-    global _libplacebo_supported
-    if _libplacebo_supported is None:
-        try:
-            completed = subprocess.run(
-                [tool_path("ffmpeg"), "-hide_banner", "-filters"],
-                capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
-            )
-            _libplacebo_supported = "libplacebo" in (completed.stdout or "")
-        except (OSError, subprocess.SubprocessError):
-            _libplacebo_supported = False
-    return _libplacebo_supported
+    """Whether HDR->SDR tone-mapping can run at all (`libplacebo_problem()` is
+    None). A failure the probe can't foresee still surfaces as a normal Failed
+    job with ffmpeg's own reason -- same safety net as any other capability
+    guess."""
+    return libplacebo_problem() is None
 
 
 def av1_preset_range():
@@ -754,27 +976,104 @@ def _probe_frame_geometry(video_path):
     """`(total_frame_count, fps)` via cv2, or `(0, 0.0)` if either is
     unusable. Used to turn a frame-index sample point
     (`_interior_sample_frames`) into the timestamp ffmpeg's own `-ss` seek
-    needs, in `extract_hdr_tonemapped_thumbnails`."""
+    needs, in `extract_hdr_tonemapped_thumbnails`.
+
+    cv2's frame count comes from the container's duration, so a file whose header
+    is an end timestamp (`_effective_duration`) reports far more frames than it
+    has, and every sample would land past its end. When cv2's implied length is
+    over 1.5x the real one the count is rebuilt from the real length; a smaller
+    disagreement (variable frame rate) is left alone so the tone-mapped set stays
+    index-for-index aligned with cv2's own."""
     cap = cv2.VideoCapture(video_path)
     try:
-        return int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), cap.get(cv2.CAP_PROP_FPS)
+        total, fps = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), cap.get(cv2.CAP_PROP_FPS)
     finally:
         cap.release()
+    if total > 0 and fps > 0:
+        real = probe_duration(video_path)
+        if real and total / fps > 1.5 * real:
+            total = max(1, int(real * fps))
+    return total, fps
+
+
+# The widest a fallback preview frame is made (ffmpeg scales anything larger
+# down): a 4K frame as a raw image is ~25MB, and the carousel never shows it
+# bigger than the window.
+_PREVIEW_MAX_WIDTH = 1920
+# Fallback frames give up after this many misses in a row with none found yet --
+# a file ffmpeg can't decode either shouldn't cost ten failed launches.
+_PREVIEW_MAX_MISSES = 3
+
+
+def _has_previewable_video(path):
+    """True when `path` has a real video stream -- not just cover art, which is
+    one frame stuck on an audio file and must not turn it into a "video" with ten
+    identical previews (an audio file keeps its Wave Loop)."""
+    try:
+        completed = subprocess.run(
+            [tool_path("ffprobe"), "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_type:stream_disposition=attached_pic",
+             "-of", "json", path],
+            capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
+        )
+        streams = json.loads(completed.stdout or "{}").get("streams") or []
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    return bool(streams) and not (streams[0].get("disposition") or {}).get("attached_pic")
+
+
+def _extract_thumbnails_ffmpeg(video_path, count):
+    """`count` interior frames taken with ffmpeg instead of OpenCV -- the fallback
+    for a file OpenCV can't seek (it works from the container's frame count, which
+    is wrong for a file whose header duration is an end timestamp: every interior
+    seek lands before the first real frame). Positions are the same fractions of
+    the file's real length (`probe_duration`, corrected), as input-side `-ss`
+    seeks, which count from the file's own start whatever its timestamps say.
+    Runs one short ffmpeg process per frame, so keep it off the GUI thread."""
+    duration = probe_duration(video_path)
+    if not duration or duration <= 0 or not _has_previewable_video(video_path):
+        return []
+    frames, misses = [], 0
+    for i in range(count):
+        try:
+            completed = subprocess.run(
+                [tool_path("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
+                 "-ss", f"{duration * (i + 1) / (count + 1):.3f}", "-i", video_path,
+                 "-map", "0:v:0", "-frames:v", "1",
+                 # rgb24 explicitly: a 10-bit source otherwise comes out as a 16-bit
+                 # PPM, which Pillow needs ~1.4s a frame to read (0.01s as 8-bit).
+                 "-vf", f"scale='min({_PREVIEW_MAX_WIDTH},iw)':-2,format=rgb24",
+                 "-f", "image2pipe", "-c:v", "ppm", "-"],
+                capture_output=True, timeout=30, creationflags=_NO_WINDOW,
+            )
+            with Image.open(io.BytesIO(completed.stdout)) as image:
+                frames.append(image.convert("RGB"))
+        except (OSError, subprocess.SubprocessError):
+            misses += 1
+            if not frames and misses >= _PREVIEW_MAX_MISSES:
+                break
+    return frames
 
 
 def extract_video_thumbnails(video_path, count=10):
     """Grabs `count` frames spread evenly across the video's *interior* as
-    raw PIL Images (unsized).
+    raw PIL Images (unsized): OpenCV first, and ffmpeg
+    (`_extract_thumbnails_ffmpeg`) only if OpenCV produced nothing at all.
+
+    Returns a list 1..count long — shorter if the clip is too short to yield
+    that many distinct frames or some seeks fail. Returns an empty list if
+    nothing decodes at all (not a video, unreadable, missing codec)."""
+    return _extract_thumbnails_cv2(video_path, count) or _extract_thumbnails_ffmpeg(video_path, count)
+
+
+def _extract_thumbnails_cv2(video_path, count):
+    """The OpenCV half of `extract_video_thumbnails`.
 
     Sample positions are the fractions 1/(count+1) … count/(count+1) of the
     frame count — deliberately interior, so a black/blank first frame and an
-    end-credits or fade-out last frame don't get picked.
-
-    Returns a list 1..count long — shorter if the clip is too short to yield
-    that many distinct frames or some seeks fail, and falling back to a
+    end-credits or fade-out last frame don't get picked. Falls back to a
     single first-frame read when the container reports no usable frame count
-    (some webm / streamed sources). Returns an empty list if nothing decodes
-    at all (not a video, unreadable, missing codec)."""
+    (some webm / streamed sources)."""
     cap = cv2.VideoCapture(video_path)
     try:
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -788,12 +1087,19 @@ def extract_video_thumbnails(video_path, count=10):
 
         targets = _interior_sample_frames(total, count)
 
-        frames = []
+        frames, misses = [], 0
         for target in targets:
             cap.set(cv2.CAP_PROP_POS_FRAMES, target)
             success, frame = cap.read()
             if success and frame is not None:
                 frames.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+            else:
+                # A frame count that doesn't match the file (see
+                # `_extract_thumbnails_ffmpeg`) fails every seek, each one slowly:
+                # stop and let the ffmpeg fallback have it.
+                misses += 1
+                if not frames and misses >= _PREVIEW_MAX_MISSES:
+                    break
         return frames
     finally:
         cap.release()

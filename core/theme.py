@@ -5,7 +5,7 @@ on top of what's here."""
 import json
 import os
 
-from core import naming, power, priority
+from core import naming, power, priority, startup_tab, window_mode
 
 # Repo root, derived from this file's own location — settings.json always
 # lands next to main.py whatever directory the app was launched from.
@@ -26,9 +26,16 @@ THEMES = {
     "Cupid": {"primary": "#FA6E99", "secondary": "#780219"},
     "Lilac": {"primary": "#a58fd7", "secondary": "#3e6d04"},
     "Ranger": {"primary":"#F98524", "secondary": "#104E4B" },
-    "Noir": {"primary": "#131317", "secondary": "#5A5B63"},
+    "Noir": {"primary": "#131317", "secondary": "#5A5B63"}, 
     "Luck": {"primary": "#ADBCDE", "secondary": "#0E5914"},
-    "Vaporwave": {"primary": "#3B41B8", "secondary": "#ED72D4"}
+    "Vaporwave": {"primary": "#3B41B8", "secondary": "#ED72D4"},
+    "Dreamsicle": {"primary": "#f9be90", "secondary": "#f97c9c"},
+    "Funk": {"primary": "#3dbcc1", "secondary": "#4b3383", "sidebar_text": "white"},
+    # Black primary, neon-green secondary: the sidebar title/logo and the selected
+    # sub-tab take the green (`sidebar_text` / `swap_subtabs`, see get_theme), and
+    # black's derived hover is black again, so it names a visible one.
+    "Terminal": {"primary": "#000000", "primary_hover": "#1c1c1c", "secondary": "#44fe2c",
+                 "sidebar_text": "secondary", "swap_subtabs": True, "swap_action_buttons": True},
 }
 
 
@@ -123,18 +130,38 @@ def get_theme(name=None):
     primary_hover/primary_text/secondary/secondary_hover/secondary_text —
     falling back to the default theme for an unknown or missing name. The
     *_text entries are derived (see readable_text_on), not stored in THEMES,
-    so adding a palette never needs a matching text color hand-picked."""
+    so adding a palette never needs a matching text color hand-picked.
+
+    `sidebar_text` is the colour of the sidebar's title and logo only. It is
+    `primary_text` unless a theme names its own (Funk's teal reads better with
+    white there, while everything else on a teal fill keeps the derived black).
+    A theme may give it as a colour or as the keyword "primary"/"secondary"
+    (Terminal's is "secondary", so it follows that colour).
+
+    `subtab_active` / `subtab_inactive` (each with `_hover` and `_text`) are the
+    fills of the selected and the other sub-tabs (`SubTabBar`): primary and
+    secondary respectively, or the other way round for a theme with
+    `swap_subtabs` (Terminal — its primary is black, which vanishes as a
+    selected tab on the dark frame)."""
     colors = THEMES.get(name, THEMES[DEFAULT_THEME_NAME])
-    return {
+    primary_text = readable_text_on(colors["primary"])
+    palette = {
         "primary": colors["primary"],
         "primary_hover": colors.get("primary_hover") or _darken(colors["primary"]),
-        "primary_text": readable_text_on(colors["primary"]),
+        "primary_text": primary_text,
         "primary_disabled_text": disabled_text_on(colors["primary"]),
         "secondary": colors["secondary"],
         "secondary_hover": colors.get("secondary_hover") or _darken(colors["secondary"]),
         "secondary_text": readable_text_on(colors["secondary"]),
         "secondary_disabled_text": disabled_text_on(colors["secondary"]),
     }
+    sidebar_text = colors.get("sidebar_text") or primary_text
+    palette["sidebar_text"] = palette[sidebar_text] if sidebar_text in ("primary", "secondary") else sidebar_text
+    active, inactive = ("secondary", "primary") if colors.get("swap_subtabs") else ("primary", "secondary")
+    for role, source in (("subtab_active", active), ("subtab_inactive", inactive)):
+        for suffix in ("", "_hover", "_text"):
+            palette[role + suffix] = palette[source + suffix]
+    return palette
 
 
 def default_output_dir():
@@ -149,12 +176,14 @@ def load_settings():
     """Reads persisted app settings (theme, appearance mode, default save
     location, GPU acceleration, the Downloader's own separate save location,
     the output naming format, "When Done" and its reset-on-launch flag, and
-    the job priority level), filling in defaults for anything missing or if
+    the job priority level, the window mode and its borderless-fullscreen
+    flag, and the tab to open on), filling in defaults for anything missing or if
     the file doesn't exist yet (e.g. first run). Appearance mode defaults to
     "System"; default save location defaults to default_output_dir(); the
     Downloader's separate save location is off by default and empty until
     set; the naming format is `core.naming.DEFAULT_TEMPLATE`, "When Done" is
-    "Do Nothing" (and reset to it on every launch), priority is "Normal".
+    "Do Nothing" (and reset to it on every launch), priority is "Normal", the
+    window is "Fixed" (and not fullscreen), the app opens on "Encoding".
     A stored value that's no longer valid (a hand-edited file) falls back to
     its default rather than reaching the UI."""
     settings = {
@@ -168,6 +197,9 @@ def load_settings():
         "when_done": power.DO_NOTHING,
         "when_done_reset": True,
         "priority_level": priority.DEFAULT_LEVEL,
+        "window_mode": window_mode.DEFAULT_MODE,
+        "borderless_fullscreen": False,
+        "startup_tab": startup_tab.DEFAULT_TAB,
     }
     if not os.path.exists(_SETTINGS_PATH):
         return settings
@@ -182,6 +214,11 @@ def load_settings():
         settings["when_done"] = power.DO_NOTHING
     if settings["priority_level"] not in priority.LEVELS:
         settings["priority_level"] = priority.DEFAULT_LEVEL
+    if settings["window_mode"] not in window_mode.MODES:
+        settings["window_mode"] = window_mode.DEFAULT_MODE
+    if settings["startup_tab"] not in startup_tab.TABS:
+        settings["startup_tab"] = startup_tab.DEFAULT_TAB
+    settings["borderless_fullscreen"] = settings["borderless_fullscreen"] is True
     return settings
 
 

@@ -14,9 +14,11 @@ from core.theme import (
     STOP_RED_HOVER,
     THEMES,
     get_theme,
+    disabled_text_on,
     load_settings,
     readable_text_on,
 )
+from ui.scale import font_px, px
 
 # Neutral greys per appearance mode (X11 names noted: gray14 = #242424, etc.).
 _NEUTRALS = {
@@ -156,9 +158,20 @@ class ThemeManager(QObject):
         colors["stop"] = STOP_RED
         colors["stop_hover"] = STOP_RED_HOVER
         colors["stop_text"] = readable_text_on(STOP_RED)
+        colors["stop_disabled_text"] = disabled_text_on(STOP_RED)
         colors["stop_pressed"] = _shade(STOP_RED_HOVER, 0.87)
         colors["secondary_pressed"] = _shade(brand["secondary_hover"], 0.87)
         colors["primary_pressed"] = _shade(brand["primary_hover"], 0.87)
+        # The do-it-now buttons (Mux / Encode / Download, Start / Pause Queue: role
+        # "action") are primary and Queue Task (role "queue") is secondary — unless
+        # the theme swaps them (Terminal, whose black primary would otherwise be the
+        # loud button). Aliased here, after every shade exists, so the stylesheet
+        # needs no theme knowledge.
+        swap = bool(THEMES.get(self.name, {}).get("swap_action_buttons"))
+        action, queue = ("secondary", "primary") if swap else ("primary", "secondary")
+        for role, source in (("action_btn", action), ("queue_btn", queue)):
+            for suffix in ("", "_hover", "_pressed", "_text", "_disabled_text"):
+                colors[role + suffix] = colors[source + suffix]
         self._colors = colors
 
 
@@ -202,20 +215,32 @@ def stylesheet():
     popups) are styled here — everything with custom geometry paints itself
     straight from `theme`."""
     c = theme.hex
+    # Qt sizes a slider handle's box as groove height + 2 x margin, and draws
+    # the knob into it: rounding px(16), px(4) and px(-6) separately left that
+    # box a pixel off the knob's own size at some scales (22x21 with an 11px
+    # radius), which Qt then drew as a square. Keep the knob even-sized and
+    # its margin exact, so the box is always precisely the knob.
+    groove = px(4)
+    knob = px(16) + (px(16) - groove) % 2
+    knob_margin = (groove - knob) // 2
     return f"""
     QWidget {{
         color: {c('text')};
         font-family: "Roboto", "Segoe UI";
-        font-size: 13px;
+        font-size: {font_px(13)}px;
     }}
-    #Root, QDialog {{ background: {c('window')}; }}
-    #TabFrame {{ background: {c('frame')}; border-radius: 6px; }}
+    QDialog {{ background: {c('window')}; }}
     QStackedWidget, QStackedWidget > QWidget {{ background: transparent; }}
 
+    /* Text on ScaledLabel / ScaledButton is painted through the scale-transformed
+       painter (ui.widgets.controls), so its font is in REFERENCE pixels here, not
+       font_px(): Qt snaps a widget font to whole pixels, which made text hop
+       between sizes while the window was dragged. */
+    ScaledLabel, ScaledButton, ScaledLineEdit {{ font-size: 13px; }}
     QLabel {{ background: transparent; }}
     QLabel:disabled {{ color: {c('label_disabled')}; }}
-    QLabel[role="field"] {{ font-family: Arial; font-size: 12px; font-weight: bold; min-height: 26px; }}
-    QLabel[role="field11"] {{ font-family: Arial; font-size: 11px; font-weight: bold; min-height: 26px; }}
+    QLabel[role="field"] {{ font-family: Arial; font-size: 12px; font-weight: bold; min-height: {px(26)}px; }}
+    QLabel[role="field11"] {{ font-family: Arial; font-size: 11px; font-weight: bold; min-height: {px(26)}px; }}
     QLabel[role="muted"] {{ color: {c('muted')}; font-family: Arial; font-size: 11px; }}
     QLabel[role="muted"]:disabled {{ color: {c('label_disabled')}; }}
     QLabel[role="meta"] {{ color: {c('label_disabled')}; font-family: Arial; font-size: 12px; }}
@@ -226,22 +251,22 @@ def stylesheet():
     QLabel[role="detailKey"] {{ font-family: Arial; font-size: 11px; font-weight: bold; }}
     QLabel[role="error"] {{ color: {c('stop')}; }}
     QLabel[role="sidebarTitle"] {{
-        color: {c('primary_text')}; font-family: "Oswald", "Segoe UI"; font-size: 36px; font-weight: bold;
+        color: {c('sidebar_text')}; font-family: "Oswald", "Segoe UI"; font-size: 36px; font-weight: bold;
     }}
     QLabel[role="sidebarFooter"] {{ color: {c('primary_text')}; font-size: 10px; }}
     QLabel[role="empty"] {{ color: {c('muted')}; }}
     QLabel[role="warn"] {{
         background: {c('warn_bg')}; color: {c('warn_text')};
-        font-family: Arial; font-size: 12px; border-radius: 6px; padding: 5px 10px;
+        font-family: Arial; font-size: 12px; border-radius: {px(6)}px; padding: {px(5)}px {px(10)}px;
     }}
 
     QPushButton {{
         background: {c('secondary')};
         color: {c('secondary_text')};
         border: none;
-        border-radius: 6px;
-        min-height: 28px;
-        padding: 0 10px;
+        border-radius: {px(6)}px;
+        min-height: {px(28)}px;
+        padding: 0 {px(10)}px;
     }}
     QPushButton:hover {{ background: {c('secondary_hover')}; }}
     QPushButton:pressed {{ background: {c('secondary_pressed')}; }}
@@ -250,35 +275,45 @@ def stylesheet():
     QPushButton[role="primary"]:hover {{ background: {c('primary_hover')}; }}
     QPushButton[role="primary"]:pressed {{ background: {c('primary_pressed')}; }}
     QPushButton[role="primary"]:disabled {{ color: {c('primary_disabled_text')}; }}
+    QPushButton[role="action"] {{ background: {c('action_btn')}; color: {c('action_btn_text')}; }}
+    QPushButton[role="action"]:hover {{ background: {c('action_btn_hover')}; }}
+    QPushButton[role="action"]:pressed {{ background: {c('action_btn_pressed')}; }}
+    QPushButton[role="action"]:disabled {{ color: {c('action_btn_disabled_text')}; }}
+    QPushButton[role="queue"] {{ background: {c('queue_btn')}; color: {c('queue_btn_text')}; }}
+    QPushButton[role="queue"]:hover {{ background: {c('queue_btn_hover')}; }}
+    QPushButton[role="queue"]:pressed {{ background: {c('queue_btn_pressed')}; }}
+    QPushButton[role="queue"]:disabled {{ color: {c('queue_btn_disabled_text')}; }}
     QPushButton[role="danger"] {{ background: {c('stop')}; color: {c('stop_text')}; }}
     QPushButton[role="danger"]:hover {{ background: {c('stop_hover')}; }}
     QPushButton[role="danger"]:pressed {{ background: {c('stop_pressed')}; }}
+    QPushButton[role="danger"]:disabled {{ color: {c('stop_disabled_text')}; }}
     QPushButton[role="ghost"] {{ background: transparent; color: {c('text')}; }}
     QPushButton[role="ghost"]:hover {{ background: {c('row_hover')}; }}
+    QPushButton[role="compact"] {{ min-height: {px(22)}px; }}
     QPushButton[role="stepper"] {{
-        min-height: 13px; max-height: 13px; min-width: 30px; max-width: 30px;
-        padding: 0; border-radius: 3px; font-size: 8px;
+        min-height: {px(13)}px; max-height: {px(13)}px; min-width: {px(30)}px; max-width: {px(30)}px;
+        padding: 0; border-radius: {px(3)}px; font-size: {font_px(8)}px;
     }}
 
     QLineEdit {{
         background: {c('entry')};
-        border: 2px solid {c('entry_border')};
-        border-radius: 6px;
-        padding: 0 6px;
-        min-height: 24px;
+        border: {px(2)}px solid {c('entry_border')};
+        border-radius: {px(6)}px;
+        padding: 0 {px(6)}px;
+        min-height: {px(24)}px;
         selection-background-color: {c('secondary')};
         selection-color: {c('secondary_text')};
     }}
     QLineEdit:focus {{ border-color: {c('secondary')}; }}
     QLineEdit:disabled {{ color: {c('label_disabled')}; }}
 
-    QSlider {{ min-height: 18px; }}
-    QSlider::groove:horizontal {{ height: 4px; background: {c('track')}; border-radius: 2px; }}
-    QSlider::sub-page:horizontal {{ background: {c('track_fill')}; border-radius: 2px; }}
-    QSlider::add-page:horizontal {{ background: {c('track')}; border-radius: 2px; }}
+    QSlider {{ min-height: {px(18)}px; }}
+    QSlider::groove:horizontal {{ height: {groove}px; background: {c('track')}; border-radius: {groove // 2}px; }}
+    QSlider::sub-page:horizontal {{ background: {c('track_fill')}; border-radius: {groove // 2}px; }}
+    QSlider::add-page:horizontal {{ background: {c('track')}; border-radius: {groove // 2}px; }}
     QSlider::handle:horizontal {{
-        background: {c('secondary')}; width: 16px; height: 16px;
-        margin: -6px 0; border-radius: 8px;
+        background: {c('secondary')}; width: {knob}px; height: {knob}px;
+        margin: {knob_margin}px 0; border-radius: {knob // 2}px;
     }}
     QSlider::handle:horizontal:hover {{ background: {c('secondary_hover')}; }}
     QSlider::handle:horizontal:disabled {{ background: {c('disabled')}; }}
@@ -289,13 +324,13 @@ def stylesheet():
     QComboBox QAbstractItemView {{
         background: {c('menu_bg')};
         color: {c('menu_text')};
-        border: 1px solid {c('menu_border')};
-        border-radius: 6px;
-        padding: 3px;
+        border: {px(1)}px solid {c('menu_border')};
+        border-radius: {px(6)}px;
+        padding: {px(3)}px;
         outline: 0;
     }}
     QComboBox QAbstractItemView::item {{
-        min-height: 28px; padding-left: 8px; border-radius: 4px;
+        min-height: {px(28)}px; padding-left: {px(8)}px; border-radius: {px(4)}px;
     }}
     QComboBox QAbstractItemView::item:hover,
     QComboBox QAbstractItemView::item:selected {{
@@ -304,11 +339,11 @@ def stylesheet():
 
     QScrollArea {{ background: transparent; border: none; }}
     QScrollArea > QWidget > QWidget {{ background: transparent; }}
-    QScrollBar:vertical {{ background: transparent; width: 12px; margin: 4px 2px; }}
-    QScrollBar::handle:vertical {{ background: {c('segment')}; border-radius: 4px; min-height: 30px; }}
+    QScrollBar:vertical {{ background: transparent; width: {px(12)}px; margin: {px(4)}px {px(2)}px; }}
+    QScrollBar::handle:vertical {{ background: {c('segment')}; border-radius: {px(4)}px; min-height: {px(30)}px; }}
     QScrollBar::handle:vertical:hover {{ background: {c('muted')}; }}
     QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
     QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
-    QMenu {{ background: {c('menu_bg')}; color: {c('menu_text')}; border: 1px solid {c('menu_border')}; }}
+    QMenu {{ background: {c('menu_bg')}; color: {c('menu_text')}; border: {px(1)}px solid {c('menu_border')}; }}
     """
