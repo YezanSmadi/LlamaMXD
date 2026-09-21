@@ -20,7 +20,8 @@ from core import ffmpeg_vars as v
 from core import gpu
 from core.tools import tool_path
 from core.utilities import (
-    VULKAN_DEVICE_FLAGS, libplacebo_tonemap_vf, supports_fps_mode, supports_libplacebo,
+    VULKAN_DEVICE_FLAGS, libplacebo_problem_text, libplacebo_tonemap_vf, supports_fps_mode,
+    supports_libplacebo,
 )
 
 # Global flags every queued job runs with. They go right after "ffmpeg"
@@ -102,6 +103,20 @@ def _mux_input(entry, primary, input_kwargs, external_cache):
     return primary
 
 
+def _input_positions(streams):
+    """`{ffmpeg-python input node: its position among the command's -i options}` for the
+    inputs `streams` read from. ffmpeg-python numbers inputs by the topological order
+    of the graph it is handed (`ffmpeg._run.get_args`), not by the order they were
+    declared, and drops any input nothing maps -- so with the video stripped, or every
+    audio track coming from another file, the primary input is not necessarily `0`.
+    A `-map_metadata` that names an input needs the real number."""
+    from ffmpeg._run import get_stream_spec_nodes
+    from ffmpeg.dag import topo_sort
+    nodes, _ = topo_sort(get_stream_spec_nodes(ffmpeg.output(*streams, "-")))
+    inputs = [node for node in nodes if isinstance(node, ffmpeg.nodes.InputNode)]
+    return {node: position for position, node in enumerate(inputs)}
+
+
 def build_mux_command(output_path=None):
     """Muxing job -> Stream. Every stream is `-c copy` -- the only
     per-job variables are *which* tracks get mapped and from which file(s)
@@ -157,6 +172,7 @@ def build_encode_command(output_path=None):
     `build_mux_command` already uses for its own external-track case."""
     input_kwargs, output_kwargs = _trim_kwargs()
     stream = ffmpeg.input(v.INPUT_FILE, **input_kwargs)
+    external_cache = {}       # audio streams pulled in from other files, one input per path
     streams = []
 
     if v.STRIP_VIDEO:
@@ -179,6 +195,14 @@ def build_encode_command(output_path=None):
         # new encode's actual resolution or bitrate. A video track's
         # language tag is never used for playback/track-selection the way an
         # audio one is, so wiping it along with the rest costs nothing real.
+        #
+        # **This one option has a side effect on every other stream.** ffmpeg
+        # documents that creating *any* `-map_metadata` mapping of a type turns
+        # off the default per-stream metadata copy for that type — for all
+        # streams, not just the one named. Confirmed: with `-map_metadata:s:v:0 -1`
+        # a plain `-c:a copy` audio track came out with no language tag (the
+        # same command without it kept `eng`/`jpn`). So every *copied* audio
+        # track below gets its tags mapped back explicitly.
         output_kwargs["map_metadata:s:v:0"] = "-1"
         if v.HW_ENCODER:
             # Hardware Acceleration (Settings) resolved to a real GPU
@@ -222,11 +246,7 @@ def build_encode_command(output_path=None):
                 # surfaces through the same "couldn't build the command"
                 # Failed-task path QueueTab._process_next already has for a
                 # settings combination the builder can't express.
-                raise ValueError(
-                    "HDR to SDR needs libplacebo for accurate BT.2390 "
-                    "tone-mapping, and this ffmpeg install doesn't have it "
-                    "compiled in. Update ffmpeg, or turn HDR to SDR off."
-                )
+                raise ValueError(f"{libplacebo_problem_text()} Or turn HDR to SDR off.")
             # Explicit output tags -- verified libplacebo's target colorspace
             # doesn't reliably propagate to the output stream's own tags on
             # its own, so a player/editor has no guarantee the result is
@@ -257,6 +277,7 @@ def build_encode_command(output_path=None):
         if video_filters:
             output_kwargs["vf"] = ",".join(video_filters)
 
+    copied = []      # (output position, its input stream, cfg) of every straight-copy audio track
     if v.STRIP_AUDIO or not v.AUDIO_STREAMS:
         output_kwargs["an"] = None
     else:
@@ -266,7 +287,12 @@ def build_encode_command(output_path=None):
         # the *source*), which only matches when every source stream up to
         # that point was included.
         for i, cfg in enumerate(v.AUDIO_STREAMS):
-            streams.append(stream[f"a:{cfg['src_index']}"])
+            # A stream from another file (Choose Stream(s) -> Add Stream(s)) is
+            # mapped from that file's own input, trimmed exactly like the primary.
+            source = _mux_input(cfg, stream, input_kwargs, external_cache)
+            streams.append(source[f"a:{cfg['src_index']}"])
+            if cfg["codec_arg"] == "copy":
+                copied.append((i, source, cfg))
             output_kwargs[f"c:a:{i}"] = cfg["codec_arg"]
             if cfg["bitrate_arg"]:
                 output_kwargs[f"b:a:{i}"] = cfg["bitrate_arg"]
@@ -293,6 +319,17 @@ def build_encode_command(output_path=None):
                 output_kwargs[f"map_metadata:s:a:{i}"] = "-1"
                 if cfg["language"]:
                     output_kwargs[f"metadata:s:a:{i}"] = f"language={cfg['language']}"
+
+    if copied:
+        # A copied (Passthru) track keeps its own tags — language, title — which the
+        # video track's `-map_metadata:s:v:0 -1` above would otherwise have dropped for
+        # it too (see there). Mapped from the input the stream is actually read from:
+        # its file's position in the command, and its own index in that file. (A
+        # re-encoded track is different: its stale statistics are wiped on purpose and
+        # only the language is put back, below.)
+        positions = _input_positions(streams)
+        for i, source, cfg in copied:
+            output_kwargs[f"map_metadata:s:a:{i}"] = f"{positions[source.node]}:s:a:{cfg['src_index']}"
 
     # **Global, NOT audio-scoped.** This exists for non-standard audio/
     # container pairings (TrueHD/E-AC3 with Atmos side data, etc.) -- it used

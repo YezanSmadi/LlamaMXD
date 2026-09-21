@@ -14,6 +14,8 @@ import os
 import re
 import time
 
+from PySide6 import QtGui
+from shiboken6 import isValid
 from PySide6.QtCore import (
     QByteArray,
     QEasingCurve,
@@ -25,20 +27,41 @@ from PySide6.QtCore import (
     QVariantAnimation,
     Signal,
 )
-from PySide6.QtGui import QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QRegion
+from PySide6.QtGui import (
+    QAbstractTextDocumentLayout,
+    QFont,
+    QFontMetricsF,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QPen,
+    QRegion,
+    QTextDocument,
+    QTextOption,
+)
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QApplication,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
+    QStyle,
     QStyledItemDelegate,
+    QStyleOptionButton,
+    QStyleOptionFrame,
+    QStylePainter,
     QVBoxLayout,
     QWidget,
 )
 
+from ui import scale
 from ui import theme as T
+from ui.scale import px
 
 NO_OPTION = "—"
 
@@ -67,18 +90,430 @@ def _icon_svg(name, color):
     return _SVG_CACHE[key]
 
 
-def ui_font(px, bold=False, family=None):
-    """A pixel-sized font — Roboto unless `family` is given."""
+def ui_font(size, bold=False, family=None):
+    """A font at `size` *reference* pixels — Roboto unless `family` is given.
+    For custom painters (which paint in design space, so the painter scales
+    the glyphs) and for measuring text in reference pixels; a real widget's
+    font goes through `set_font_px`."""
     f = QFont()
     f.setFamilies([family] if family else ["Roboto", "Segoe UI"])
-    f.setPixelSize(px)
+    f.setPixelSize(size)
     f.setBold(bold)
+    # Unhinted, so glyph advances are linear in the size: hinted ones snap per
+    # size (a 40-character line measures 227 / 236 / 262px at 12 / 13 / 14px,
+    # not 224 / 242 / 261), which made scaled text stutter and made a measured
+    # width disagree with the painted one.
+    f.setHintingPreference(QFont.PreferNoHinting)
     return f
+
+
+def _unhinted(widget):
+    """Make `widget`'s font unhinted whatever the app font is: hinted glyphs are
+    placed on whole pixels, so text painted through a scaled painter comes out
+    with uneven letter and word gaps (0.4px spread against 0.07px unhinted),
+    and its measured width stops matching its painted width."""
+    f = QFont(widget.font())
+    f.setHintingPreference(QFont.PreferNoHinting)
+    widget.setFont(f)
+
+
+def set_font_px(widget, size, bold=False, family=None):
+    """Give a real (stylesheet-laid-out) widget a font at `size` reference
+    pixels, re-applied whenever the scale changes."""
+    scale.bind(widget, lambda: widget.setFont(ui_font(scale.font_px(size), bold, family)))
+
+
+class ScaledLabel(QLabel):
+    """A label whose text is painted through the scale-transformed painter
+    (`scale.begin`) instead of Qt's own text path.
+
+    Qt snaps a widget font to a whole pixel size — whatever the family,
+    engine or hinting — so a stylesheet-sized label hops between 12, 13, 14px
+    as the window is dragged, and a sentence's width jumps by 10-35px at each
+    hop (measured: a word's position wanders 5-6px rms, 14-19px worst, against
+    0.3px rms for text drawn through a scaled painter, which every custom
+    widget here already does). This label's font is therefore the *reference*
+    font — the stylesheet gives it reference pixels, not `font_px` — and Qt's
+    own metrics are at reference size; paint and size hints multiply by the
+    scale. The stylesheet's box (padding, border, background) is real pixels
+    and is left exactly as Qt lays it out, which is why hints are converted as
+    "text part x scale + chrome" rather than scaled whole."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _unhinted(self)
+        # A scale change moves the hint without touching the label's own state.
+        scale.bind(self, self.updateGeometry, "hint")
+
+    def _chrome(self):
+        """(width, height) the stylesheet's padding + border add around the text."""
+        self.ensurePolished()
+        r, c = self.rect(), self.contentsRect()
+        return r.width() - c.width(), r.height() - c.height()
+
+    def _unwrapped_hint(self):
+        """The real-pixel size hint of an unwrapped label: the text measured with
+        the reference font (what the painter draws with) times the scale, plus
+        the stylesheet's box, which is already real pixels. It is measured here
+        rather than taken from Qt because Qt folds the real-pixel `min-height`
+        and `min-width` (a fixed-width label's *fixed width*) into its hint —
+        scaling that whole doubled them (a 26px caption box came out 104px at
+        2x, a fixed 872px label reported 1744) — and every consumer of the hint
+        then sat at the wrong size, invisibly at 1.0. The minimum height is
+        applied afterwards."""
+        cw, ch = self._chrome()
+        f = scale.factor()
+        fm = QFontMetricsF(self.font())
+        if self._is_rich():
+            doc = QTextDocument()
+            doc.setDefaultFont(self.font())
+            doc.setHtml(self.text())
+            text_w, text_h = doc.idealWidth(), doc.size().height()
+        else:
+            lines = self.text().split("\n")
+            text_w = max((fm.horizontalAdvance(line) for line in lines), default=0.0)
+            text_h = fm.height() + fm.lineSpacing() * (len(lines) - 1)
+        return QSize(math.ceil(text_w * f + cw), max(math.ceil(text_h * f + ch), self.minimumHeight()))
+
+    def _ref_text_height(self, ref_width):
+        """The text's height in reference pixels when wrapped at `ref_width`
+        (unwrapped labels: one line per newline), from the same font the
+        painter draws with."""
+        text = self.text()
+        if self._is_rich():
+            doc = QTextDocument()
+            doc.setDefaultFont(self.font())
+            doc.setHtml(text)
+            if self.wordWrap():
+                doc.setTextWidth(ref_width)
+            return doc.size().height()
+        fm = QFontMetricsF(self.font())
+        if not self.wordWrap():
+            return fm.height() + fm.lineSpacing() * text.count("\n")
+        return fm.boundingRect(QRectF(0, 0, ref_width, 1e6), int(Qt.TextWordWrap), text).height()
+
+    def _wrap_widths(self):
+        """(ideal, narrowest) text widths, in reference pixels, of a
+        word-wrapped label. Qt picks a wrapped label's ideal width by aspect
+        ratio, but does it with reference-size text and real-pixel padding
+        mixed together, so its answer drifts with the scale (a 132px-wide
+        tooltip at 1x came out 220 at 1.9x — proportionally it is 250) — and
+        its minimum hint is the tall, narrowest wrapping, which a top-level
+        window enforces as a floor on its height. Both are computed here from
+        the reference font alone, so they scale exactly."""
+        fm = QFontMetricsF(self.font())
+        if self._is_rich():
+            doc = QTextDocument()
+            doc.setHtml(self.text())
+            text = doc.toPlainText()
+        else:
+            text = self.text()
+        lines = text.split("\n")
+        widest = max((fm.horizontalAdvance(line) for line in lines), default=0.0)
+        narrow = max((fm.horizontalAdvance(word) for word in text.split()), default=0.0)
+        area = sum(fm.horizontalAdvance(line) for line in lines) * fm.height()
+        return min(widest, max(narrow, math.sqrt(area * 4))), narrow    # about 4:1 wide
+
+    def sizeHint(self):
+        if not self.wordWrap():
+            return self._unwrapped_hint()
+        cw, ch = self._chrome()
+        f = scale.factor()
+        ideal, _ = self._wrap_widths()
+        return QSize(math.ceil(ideal * f + cw),
+                     max(math.ceil(self._ref_text_height(ideal) * f + ch), self.minimumHeight()))
+
+    def minimumSizeHint(self):
+        if not self.wordWrap():
+            return self._unwrapped_hint()
+        cw, ch = self._chrome()
+        f = scale.factor()
+        _, narrow = self._wrap_widths()
+        one_line = QFontMetricsF(self.font()).height()
+        return QSize(math.ceil(narrow * f + cw), max(math.ceil(one_line * f + ch), self.minimumHeight()))
+
+    def heightForWidth(self, width):
+        """Wrapped text's height at a real `width`: Qt wraps at the reference
+        width the real one corresponds to, and the result scales back up."""
+        cw, ch = self._chrome()
+        f = scale.factor()
+        return max(math.ceil(self._ref_text_height((width - cw) / f) * f + ch), self.minimumHeight())
+
+    def _is_rich(self):
+        fmt = self.textFormat()
+        return fmt == Qt.RichText or (fmt == Qt.AutoText and QtGui.Qt.mightBeRichText(self.text()))
+
+    def paintEvent(self, event):
+        text = self.text()
+        if not text or not self.pixmap().isNull() or self.movie() is not None:
+            return super().paintEvent(event)   # nothing to re-route: a picture, or an empty label
+        QFrame.paintEvent(self, event)         # the stylesheet's background / border only
+        p = QPainter(self)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        f = scale.factor()
+        cr = self.contentsRect()
+        rect = QRectF(cr.x() / f, cr.y() / f, cr.width() / f, cr.height() / f)
+        scale.begin(p)
+        p.setFont(self.font())
+        p.setPen(self.palette().color(self.foregroundRole()))
+        align = self.alignment()
+        if not self._is_rich():
+            p.drawText(rect, int(align) | (int(Qt.TextWordWrap) if self.wordWrap() else 0), text)
+            return
+        doc = QTextDocument()
+        doc.setDefaultFont(self.font())
+        option = QTextOption(align & Qt.AlignHorizontal_Mask)
+        option.setWrapMode(QTextOption.WordWrap if self.wordWrap() else QTextOption.NoWrap)
+        doc.setDefaultTextOption(option)
+        doc.setHtml(text)
+        doc.setTextWidth(rect.width())
+        top = rect.top() + (rect.height() - doc.size().height()) * (
+            1.0 if align & Qt.AlignBottom else 0.5 if align & Qt.AlignVCenter else 0.0)
+        p.translate(rect.left(), top)
+        ctx = QAbstractTextDocumentLayout.PaintContext()
+        ctx.palette.setColor(QPalette.Text, self.palette().color(self.foregroundRole()))
+        doc.documentLayout().draw(p, ctx)
+
+
+class ScaledButton(QPushButton):
+    """A stylesheet-backed push button whose text is painted through the
+    scale-transformed painter, for the same reason as `ScaledLabel`: Qt snaps a
+    widget font to a whole pixel size, so button captions hopped between sizes
+    during a resize. The stylesheet still draws the box (fill, radius, hover,
+    pressed) and supplies the text colour per state; only the text moves."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _unhinted(self)
+        scale.bind(self, self.updateGeometry, "hint")
+
+    def sizeHint(self):
+        # Measured from the text, not taken from Qt: Qt folds the real-pixel
+        # `min-height` (and a fixed width) into its hint, so scaling that whole
+        # scaled them twice (see `ScaledLabel._unwrapped_hint`). The stylesheet's
+        # padding is real pixels — the width of the box around the contents
+        # rect the text is painted into — and only the text scales.
+        opt = QStyleOptionButton()
+        self.initStyleOption(opt)
+        contents = self.style().subElementRect(QStyle.SE_PushButtonContents, opt, self)
+        fm = QFontMetricsF(self.font())
+        f = scale.factor()
+        return QSize(math.ceil(fm.horizontalAdvance(self.text()) * f) + self.width() - contents.width(),
+                     max(self.minimumHeight(), math.ceil(fm.height() * f)))
+
+    def paintEvent(self, event):
+        p = QStylePainter(self)
+        opt = QStyleOptionButton()
+        self.initStyleOption(opt)
+        text = opt.text
+        opt.text = ""
+        opt.icon = QIcon()
+        p.drawControl(QStyle.CE_PushButton, opt)        # the box, without its caption
+        if not text:
+            return
+        f = scale.factor()
+        cr = self.style().subElementRect(QStyle.SE_PushButtonContents, opt, self)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        scale.begin(p)
+        p.setFont(self.font())
+        p.setPen(self.palette().color(self.foregroundRole()))
+        p.drawText(QRectF(cr.x() / f, cr.y() / f, cr.width() / f, cr.height() / f), int(Qt.AlignCenter), text)
+
+
+class ScaledLineEdit(QLineEdit):
+    """A line edit whose text, selection and caret are painted through the
+    scale-transformed painter, for the same reason as `ScaledLabel`: Qt snaps a
+    widget font to a whole pixel size, so an entry's text hopped between sizes
+    while the window was dragged. `QLineEdit` paints itself through a painter it
+    opens internally, so nothing can be routed through it — this takes over the
+    two things that touch the font and leaves the rest to Qt: **painting** (the
+    stylesheet still draws the box, the focus border and the disabled state;
+    text, placeholder, selection and caret are drawn here from the reference
+    font) and **mouse-to-character mapping** (press, drag, double-click), which
+    has to use the same metrics as the painting or a click lands on the wrong
+    letter. Keys, undo, the clipboard, the selection model and every signal are
+    Qt's own."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _unhinted(self)
+        self._scroll = 0.0        # reference pixels the text is scrolled left by
+        self._anchor = 0          # where a press began, for drag-selecting
+        self._blink_on = True
+        self._blink = QTimer(self)
+        self._blink.setInterval(530)
+        self._blink.timeout.connect(self._toggle_blink)
+        for signal in (self.cursorPositionChanged, self.textChanged, self.selectionChanged):
+            signal.connect(self._activity)
+        T.theme.changed.connect(self.update)
+        scale.bind(self, self.updateGeometry, "hint")
+
+    # -- geometry ----------------------------------------------------------
+    def _contents(self):
+        """The text area (border and padding excluded), real pixels."""
+        self.ensurePolished()
+        opt = QStyleOptionFrame()
+        self.initStyleOption(opt)
+        return self.style().subElementRect(QStyle.SE_LineEditContents, opt, self)
+
+    def _content_ref(self):
+        c, f = self._contents(), scale.factor()
+        return QRectF(c.x() / f, c.y() / f, c.width() / f, c.height() / f)
+
+    def _to_real(self, ref_w, ref_h):
+        """Qt's size hint folds the stylesheet's real-pixel `min-height` in, so
+        it can't be scaled whole (see `ScaledLabel._unwrapped_hint`): the text part
+        scales, the box around it doesn't, and the minimum is applied last."""
+        c = self._contents()
+        f = scale.factor()
+        return QSize(math.ceil(ref_w * f) + self.width() - c.width(),
+                     max(math.ceil(ref_h * f) + self.height() - c.height(), self.minimumHeight()))
+
+    def sizeHint(self):
+        fm = QFontMetricsF(self.font())
+        return self._to_real(fm.horizontalAdvance("x") * 17, fm.height())
+
+    def minimumSizeHint(self):
+        fm = QFontMetricsF(self.font())
+        return self._to_real(fm.horizontalAdvance("x") * 4, fm.height())
+
+    # -- painting ----------------------------------------------------------
+    def _fit_scroll(self, fm, width, text):
+        """Keep the caret in view, scrolling only as far as it needs."""
+        total = fm.horizontalAdvance(text)
+        if total <= width:
+            self._scroll = 0.0
+            return
+        cx = fm.horizontalAdvance(text[:self.cursorPosition()])
+        if cx - self._scroll > width:
+            self._scroll = cx - width
+        if cx - self._scroll < 0:
+            self._scroll = cx
+        self._scroll = max(0.0, min(self._scroll, total - width + 1))
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        opt = QStyleOptionFrame()
+        self.initStyleOption(opt)
+        self.style().drawPrimitive(QStyle.PE_PanelLineEdit, opt, p, self)   # the stylesheet's box only
+        f = scale.factor()
+        area = self._content_ref()
+        text = self.displayText()
+        font = self.font()
+        fm = QFontMetricsF(font)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        scale.begin(p)
+        p.setClipRect(area)
+        p.setFont(font)
+        pal = self.palette()
+        self._fit_scroll(fm, area.width(), text)
+        left = area.left() - self._scroll
+        top = area.top() + (area.height() - fm.height()) / 2
+        base = QPointF(left, top + fm.ascent())
+        if not text:
+            hint = self.placeholderText()
+            if hint:
+                p.setPen(pal.color(QPalette.PlaceholderText))
+                p.drawText(base, hint)
+        else:
+            sel_from = self.selectionStart() if self.hasSelectedText() else -1
+            if sel_from >= 0:
+                sel_to = sel_from + len(self.selectedText())
+                x1, x2 = fm.horizontalAdvance(text[:sel_from]), fm.horizontalAdvance(text[:sel_to])
+                band = QRectF(left + x1, top, x2 - x1, fm.height())
+                p.fillRect(band, pal.color(QPalette.Highlight))
+            p.setPen(pal.color(QPalette.Text))
+            p.drawText(base, text)
+            if sel_from >= 0:
+                p.save()
+                p.setClipRect(band, Qt.IntersectClip)
+                p.setPen(pal.color(QPalette.HighlightedText))
+                p.drawText(base, text)
+                p.restore()
+        if self.hasFocus() and self._blink_on and not self.isReadOnly():
+            caret_w = max(1, round(f)) / f                       # one or two real pixels
+            cx = round((left + fm.horizontalAdvance(text[:self.cursorPosition()])) * f) / f
+            p.fillRect(QRectF(cx, top, caret_w, fm.height()), pal.color(QPalette.Text))
+
+    # -- caret blink -------------------------------------------------------
+    def _toggle_blink(self):
+        self._blink_on = not self._blink_on
+        self.update()
+
+    def _activity(self, *_):
+        """Typing, moving or selecting shows the caret again and restarts its blink."""
+        self._blink_on = True
+        if self.hasFocus():
+            self._blink.start()
+        self.update()
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self._blink_on = True
+        self._blink.start()
+        self.update()
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self._blink.stop()
+        self.update()
+
+    # -- mouse -------------------------------------------------------------
+    def _pos_at(self, x):
+        """The character boundary nearest to real-pixel `x`, by the same metrics the text is painted with."""
+        text = self.displayText()
+        fm = QFontMetricsF(self.font())
+        target = x / scale.factor() - self._content_ref().left() + self._scroll
+        last = 0.0
+        for i in range(1, len(text) + 1):
+            adv = fm.horizontalAdvance(text[:i])
+            if adv >= target:
+                return i if adv - target < target - last else i - 1
+            last = adv
+        return len(text)
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            return super().mousePressEvent(event)
+        self.setFocus(Qt.MouseFocusReason)
+        pos = self._pos_at(event.position().x())
+        if event.modifiers() & Qt.ShiftModifier:
+            self.setSelection(self._anchor, pos - self._anchor)
+        else:
+            self._anchor = pos
+            self.setCursorPosition(pos)
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton:
+            pos = self._pos_at(event.position().x())
+            self.setSelection(self._anchor, pos - self._anchor)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            return super().mouseDoubleClickEvent(event)
+        pos = self._pos_at(event.position().x())
+        for m in re.finditer(r"\w+", self.displayText()):
+            if m.start() <= pos <= m.end():
+                self._anchor = m.start()
+                self.setSelection(m.start(), m.end() - m.start())
+                return
+        self._anchor = 0
+        self.selectAll()
 
 
 def field_label(text, role="field"):
     """The bold Arial caption that sits above a control."""
-    label = QLabel(text)
+    label = ScaledLabel(text)
     label.setProperty("role", role)
     return label
 
@@ -89,7 +524,7 @@ def labeled(label_text, widget, role="field", spacing=1, align=Qt.AlignLeft):
     box = QWidget()
     lay = QVBoxLayout(box)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(spacing)
+    scale.spacing(lay, spacing)
     label = field_label(label_text, role)
     lay.addWidget(label, 0, align)
     lay.addWidget(widget, 0, align)
@@ -97,7 +532,7 @@ def labeled(label_text, widget, role="field", spacing=1, align=Qt.AlignLeft):
 
 
 def button_width_for(texts, padding=26, min_width=60):
-    """The width that fits the widest of `texts` inside a themed button (the
+    """The width (reference pixels) that fits the widest of `texts` inside a themed button (the
     QPushButton stylesheet's own 10px-per-side padding, plus a little slack)
     — so a button never clips text a fixed guess didn't leave room for."""
     fm = QFontMetricsF(ui_font(13))
@@ -109,13 +544,10 @@ def button(text, role=None, width=None, height=None):
     """A stylesheet-driven push button (secondary unless `role` says otherwise).
     NoFocus, like every clickable here: no focus rings, and a focused button
     would swallow the global Space keybind."""
-    btn = QPushButton(text)
+    btn = ScaledButton(text)
     if role:
         btn.setProperty("role", role)
-    if width:
-        btn.setFixedWidth(width)
-    if height:
-        btn.setFixedHeight(height)
+    scale.fixed(btn, width or None, height or None)
     btn.setCursor(Qt.PointingHandCursor)
     btn.setFocusPolicy(Qt.NoFocus)
     return btn
@@ -149,7 +581,8 @@ def anim(owner, duration, on_value, curve=QEasingCurve.OutCubic):
 
 
 def draw_cross(p, rect, color, width=1.6):
-    """A ✕ drawn as two strokes — never at the mercy of a font's glyphs."""
+    """A ✕ drawn as two strokes — never at the mercy of a font's glyphs.
+    `rect` and `width` are in the caller's (design-space) pixels."""
     c = rect.center()
     r = min(rect.width(), rect.height()) * 0.2
     pen = QPen(color, width)
@@ -162,24 +595,30 @@ def draw_cross(p, rect, color, width=1.6):
     p.restore()
 
 
-_SVG_ICON_KINDS = {"select-multiple": "select-multiple.svg", "deselect-multiple": "deselect-multiple.svg"}
+_SVG_ICON_KINDS = {"select-multiple": "select-multiple.svg", "deselect-multiple": "deselect-multiple.svg",
+                   "undo": "undo.svg", "redo": "redo.svg"}
+
+
+# How much of the button's shorter side an icon's square box takes, where the default
+# (72% compact / 56% otherwise) doesn't suit the artwork: undo/redo's arrow only fills
+# ~16x8 of its 24-unit viewBox, so it needs a box larger than the button to read.
+_ICON_FRACTION = {"undo": 1.0, "redo": 1.0}
 
 
 class IconButton(QPushButton):
     """A stylesheet-backed button whose glyph is painted: "close" (✕),
     "up" (▲), "down" (▼), or an svg asset ("select-multiple" /
-    "deselect-multiple", recolored to match the button's own text color via
-    `_icon_svg` rather than shipped pre-tinted)."""
+    "deselect-multiple" / "undo" / "redo", recolored to match the button's own
+    text color via `_icon_svg` rather than shipped pre-tinted). `role="compact"`
+    is a shorter button (the stylesheet's own 28px minimum would otherwise
+    override any fixed height) whose glyph fills more of it."""
 
     def __init__(self, kind, role=None, width=None, height=None):
         super().__init__("")
         self._kind = kind
         if role:
             self.setProperty("role", role)
-        if width:
-            self.setFixedWidth(width)
-        if height:
-            self.setFixedHeight(height)
+        scale.fixed(self, width or None, height or None)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
 
@@ -187,7 +626,8 @@ class IconButton(QPushButton):
         super().paintEvent(event)
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        rect = QRectF(self.rect())
+        scale.begin(p)
+        rect = scale.ref_rect(self)
         if self.property("role") == "ghost":
             color = T.theme.color("text")
         else:
@@ -201,7 +641,8 @@ class IconButton(QPushButton):
             # stretches a square-viewBox svg to fill whatever rect it's
             # given rather than preserving its aspect ratio, so a plain
             # inset on all four sides of a wide `rect` squashed the icon.
-            side = min(rect.width(), rect.height()) * 0.56
+            fraction = _ICON_FRACTION.get(self._kind, 0.72 if self.property("role") == "compact" else 0.56)
+            side = min(rect.width(), rect.height()) * fraction
             icon_rect = QRectF(0, 0, side, side)
             icon_rect.moveCenter(rect.center())
             _icon_svg(_SVG_ICON_KINDS[self._kind], color.name()).render(p, icon_rect)
@@ -217,7 +658,7 @@ class IconButton(QPushButton):
         p.fillPath(path, color)
 
 
-class ClickableLabel(QLabel):
+class ClickableLabel(ScaledLabel):
     """A label that reports clicks (the HDRtoSDR caption toggles its switch)."""
 
     clicked = Signal()
@@ -232,8 +673,8 @@ class ClickableLabel(QLabel):
 # --------------------------------------------------------------------------- #
 class Dropdown(QComboBox):
     """A secondary-filled dropdown with a darker arrow section. Opens
-    straight down below the button, unrolls
-    + fades in, and reports row hover through `hovered(str)` for live
+    straight down below the button (or straight up, when the list wouldn't fit
+    below and there's more room above), unrolls + fades in, and reports row hover through `hovered(str)` for live
     previews.
 
     `set(value)` does **not** require the value to be in the list — a value that isn't is shown as a display-only
@@ -256,10 +697,9 @@ class Dropdown(QComboBox):
         self._override = None
         self._hover = False
         self._open = False
+        self._up = False
         self.addItems(list(values) or [NO_OPTION])
-        if width:
-            self.setFixedWidth(width)
-        self.setFixedHeight(28)
+        scale.fixed(self, width or None, 28)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
         self.setMaxVisibleItems(14)
@@ -279,8 +719,8 @@ class Dropdown(QComboBox):
 
     @classmethod
     def width_for(cls, values, min_width=60):
-        """The width that fits the longest of `values`, so a dropdown never
-        resizes when a longer option is picked."""
+        """The width (reference pixels) that fits the longest of `values`, so
+        a dropdown never resizes when a longer option is picked."""
         fm = QFontMetricsF(ui_font(13))
         widest = max((fm.horizontalAdvance(v) for v in values), default=0)
         return max(min_width, math.ceil(widest + 8 + 6 + cls._ARROW_W))
@@ -307,11 +747,18 @@ class Dropdown(QComboBox):
         self.update()
 
     def set_values(self, values):
-        """Replace the option list. No-op when unchanged; keeps the current
-        pick when it's still legal, else snaps to the first entry. Never fires
-        `picked` — the caller owns any value change it causes."""
+        """Replace the option list. No-op when unchanged *and* nothing is being
+        shown that isn't in it; keeps the current pick when it's still legal,
+        else snaps to the first entry. Never fires `picked` — the caller owns
+        any value change it causes.
+
+        A display override (`set` with a value outside the list — the `—` a
+        tab shows before a file is imported, or a Passthru mirror) is not a
+        legal pick, so an unchanged list no longer leaves it in place: it used
+        to, and Resolution kept showing `—` after a 2160p+ source was imported
+        (its list only changes for shorter ones), as FPS did for 120fps+."""
         values = list(values) or [NO_OPTION]
-        if values == self.values():
+        if values == self.values() and self._override is None:
             return
         current = self.value()
         self.blockSignals(True)
@@ -340,10 +787,23 @@ class Dropdown(QComboBox):
         super().showPopup()
         self._open = True
         c = self._container
-        anchor = self.mapToGlobal(self.rect().bottomLeft())
-        c.move(anchor.x(), anchor.y() + self._GAP)
+        gap = px(self._GAP)
+        below = self.mapToGlobal(self.rect().bottomLeft())
+        above_y = self.mapToGlobal(self.rect().topLeft()).y()
+        area = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+        room_below = area.bottom() + 1 - (below.y() + gap)
+        room_above = above_y - gap - area.top()
+        # Drops down unless the list would run off the screen (a tall list near the
+        # bottom, most obviously in fullscreen) — then it opens upward if that has
+        # more room, and rolls out from the button's edge either way.
+        self._up = c.height() > room_below and room_above > room_below
+        if self._up:
+            y = max(area.top(), above_y - gap - c.height())
+        else:
+            y = below.y() + gap
+        c.move(below.x(), y)
         c.setWindowOpacity(0.25)
-        c.setMask(QRegion(0, 0, c.width(), 1))
+        self._set_unroll_mask(1)
         self._unroll.stop()
         self._unroll.start()
 
@@ -363,7 +823,13 @@ class Dropdown(QComboBox):
         if t >= 1.0:
             c.clearMask()
         else:
-            c.setMask(QRegion(0, 0, c.width(), max(1, round(c.height() * t))))
+            self._set_unroll_mask(max(1, round(c.height() * t)))
+
+    def _set_unroll_mask(self, shown):
+        """Clip the popup to `shown` px, anchored to the edge nearest the button."""
+        c = self._container
+        top = c.height() - shown if self._up else 0
+        c.setMask(QRegion(0, top, c.width(), shown))
 
     # --- painting -------------------------------------------------------------
     def enterEvent(self, e):
@@ -377,13 +843,14 @@ class Dropdown(QComboBox):
         super().leaveEvent(e)
 
     def sizeHint(self):
-        return QSize(self.width(), 28)
+        return QSize(self.width(), px(28))
 
     def paintEvent(self, _event):
         th = T.theme
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        r = QRectF(self.rect())
+        scale.begin(p)
+        r = scale.ref_rect(self)
         enabled = self.isEnabled()
         body = QPainterPath()
         body.addRoundedRect(r, 6, 6)
@@ -454,7 +921,7 @@ class CheckBox(QAbstractButton):
         w = 24
         if self.text():
             w += 8 + QFontMetricsF(self._font).horizontalAdvance(self.text())
-        return QSize(math.ceil(w) + 1, 24)
+        return QSize(px(math.ceil(w) + 1), px(24))
 
     def minimumSizeHint(self):
         return self.sizeHint()
@@ -476,6 +943,7 @@ class CheckBox(QAbstractButton):
         th = T.theme
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        scale.begin(p)
         box = QRectF(1.5, 1.5, 21, 21)
         enabled = self.isEnabled()
         if enabled:
@@ -504,7 +972,7 @@ class CheckBox(QAbstractButton):
         if self.text():
             p.setFont(self._font)
             p.setPen(th.color("text") if enabled else th.color("label_disabled"))
-            p.drawText(QRectF(32, 0, self.width() - 32, 24), Qt.AlignVCenter, self.text())
+            p.drawText(QRectF(32, 0, scale.ref_size(self)[0] - 32, 24), Qt.AlignVCenter, self.text())
 
 
 # --------------------------------------------------------------------------- #
@@ -520,7 +988,7 @@ class Switch(QAbstractButton):
         self.setChecked(checked)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
-        self.setFixedSize(42, 24)
+        scale.fixed(self, 42, 24)
         self._pos = 1.0 if checked else 0.0
         self._from = self._to = self._pos
         self._slide = anim(self, 160, self._step, QEasingCurve.InOutCubic)
@@ -545,6 +1013,7 @@ class Switch(QAbstractButton):
         th = T.theme
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        scale.begin(p)
         track = QRectF(3, 5, 36, 14)
         enabled = self.isEnabled()
         on_color = th.color("secondary") if enabled else th.color("disabled")
@@ -580,7 +1049,7 @@ class SegmentedButton(QWidget):
         self._font = ui_font(13)
         fm = QFontMetricsF(self._font)
         self._widths = [fm.horizontalAdvance(o) + 16 for o in self._options]
-        self.setFixedSize(math.ceil(sum(self._widths)) + 4, 28)
+        scale.fixed(self, math.ceil(sum(self._widths)) + 4, 28)
         self._slide = anim(self, 180, self._step)
         T.theme.changed.connect(self.update)
 
@@ -618,7 +1087,7 @@ class SegmentedButton(QWidget):
         return -1
 
     def mouseMoveEvent(self, e):
-        h = self._hit(e.position().x())
+        h = self._hit(scale.ref_pos(e.position()).x())
         if h != self._hover:
             self._hover = h
             self.update()
@@ -628,7 +1097,7 @@ class SegmentedButton(QWidget):
         self.update()
 
     def mousePressEvent(self, e):
-        i = self._hit(e.position().x())
+        i = self._hit(scale.ref_pos(e.position()).x())
         if i >= 0 and i != self._index and self.isEnabled():
             self._from = self._pos
             self._index = i
@@ -645,16 +1114,18 @@ class SegmentedButton(QWidget):
         enabled = self.isEnabled()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        scale.begin(p)
+        height = scale.ref_size(self)[1]
         p.setPen(Qt.NoPen)
         p.setBrush(th.color("segment"))
-        p.drawRoundedRect(QRectF(self.rect()), 6, 6)
+        p.drawRoundedRect(scale.ref_rect(self), 6, 6)
         if enabled and 0 <= self._hover != self._index:
             hx, hw = self._x_of(self._hover)
             p.setBrush(th.color("menu_hover"))
-            p.drawRoundedRect(QRectF(hx, 2, hw, self.height() - 4), 5, 5)
+            p.drawRoundedRect(QRectF(hx, 2, hw, height - 4), 5, 5)
         x, w = self._x_of(self._pos)
         p.setBrush(th.color("secondary"))
-        p.drawRoundedRect(QRectF(x, 2, w, self.height() - 4), 5, 5)
+        p.drawRoundedRect(QRectF(x, 2, w, height - 4), 5, 5)
         p.setFont(self._font)
         edge = 2
         for i, (opt, sw) in enumerate(zip(self._options, self._widths)):
@@ -663,7 +1134,7 @@ class SegmentedButton(QWidget):
                 p.setPen(T.lerp(th.color("text"), th.color("secondary_text"), near))
             else:
                 p.setPen(T.lerp(th.color("label_disabled"), th.color("secondary_disabled_text"), near))
-            p.drawText(QRectF(edge, 0, sw, self.height()), Qt.AlignCenter, opt)
+            p.drawText(QRectF(edge, 0, sw, height), Qt.AlignCenter, opt)
             edge += sw
 
 
@@ -687,7 +1158,7 @@ class _TimeField(QWidget):
         self.digits = list("000000")
         self.cursor_pos = 5
         self._mute_when_zero = mute_when_zero
-        self.setFixedSize(100, 30)
+        scale.fixed(self, 100, 30)
         self.setFocusPolicy(Qt.ClickFocus)
         self.setCursor(Qt.IBeamCursor)
         self._font = ui_font(13)
@@ -707,11 +1178,12 @@ class _TimeField(QWidget):
         fm = QFontMetricsF(self._font)
         text = self.text()
         total = fm.horizontalAdvance(text)
-        x = (self.width() - total) / 2
+        width, height = scale.ref_size(self)
+        x = (width - total) / 2
         rects = []
         for ch in text:
             w = fm.horizontalAdvance(ch)
-            rects.append(QRectF(x, 0, w, self.height()))
+            rects.append(QRectF(x, 0, w, height))
             x += w
         return rects
 
@@ -747,7 +1219,7 @@ class _TimeField(QWidget):
     def mousePressEvent(self, e):
         self.setFocus(Qt.MouseFocusReason)
         rects = self._char_rects()
-        x = e.position().x()
+        x = scale.ref_pos(e.position()).x()
         distances = [abs(rects[pos].center().x() - x) for pos in self._SEGMENT_POSITIONS]
         self.cursor_pos = distances.index(min(distances))
         self.update()
@@ -766,7 +1238,8 @@ class _TimeField(QWidget):
         th = T.theme
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        scale.begin(p)
+        rect = scale.ref_rect(self).adjusted(1, 1, -1, -1)
         path = QPainterPath()
         path.addRoundedRect(rect, 6, 6)
         p.fillPath(path, th.color("entry"))
@@ -786,7 +1259,7 @@ class _TimeField(QWidget):
         for i, ch in enumerate(self.text()):
             r = rects[i]
             if i == block:
-                hl = QRectF(r.left(), (self.height() - fm.height()) / 2, r.width(), fm.height())
+                hl = QRectF(r.left(), (scale.ref_size(self)[1] - fm.height()) / 2, r.width(), fm.height())
                 p.fillRect(hl, th.color("secondary"))
                 p.setPen(th.color("secondary_text"))
             elif not enabled:
@@ -808,14 +1281,14 @@ class TimeSpinner(QWidget):
         super().__init__(parent)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(5)
+        scale.spacing(lay, 5)
         self.field = _TimeField(mute_when_zero=mute_when_zero)
         self.field.edited.connect(lambda: self.valueChanged.emit(self.seconds()))
         lay.addWidget(self.field)
 
         stepper = QVBoxLayout()
-        stepper.setSpacing(2)
-        stepper.setContentsMargins(0, 1, 0, 1)
+        scale.spacing(stepper, 2)
+        scale.margins(stepper, 0, 1, 0, 1)
         self.btn_plus = IconButton("up", role="stepper")
         self.btn_minus = IconButton("down", role="stepper")
         stepper.addWidget(self.btn_plus)
@@ -873,47 +1346,99 @@ _MARQUEE_HOLD = 1.5     # seconds still at the start of each loop
 
 
 class MarqueeGroup:
-    """Synchronizes several `MarqueeLabel`s sharing one loop (e.g.
-    `SummaryPanel`'s Video/Audio/Length rows): without this, each label
-    wraps back to its own start the moment *its own* text finishes
-    sweeping, so three labels of different lengths drift in and out of
-    phase with each other. A grouped label instead holds at its resting
-    position once its own sweep finishes, and every member restarts
-    together only once the slowest one has too."""
+    """One shared loop and clock for several `MarqueeLabel`s (e.g.
+    `SummaryPanel`'s Video/Audio/Length rows, a track box's rows). Without it
+    each label wrapped back to its own start the moment *its own* text
+    finished sweeping, so labels of different lengths drifted in and out of
+    phase; in the group a label instead holds at its resting position once its
+    own sweep finishes, and every member restarts together only once the
+    slowest one has too.
+
+    **The group also owns the one timer, and reads the clock once per tick**
+    (`now`) — every label paints from that snapshot, and the labels are all
+    `update()`d in the same tick so Qt repaints them in one pass. Each label
+    used to run its own 16ms timer and read `time.perf_counter()` at its own
+    paint, so two rows that started together were painted a tick or a few
+    milliseconds apart and visibly crept relative to each other (0.04px per
+    ms at the marquee's speed, up to 0.7px for a late tick)."""
 
     def __init__(self):
-        self.t0 = time.perf_counter()
+        self.t0 = self.now = time.perf_counter()
         self._members = []
+        self._period = None      # cached `period()`; dropped when a member changes
+        self._timer = None       # built on first use (needs a QApplication)
 
     def register(self, label):
         self._members.append(label)
+        self._period = None
 
     def unregister(self, label):
         """Drops a label that's about to be destroyed (a removed track row),
         so `period()` never touches a deleted widget."""
         if label in self._members:
             self._members.remove(label)
+            self._period = None
             self.reset()
+            self.sync()
 
     def reset(self):
-        self.t0 = time.perf_counter()
+        """Restart the shared loop from its resting hold."""
+        self.t0 = self.now = time.perf_counter()
+
+    def invalidate(self):
+        """A member's text, width or scrolling state changed."""
+        self._period = None
 
     def period(self):
         """The shared cycle length: `_MARQUEE_HOLD` plus the longest sweep
-        among members that actually need to scroll right now."""
-        sweeps = [m._sweep_seconds() for m in self._members if m._overflows()]
-        return _MARQUEE_HOLD + (max(sweeps) if sweeps else 0.0)
+        among members that are actually scrolling right now (cached — it is
+        read by every member on every frame)."""
+        if self._period is None:
+            sweeps = [m._sweep_seconds() for m in self._members if m._scrolling]
+            self._period = _MARQUEE_HOLD + (max(sweeps) if sweeps else 0.0)
+        return self._period
+
+    def phase(self):
+        """Seconds into the current cycle, as of the last tick."""
+        return (self.now - self.t0) % self.period()
+
+    def sync(self):
+        """Runs the timer exactly while some member is scrolling."""
+        if any(m._scrolling for m in self._members):
+            if self._timer is None:
+                self._timer = QTimer(QApplication.instance())
+                self._timer.setTimerType(Qt.PreciseTimer)
+                self._timer.timeout.connect(self._tick)
+            if not self._timer.isActive():
+                self.now = time.perf_counter()
+                self._timer.start(16)
+        elif self._timer is not None:
+            self._timer.stop()
+
+    def _tick(self):
+        self.now = time.perf_counter()
+        live = False
+        for label in list(self._members):
+            if not isValid(label):        # deleted underneath us (a destroyed row)
+                self._members.remove(label)
+                self._period = None
+            elif label._scrolling:
+                live = True
+                label.update()
+        if not live:
+            self._timer.stop()
 
 
 class MarqueeLabel(QWidget):
     """Single-line text that scrolls smoothly (sub-pixel, time-based) when it
-    doesn't fit, and sits still when it does. The timer only runs while the
-    widget is actually shown — a page hidden in a QStackedWidget gets a real
-    hideEvent, so there's nothing to gate by hand.
+    doesn't fit, and sits still when it does. It only animates while actually
+    shown — a page hidden in a QStackedWidget gets a real hideEvent, so
+    there's nothing to gate by hand.
 
     Pass `group` (a `MarqueeGroup`) to keep several labels' loops in step —
-    see `MarqueeGroup`. Standalone labels (the default) just loop on their
-    own, as before."""
+    see `MarqueeGroup`. Standalone labels (the default) get a group of their
+    own, so there is one code path: a group of one loops exactly as a lone
+    label always did."""
 
     doubleClicked = Signal()
 
@@ -923,15 +1448,11 @@ class MarqueeLabel(QWidget):
         self._text = text or ""
         self._color_key = color_key
         self._font = ui_font(pixel_size, bold=bold, family=family)
-        self.setMinimumWidth(10)
-        self.setFixedHeight(math.ceil(QFontMetricsF(self._font).height()) + 4)
-        self._timer = QTimer(self)
-        self._timer.setTimerType(Qt.PreciseTimer)
-        self._timer.timeout.connect(self.update)
-        self._t0 = time.perf_counter()
-        self._group = group
-        if group is not None:
-            group.register(self)
+        scale.bounds(self, min_w=10)
+        scale.fixed(self, h=math.ceil(QFontMetricsF(self._font).height()) + 4)
+        self._scrolling = False
+        self._group = group if group is not None else MarqueeGroup()
+        self._group.register(self)
         T.theme.changed.connect(self.update)
 
     def setText(self, text):
@@ -939,11 +1460,8 @@ class MarqueeLabel(QWidget):
         if text == self._text:
             return
         self._text = text
-        if self._group is not None:
-            self._group.reset()
-        else:
-            self._t0 = time.perf_counter()
-        self._sync_timer()
+        self._group.reset()
+        self._sync_scrolling()
         self.update()
 
     def text(self):
@@ -955,7 +1473,7 @@ class MarqueeLabel(QWidget):
             self.update()
 
     def _overflows(self):
-        return QFontMetricsF(self._font).horizontalAdvance(self._text) > self.width()
+        return QFontMetricsF(self._font).horizontalAdvance(self._text) > scale.ref_size(self)[0]
 
     def _sweep_seconds(self):
         """How long this label's own text takes to scroll through once —
@@ -964,50 +1482,48 @@ class MarqueeLabel(QWidget):
         span = fm.horizontalAdvance(self._text) + _MARQUEE_GAP
         return span / _MARQUEE_SPEED
 
-    def _sync_timer(self):
-        if self.isVisible() and self._overflows():
-            if not self._timer.isActive():
-                # A label that starts scrolling *now* (imported after its group
-                # was already looping, or just shown) restarts the shared loop
-                # instead of landing at some arbitrary phase of it — which could
-                # be past its own sweep, leaving it parked until the next wrap.
-                if self._group is None:
-                    self._t0 = time.perf_counter()
-                else:
-                    self._group.reset()
-                self._timer.start(16)
-        else:
-            self._timer.stop()
+    def _set_scrolling(self, scrolling):
+        self._group.invalidate()
+        if scrolling and not self._scrolling:
+            # A label that starts scrolling *now* (imported after its group
+            # was already looping, or just shown) restarts the shared loop
+            # instead of landing at some arbitrary phase of it — which could
+            # be past its own sweep, leaving it parked until the next wrap.
+            self._group.reset()
+        self._scrolling = scrolling
+        self._group.sync()
+
+    def _sync_scrolling(self):
+        self._set_scrolling(self.isVisible() and self._overflows())
 
     def showEvent(self, e):
-        self._sync_timer()
+        self._sync_scrolling()
 
     def hideEvent(self, e):
-        self._timer.stop()
+        self._set_scrolling(False)
 
     def resizeEvent(self, e):
-        self._sync_timer()
+        self._sync_scrolling()
 
     def mouseDoubleClickEvent(self, e):
         self.doubleClicked.emit()
 
     def paintEvent(self, _event):
         p = QPainter(self)
+        scale.begin(p)
         p.setFont(self._font)
         p.setPen(T.theme.color(self._color_key) if self.isEnabled() else T.theme.color("label_disabled"))
         fm = QFontMetricsF(self._font)
         tw = fm.horizontalAdvance(self._text)
-        rect = QRectF(self.rect())
+        rect = scale.ref_rect(self)
         if tw <= rect.width():
             p.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, self._text)
             return
         span = tw + _MARQUEE_GAP
         sweep = span / _MARQUEE_SPEED
-        if self._group is not None:
-            t0, period = self._group.t0, self._group.period()
-        else:
-            t0, period = self._t0, sweep + _MARQUEE_HOLD
-        cycle_t = (time.perf_counter() - t0) % period
+        # The group's per-tick snapshot, not the clock: every label painted in
+        # this frame must show the same instant (see MarqueeGroup).
+        cycle_t = self._group.phase()
         # Holds at the resting position both before the sweep starts (everyone
         # waits out `_MARQUEE_HOLD` together) and after this label's own sweep
         # finishes (waiting for a slower groupmate) — travel pinned at `sweep`

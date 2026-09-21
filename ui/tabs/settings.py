@@ -1,6 +1,6 @@
 """Settings: theme (with a live hover preview), appearance mode, default save
 location, the output file-naming format, hardware acceleration, job priority
-and "When Done" — all persisted to settings.json.
+"When Done" and the startup tab — all persisted to settings.json.
 
 A theme change is live **without a rebuild**: `ThemeManager.changed`
 repaints everything in place, which is also why hovering the list can
@@ -11,21 +11,23 @@ from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QFileDialog,
-    QLabel,
-    QLineEdit,
     QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from core import gpu, naming, power, priority, system_info
+from core import gpu, naming, power, priority, startup_tab, system_info, window_mode
 from core.theme import DEFAULT_THEME_NAME, THEMES, default_output_dir, get_theme, save_settings
+from ui import scale
 from ui import theme as T
+from ui.scale import fpx
 from ui.tabs.media_tab import hrow, set_line_text
 from ui.widgets.controls import (
     CheckBox,
     Dropdown,
+    ScaledLabel,
+    ScaledLineEdit,
     Switch,
     button,
     button_width_for,
@@ -57,10 +59,15 @@ _NAMING_HELP = ("Filled in as soon as a file is picked: {source} {title} {chapte
 _PRIORITY_TIP = ("How much CPU priority encodes and downloads get over your other programs. Higher "
                  "finishes sooner but can make the PC feel less responsive; lower keeps it smooth "
                  "while you work. Applies right away, even to a job that's running.")
+_WINDOW_MODE_TIP = ("Windowed: the usual title bar and frame, resize it freely. Borderless: no title bar "
+                    "or frame (drag the sidebar to move it, its edges to resize). Fixed: the window as the "
+                    "app is designed, at a fixed size.")
+_FULLSCREEN_TIP = "Fills the whole screen. Alt+F4 closes the app; switch the mode back here to get a frame again."
 _WHEN_DONE_TIP = ("What happens once the queue has finished its last job. Shutdown, Sleep, Hibernate "
                   "and Log Off give you 30 seconds to cancel first.")
 _WHEN_DONE_RESET_TIP = ("Starts every launch on 'Do Nothing', so a Shutdown you picked for one long "
                         "encode can't catch you out next time.")
+_STARTUP_TAB_TIP = "Which tab the app opens on each time it launches."
 
 # "Available space" on the Default Save Location's drive turns red at or
 # below this, in binary GB (matching system_info.format_bytes's units).
@@ -74,13 +81,13 @@ class _Swatch(QWidget):
         super().__init__()
         self.key = key
         self.theme_name = None
-        self.setFixedSize(26, 26)
+        scale.fixed(self, 26, 26)
 
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), 4, 4)
+        path.addRoundedRect(QRectF(self.rect()), fpx(4), fpx(4))
         p.fillPath(path, QColor(get_theme(self.theme_name)[self.key]))
 
 
@@ -92,7 +99,7 @@ class SettingsTab(QWidget):
         lay = QVBoxLayout(page)
         # Small top margin: the header row is as tall as the (three-line) system
         # info, well past the tab bar, so it already supplies most of the gap.
-        lay.setContentsMargins(_SIDE_PAD, 6, _SIDE_PAD, 10)
+        scale.margins(lay, _SIDE_PAD, 6, _SIDE_PAD, 10)
         lay.setSpacing(0)
         lay.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         return page, lay
@@ -120,7 +127,7 @@ class SettingsTab(QWidget):
         # frame's rounded border. It sits in the tab bar's own full-width row
         # after a stretch, so it lands at the frame's real right edge.
         header, hl = hrow(spacing=0, align_bottom=False)
-        hl.setContentsMargins(_SIDE_PAD, _TOP_PAD, _SIDE_PAD, 0)
+        scale.margins(hl, _SIDE_PAD, _TOP_PAD, _SIDE_PAD, 0)
         self.sub_tab_bar = SubTabBar(SETTINGS_PAGES)
         hl.addWidget(self.sub_tab_bar, 0, Qt.AlignTop)
         hl.addStretch(1)
@@ -129,7 +136,7 @@ class SettingsTab(QWidget):
         # plain newline-joined label has no spacing knob). Escaped: a device
         # name is arbitrary text.
         sys_lines = (system_info.cpu_name(), gpu.display_name(), ram_text)
-        sys_info = QLabel("".join(
+        sys_info = ScaledLabel("".join(
             f'<p style="margin:0; line-height:125%;">{html.escape(line)}</p>' for line in sys_lines))
         sys_info.setTextFormat(Qt.RichText)
         sys_info.setProperty("role", "muted")
@@ -138,7 +145,7 @@ class SettingsTab(QWidget):
         sys_info.setStyleSheet("font-size: 12px;")
         sys_info.setAlignment(Qt.AlignRight | Qt.AlignTop)
         sys_info.setWordWrap(True)
-        sys_info.setFixedWidth(230)
+        scale.fixed(sys_info, w=230)
         hl.addWidget(sys_info, 0, Qt.AlignTop)
         outer.addWidget(header)
 
@@ -158,7 +165,7 @@ class SettingsTab(QWidget):
         # ================= Appearance =================
         # -- Theme
         pa.addWidget(field_label("Theme:"), 0, Qt.AlignLeft)
-        pa.addSpacing(4)
+        scale.spacer(pa, 4)
         row, rl = hrow(spacing=0, align_bottom=False)
         self.theme_menu = Dropdown(list(THEMES), width=150)
         self.theme_menu.set(self._committed)
@@ -166,32 +173,53 @@ class SettingsTab(QWidget):
         self.theme_menu.picked.connect(self._on_theme_change)
         self.theme_menu.popupClosed.connect(lambda: QTimer.singleShot(0, self._end_preview))
         rl.addWidget(self.theme_menu)
-        rl.addSpacing(12)
+        scale.spacer(rl, 12)
         self.primary_swatch, self.secondary_swatch = _Swatch("primary"), _Swatch("secondary")
         rl.addWidget(self.primary_swatch)
-        rl.addSpacing(5)
+        scale.spacer(rl, 5)
         rl.addWidget(self.secondary_swatch)
         pa.addWidget(row, 0, Qt.AlignLeft)
         self._show_swatches(self._committed)
-        pa.addSpacing(18)
+        scale.spacer(pa, 18)
 
         # -- Appearance mode
         pa.addWidget(field_label("Appearance Mode:"))
-        pa.addSpacing(4)
+        scale.spacer(pa, 4)
         self.appearance_menu = Dropdown(["System", "Light", "Dark"], width=150)
         self.appearance_menu.set(T.theme.mode)
         self.appearance_menu.picked.connect(self._on_appearance_change)
         pa.addWidget(self.appearance_menu)
-        pa.addSpacing(18)
+        scale.spacer(pa, 18)
+
+        # -- Window mode (Borderless adds a Fullscreen box underneath)
+        pa.addWidget(field_label("Window Mode:"))
+        scale.spacer(pa, 4)
+        self.window_mode_menu = Dropdown(window_mode.MODES, width=150)
+        self.window_mode_menu.set(app.window_mode)
+        self.window_mode_menu.picked.connect(self._on_window_mode_change)
+        tip(self.window_mode_menu, _WINDOW_MODE_TIP)
+        pa.addWidget(self.window_mode_menu)
+        self.fullscreen_row = QWidget()
+        fsl = QVBoxLayout(self.fullscreen_row)
+        scale.margins(fsl, 0, 8, 0, 0)
+        self.fullscreen_check = CheckBox("Fullscreen", checked=app.borderless_fullscreen)
+        self.fullscreen_check.clicked.connect(self._on_fullscreen_toggle)
+        tip(self.fullscreen_check, _FULLSCREEN_TIP)
+        fsl.addWidget(self.fullscreen_check)
+        # Parent first, then visibility: a still-parentless widget made visible is
+        # its own top-level window, which flashed on screen at every Borderless launch.
+        pa.addWidget(self.fullscreen_row, 0, Qt.AlignLeft)
+        self.fullscreen_row.setVisible(app.window_mode == window_mode.BORDERLESS)
+        scale.spacer(pa, 18)
 
         # ================= Output =================
         # -- Default save location
         po.addWidget(field_label("Default Save Location:"))
-        po.addSpacing(4)
+        scale.spacer(po, 4)
         loc, ll = hrow(spacing=8, align_bottom=False)
-        self.save_location_entry = QLineEdit()
+        self.save_location_entry = ScaledLineEdit()
         self.save_location_entry.setPlaceholderText("No default location set...")
-        self.save_location_entry.setFixedSize(300, 28)
+        scale.fixed(self.save_location_entry, 300, 28)
         set_line_text(self.save_location_entry, app.default_save_location)
         self.save_location_entry.editingFinished.connect(self._sync_state_from_widgets)
         ll.addWidget(self.save_location_entry)
@@ -199,11 +227,11 @@ class SettingsTab(QWidget):
         browse.clicked.connect(self._browse_save_location)
         ll.addWidget(browse)
         po.addWidget(loc, 0, Qt.AlignLeft)
-        po.addSpacing(4)
-        self.disk_label = QLabel("")
+        scale.spacer(po, 4)
+        self.disk_label = ScaledLabel("")
         self.disk_label.setProperty("role", "muted")
         po.addWidget(self.disk_label)
-        po.addSpacing(10)
+        scale.spacer(po, 10)
         self._refresh_disk_usage()
 
         # -- Downloader's own save location, off by default
@@ -212,11 +240,11 @@ class SettingsTab(QWidget):
         self.downloader_separate_check.clicked.connect(self._on_downloader_separate_toggle)
         tip(self.downloader_separate_check, _SEPARATE_SAVE_TIP)
         po.addWidget(self.downloader_separate_check)
-        po.addSpacing(8)
+        scale.spacer(po, 8)
         self.downloader_loc_row, dll = hrow(spacing=8, align_bottom=False)
-        self.downloader_location_entry = QLineEdit()
+        self.downloader_location_entry = ScaledLineEdit()
         self.downloader_location_entry.setPlaceholderText("No separate location set...")
-        self.downloader_location_entry.setFixedSize(300, 28)
+        scale.fixed(self.downloader_location_entry, 300, 28)
         set_line_text(self.downloader_location_entry,
                      app.downloader_save_location or app.default_save_location)
         self.downloader_location_entry.editingFinished.connect(self._sync_state_from_widgets)
@@ -226,26 +254,26 @@ class SettingsTab(QWidget):
         dll.addWidget(downloader_browse)
         po.addWidget(self.downloader_loc_row, 0, Qt.AlignLeft)
         self.downloader_loc_row.setVisible(bool(app.downloader_separate_save))
-        po.addSpacing(18)
+        scale.spacer(po, 18)
 
         # -- Output file naming (the tabs autofill their Save field from this)
         po.addWidget(field_label("File Naming:"))
-        po.addSpacing(4)
-        self.naming_entry = QLineEdit()
+        scale.spacer(po, 4)
+        self.naming_entry = ScaledLineEdit()
         self.naming_entry.setPlaceholderText(naming.DEFAULT_TEMPLATE)
-        self.naming_entry.setFixedSize(300, 28)
+        scale.fixed(self.naming_entry, 300, 28)
         set_line_text(self.naming_entry, app.naming_template)
         self.naming_entry.textEdited.connect(self._validate_naming_text)
         self.naming_entry.editingFinished.connect(self._commit_naming)
         tip(self.naming_entry, _NAMING_TIP)
         po.addWidget(self.naming_entry)
-        po.addSpacing(4)
-        self.naming_hint = QLabel(_NAMING_HELP)
+        scale.spacer(po, 4)
+        self.naming_hint = ScaledLabel(_NAMING_HELP)
         self.naming_hint.setProperty("role", "hint")
         self.naming_hint.setWordWrap(True)
-        self.naming_hint.setFixedWidth(400)
+        scale.fixed(self.naming_hint, w=400)
         po.addWidget(self.naming_hint)
-        po.addSpacing(18)
+        scale.spacer(po, 18)
 
         # ================= Performance =================
         # -- Hardware acceleration (a global preference every Encode inherits)
@@ -255,56 +283,66 @@ class SettingsTab(QWidget):
         self.gpu_label = field_label("Hardware Acceleration (GPU):")
         self.gpu_label.setEnabled(self._gpu_available)
         pp.addWidget(self.gpu_label)
-        pp.addSpacing(4)
+        scale.spacer(pp, 4)
         self.gpu_switch = Switch(checked=bool(app.gpu_enabled))
         self.gpu_switch.setEnabled(self._gpu_available)
         self.gpu_switch.clicked.connect(self._on_gpu_toggle)
         tip(self.gpu_switch, _GPU_TIP if self._gpu_available else _GPU_UNAVAILABLE_TIP)
         pp.addWidget(self.gpu_switch)
-        pp.addSpacing(4)
-        self.gpu_status_label = QLabel("")
+        scale.spacer(pp, 4)
+        self.gpu_status_label = ScaledLabel("")
         self.gpu_status_label.setProperty("role", "hint")
         self.gpu_status_label.setWordWrap(True)
-        self.gpu_status_label.setFixedWidth(360)
+        scale.fixed(self.gpu_status_label, w=360)
         pp.addWidget(self.gpu_status_label)
-        pp.addSpacing(18)
+        scale.spacer(pp, 18)
         self._refresh_gpu_status()
 
         # -- Priority level (how hard encodes/downloads compete with other apps)
         pp.addWidget(field_label("Priority Level:"))
-        pp.addSpacing(4)
+        scale.spacer(pp, 4)
         self.priority_menu = Dropdown(priority.LEVELS, width=Dropdown.width_for(priority.LEVELS))
         self.priority_menu.set(app.priority_level)
         self.priority_menu.picked.connect(self._on_priority_change)
         tip(self.priority_menu, _PRIORITY_TIP)
         pp.addWidget(self.priority_menu)
-        pp.addSpacing(18)
+        scale.spacer(pp, 18)
 
         # -- When Done (what happens once the queue empties)
         pp.addWidget(field_label("When Done:"))
-        pp.addSpacing(4)
+        scale.spacer(pp, 4)
         self.when_done_menu = Dropdown(power.ACTIONS, width=Dropdown.width_for(power.ACTIONS))
         self.when_done_menu.set(app.when_done)
         self.when_done_menu.picked.connect(self._on_when_done_change)
         tip(self.when_done_menu, _WHEN_DONE_TIP)
         pp.addWidget(self.when_done_menu)
-        pp.addSpacing(8)
+        scale.spacer(pp, 8)
         self.when_done_reset_check = CheckBox(
             "Reset to 'Do Nothing' when the app is relaunched", checked=app.when_done_reset)
         self.when_done_reset_check.clicked.connect(self._on_when_done_reset_toggle)
         tip(self.when_done_reset_check, _WHEN_DONE_RESET_TIP)
         pp.addWidget(self.when_done_reset_check)
-        pp.addSpacing(18)
+        scale.spacer(pp, 18)
+
+        # -- Startup tab (which of the four main tabs the app opens on)
+        pp.addWidget(field_label("Startup Tab:"))
+        scale.spacer(pp, 4)
+        self.startup_tab_menu = Dropdown(startup_tab.TABS, width=Dropdown.width_for(startup_tab.TABS))
+        self.startup_tab_menu.set(app.startup_tab)
+        self.startup_tab_menu.picked.connect(self._on_startup_tab_change)
+        tip(self.startup_tab_menu, _STARTUP_TAB_TIP)
+        pp.addWidget(self.startup_tab_menu)
+        scale.spacer(pp, 18)
 
         actions, actions_l = hrow(spacing=10, align_bottom=False)
         self.reset_btn = button("Reset to Default", role="danger",
                                 width=button_width_for(["Reset to Default"]))
         self.reset_btn.clicked.connect(self._on_reset_defaults)
         actions_l.addWidget(self.reset_btn)
-        self.save_btn = button("Save", role="primary", width=150)
+        self.save_btn = button("Save", role="action", width=150)
         self.save_btn.clicked.connect(self._on_save)
         actions_l.addWidget(self.save_btn)
-        actions_l.setContentsMargins(_SIDE_PAD, 10, _SIDE_PAD, 16)
+        scale.margins(actions_l, _SIDE_PAD, 10, _SIDE_PAD, 16)
         outer.addWidget(actions, 0, Qt.AlignLeft)
 
     # ------------------------------------------------------------------ #
@@ -325,6 +363,9 @@ class SettingsTab(QWidget):
             "priority_level": self.app.priority_level,
             "when_done": self.app.when_done,
             "when_done_reset": self.when_done_reset_check.isChecked(),
+            "window_mode": self.app.window_mode,
+            "borderless_fullscreen": self.app.borderless_fullscreen,
+            "startup_tab": self.app.startup_tab,
             "downloader_separate_save": separate,
             # While separate-save is off, the entry just displays the shared
             # default as a fallback (see __init__) — that display text is
@@ -357,8 +398,10 @@ class SettingsTab(QWidget):
         """Switching away flushes every setting to disk."""
         self.theme_menu.close()
         self.appearance_menu.close()
+        self.window_mode_menu.close()
         self.priority_menu.close()
         self.when_done_menu.close()
+        self.startup_tab_menu.close()
         # A format left half-typed and invalid isn't kept around: show the one
         # actually in use when the tab is next opened.
         if naming.template_error(self.naming_entry.text()):
@@ -401,6 +444,17 @@ class SettingsTab(QWidget):
     # ------------------------------------------------------------------ #
     def _on_appearance_change(self, mode):
         T.theme.set_mode(mode)
+        self.autosave()
+
+    def _on_window_mode_change(self, mode):
+        """Apply the window mode at once; the Fullscreen box only exists for
+        Borderless (its own choice is remembered while another mode is on)."""
+        self.fullscreen_row.setVisible(mode == window_mode.BORDERLESS)
+        self.app.set_window_mode(mode, self.fullscreen_check.isChecked())
+        self.autosave()
+
+    def _on_fullscreen_toggle(self, *_):
+        self.app.set_window_mode(self.window_mode_menu.value(), self.fullscreen_check.isChecked())
         self.autosave()
 
     def _browse_save_location(self):
@@ -468,6 +522,11 @@ class SettingsTab(QWidget):
         self.app.when_done = action
         self.autosave()
 
+    def _on_startup_tab_change(self, tab):
+        """Only what the *next* launch opens on: the current session stays put."""
+        self.app.startup_tab = tab
+        self.autosave()
+
     def _on_when_done_reset_toggle(self, *_):
         self.app.when_done_reset = self.when_done_reset_check.isChecked()
         self.autosave()
@@ -491,9 +550,9 @@ class SettingsTab(QWidget):
     def _on_reset_defaults(self):
         if not ask_yes_no(
             self.app, "Reset to Default?",
-            "This resets the theme, appearance mode, default save location, "
+            "This resets the theme, appearance mode, window mode, default save location, "
             "Downloader save location, file naming, hardware acceleration, "
-            "priority level and When Done back to their defaults. Continue?",
+            "priority level, When Done and Startup Tab back to their defaults. Continue?",
         ):
             return
         self._committed = DEFAULT_THEME_NAME
@@ -502,6 +561,10 @@ class SettingsTab(QWidget):
         T.theme.set_theme(DEFAULT_THEME_NAME)
         self.appearance_menu.set("System")
         T.theme.set_mode("System")
+        self.window_mode_menu.set(window_mode.DEFAULT_MODE)
+        self.fullscreen_check.setChecked(False)
+        self.fullscreen_row.setVisible(False)
+        self.app.set_window_mode(window_mode.DEFAULT_MODE, False)
         location = default_output_dir()
         set_line_text(self.save_location_entry, location)
         self.app.set_default_save_location(location)
@@ -523,6 +586,8 @@ class SettingsTab(QWidget):
         self.app.when_done = power.DO_NOTHING
         self.when_done_reset_check.setChecked(True)
         self.app.when_done_reset = True
+        self.startup_tab_menu.set(startup_tab.DEFAULT_TAB)
+        self.app.startup_tab = startup_tab.DEFAULT_TAB
         self._refresh_disk_usage()
         self.autosave()
         self.app.notify("Settings reset to default.", go_to_queue=False)

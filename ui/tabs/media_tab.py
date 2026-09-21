@@ -13,7 +13,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
-    QLineEdit,
     QStackedLayout,
     QStackedWidget,
     QVBoxLayout,
@@ -21,12 +20,14 @@ from PySide6.QtWidgets import (
 )
 
 from core import formats, naming, presets
+from ui import scale
 from ui.widgets.carousel import ThumbnailCarousel, _ExpandedPreviewOverlay
 from ui.widgets.controls import (
     NO_OPTION,
     CheckBox,
     Dropdown,
     MarqueeLabel,
+    ScaledLineEdit,
     TimeSpinner,
     button,
     button_width_for,
@@ -51,7 +52,7 @@ def hrow(spacing=0, align_bottom=True):
     w = QWidget()
     lay = QHBoxLayout(w)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(spacing)
+    scale.spacing(lay, spacing)
     if align_bottom:
         lay.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
     return w, lay
@@ -66,7 +67,7 @@ def hms(total_seconds):
 
 
 def set_line_text(entry, text):
-    """Replace a QLineEdit's text and show its start (paths are long)."""
+    """Replace a line edit's text and show its start (paths are long)."""
     entry.setText(text or "")
     entry.setCursorPosition(0)
 
@@ -95,7 +96,7 @@ class MediaTab(QWidget):
         self._auto_output = app.default_save_location or ""
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 5, 10, 4)
+        scale.margins(root, 10, 5, 10, 4)
         root.setSpacing(0)
 
         # --- Header: sub-tab switch + the selected file.
@@ -106,7 +107,7 @@ class MediaTab(QWidget):
         self.file_label.doubleClicked.connect(self.select_input_file)
         hl.addWidget(self.file_label, 1, Qt.AlignVCenter)
         root.addWidget(header)
-        root.addSpacing(15)
+        scale.spacer(root, 15)
 
         # --- Preview: the DropBox until the first frames land, then the
         # carousel in its place.
@@ -124,7 +125,7 @@ class MediaTab(QWidget):
         self._preview_stack.addWidget(self.drop_box)
         self._preview_stack.addWidget(self.carousel)
         root.addWidget(preview, 1)
-        root.addSpacing(18)
+        scale.spacer(root, 18)
 
         # --- Sub-tab panels.
         self.panels = QStackedWidget()
@@ -133,26 +134,27 @@ class MediaTab(QWidget):
         self.panels.addWidget(self.build_audio())
         self.sub_tab_bar.changed.connect(lambda n: self.panels.setCurrentIndex(SUBTABS.index(n)))
         root.addWidget(self.panels)
-        root.addSpacing(11)
+        scale.spacer(root, 11)
 
         # --- Save row.
         save, sl = hrow(spacing=6, align_bottom=False)
-        self.save_entry = QLineEdit()
+        self.save_entry = ScaledLineEdit()
         self.save_entry.setPlaceholderText("Save file as...")
-        self.save_entry.setFixedHeight(28)
+        scale.fixed(self.save_entry, h=28)
         set_line_text(self.save_entry, app.default_save_location)
         sl.addWidget(self.save_entry, 1)
         self.browse_save_btn = button("Browse", width=80)
         self.browse_save_btn.clicked.connect(self.select_save_location)
         sl.addWidget(self.browse_save_btn)
         root.addWidget(save)
-        root.addSpacing(10)
+        scale.spacer(root, 10)
 
-        # --- Queue Task (secondary) + the do-it-now button (primary).
+        # --- Queue Task (secondary) + the do-it-now button (primary) — by role, so a
+        # theme can swap the two (Terminal does).
         actions, al = hrow(spacing=8, align_bottom=False)
-        self.queue_btn = button("Queue Task")
+        self.queue_btn = button("Queue Task", role="queue")
         self.queue_btn.clicked.connect(self.add_to_queue)
-        self.go_btn = button(self.ACTION_TEXT, role="primary")
+        self.go_btn = button(self.ACTION_TEXT, role="action")
         self.go_btn.clicked.connect(self.run_now)
         al.addWidget(self.queue_btn, 1)
         al.addWidget(self.go_btn, 1)
@@ -174,10 +176,10 @@ class MediaTab(QWidget):
         page = QWidget()
         outer = QHBoxLayout(page)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(20)
+        scale.spacing(outer, 20)
 
         left = QVBoxLayout()
-        left.setSpacing(6)
+        scale.spacing(left, 6)
         left.addStretch(1)
         row1, r1 = hrow(spacing=8)
         self.format_menu = Dropdown(formats.containers(), width=92)
@@ -185,7 +187,7 @@ class MediaTab(QWidget):
         self._update_format_tip()
         box, self.format_label = labeled("Output Format:", self.format_menu)
         r1.addWidget(box)
-        r1.addSpacing(6)
+        scale.spacer(r1, 6)
         self.preset_menu = Dropdown(presets.menu_values(self.TAB), width=132)
         self.preset_menu.set(presets.NONE_LABEL)
         self.preset_menu.picked.connect(self._on_preset_selected)
@@ -215,7 +217,7 @@ class MediaTab(QWidget):
         r2.addWidget(box)
         box, self.duration_label = labeled("Clip Duration:", self.duration_time_spinner)
         r2.addWidget(box)
-        r2.addSpacing(2)
+        scale.spacer(r2, 2)
         self.av_sync_check = CheckBox("A/V Sync", checked=True)
         self.av_sync_check.clicked.connect(self._on_control_change)
         tip(self.av_sync_check, AV_SYNC_TIP)
@@ -227,7 +229,7 @@ class MediaTab(QWidget):
         right.addStretch(1)
         self.summary = SummaryPanel(["Video", "Audio", "Length"])
         right.addWidget(self.summary)
-        right.addSpacing(4)
+        scale.spacer(right, 4)
         outer.addLayout(right, 1)
         return page
 
@@ -238,9 +240,9 @@ class MediaTab(QWidget):
         page = QWidget()
         outer = QHBoxLayout(page)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(20)
+        scale.spacing(outer, 20)
         left = QVBoxLayout()
-        left.setSpacing(6)
+        scale.spacing(left, 6)
         left.addStretch(1)
         outer.addLayout(left)
         outer.addStretch(1)
@@ -289,8 +291,9 @@ class MediaTab(QWidget):
         tab-specific dropdowns `extra` names (`(menu, label)` pairs) —
         rather than showing a default or stale value nothing has actually
         confirmed yet. Call this last, at the end of `_sync_controls`. Start
-        Time, Clip Duration, A/V Sync and the preset Save/Delete buttons
-        disable with them (their values are left alone).
+        Time, Clip Duration, A/V Sync, the preset Save/Delete buttons and the
+        Queue Task / Mux / Encode action buttons disable with them (their
+        values are left alone).
 
         Output Format and Preset get their enabled state set *both ways*,
         unconditionally — unlike every `extra` dropdown, nothing else in
@@ -315,7 +318,16 @@ class MediaTab(QWidget):
         self.av_sync_check.setEnabled(has_file)
         self.preset_save_btn.setEnabled(has_file)
         self.preset_delete_btn.setEnabled(has_file)
+        # Queue Task / Mux / Encode have nothing to run without a file — greyed like
+        # the Downloader's until a fetch succeeds (same both-ways rule as above).
+        self.queue_btn.setEnabled(has_file)
+        self.go_btn.setEnabled(has_file)
         if has_file:
+            # The `—` the no-file pass left in Preset is a placeholder, not a pick: its
+            # option list never changes after an import, so nothing else clears it
+            # (an enabled Preset dropdown was reading `—`). No preset applied = None.
+            if self.preset_menu.value() == NO_OPTION:
+                self.preset_menu.set(presets.NONE_LABEL)
             return
         self.format_menu.set(NO_OPTION)
         self.preset_menu.set(NO_OPTION)
@@ -345,9 +357,20 @@ class MediaTab(QWidget):
         self.drop_box.reset()
         self.carousel.force_collapse()
         self.carousel.clear_preview()
+        self.carousel.forget_populated()
         self._preview_stack.setCurrentWidget(self.drop_box)
         set_line_text(self.save_entry, self.app.default_save_location)
         self._auto_output = self.app.default_save_location or ""
+
+    def show_no_preview(self):
+        """The file stays selected but has no preview frames: put the drop box (now
+        reading "No Preview Available") back over the carousel. The carousel forgets
+        it was populated, so the next file that does have frames reveals it again."""
+        self.carousel.force_collapse()
+        self.carousel.clear_preview()
+        self.carousel.forget_populated()
+        self.drop_box.show_no_preview()
+        self._preview_stack.setCurrentWidget(self.drop_box)
 
     def _reveal_preview(self):
         self._preview_stack.setCurrentWidget(self.carousel)
@@ -550,9 +573,11 @@ class MediaTab(QWidget):
 
     @staticmethod
     def _menu_value(menu):
-        """A derived dropdown's value, with the `NO_OPTION` placeholder as ""."""
+        """A derived dropdown's value, with the placeholders as "": `NO_OPTION`
+        (nothing to pick) and `Lossless` (Bitrate on a lossless codec — there
+        is no bitrate to carry into a job)."""
         value = menu.value()
-        return "" if value == NO_OPTION else value
+        return "" if value in (NO_OPTION, formats.LOSSLESS) else value
 
     def _validate_settings(self, settings):
         """Minimum fields, the tab's own checks, then the output-path prompt."""

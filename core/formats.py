@@ -297,14 +297,17 @@ def resolution_height_for(resolution):
 
 
 # Encoding / Video sub-tab's optional frame-rate change, alongside
-# Resolution -- "Source" (no change) plus a fixed ladder of common rates.
-# Deliberately whole numbers rather than the NTSC-exact 29.97/23.976: a
-# source probed at one of those still offers the round number right below
-# it (fps_values_for's own tolerance), and ffmpeg's -r happily retimes onto
-# a plain integer target without needing this app to reproduce broadcast
-# drop-frame arithmetic in the UI.
+# Resolution -- "Source" (no change) plus a fixed ladder of common rates:
+# the broadcast and cinema standards, the three NTSC ones among them
+# (23.976 / 29.97 / 59.94), then 12 and 8 for deliberately choppy output.
 SOURCE_FPS = "Source"
-FPS_VALUES = [SOURCE_FPS, "60", "50", "30", "25", "24", "12", "8"]
+FPS_VALUES = [SOURCE_FPS, "120", "60", "59.94", "50", "48", "30", "29.97", "25", "24", "23.976", "12", "8"]
+
+# The NTSC rates are 24000/1001 etc., not 23.976 -- typing the rounded decimal
+# into ffmpeg's -r would retime a true NTSC source a hair off, drifting audio
+# sync over a long file -- so their `-r` value is the exact rational. Every
+# other rung is its own value.
+_FPS_ARGS = {"59.94": "60000/1001", "29.97": "30000/1001", "23.976": "24000/1001"}
 
 
 def fps_values_for(source_fps):
@@ -315,15 +318,29 @@ def fps_values_for(source_fps):
     probe yet) offers the full ladder rather than guessing a cap."""
     if not source_fps:
         return list(FPS_VALUES)
-    return [SOURCE_FPS] + [f for f in FPS_VALUES[1:] if float(f) <= source_fps + 0.1]
+    return [SOURCE_FPS] + [f for f in FPS_VALUES[1:] if fps_number_for(f) <= source_fps + 0.1]
 
 
 def fps_arg_for(fps):
     """ffmpeg -r value for an FPS pick, or None for 'Source' -- the "no
-    change" case."""
+    change" case. The NTSC rates come back as their exact rational
+    ("24000/1001"), which -r accepts."""
     if not fps or fps == SOURCE_FPS:
         return None
-    return fps
+    return _FPS_ARGS.get(fps, fps)
+
+
+def fps_number_for(fps):
+    """An FPS pick as a plain float (23.976023...), for comparing against a
+    probed rate; None for 'Source'. (`float("24000/1001")` doesn't parse, so
+    callers that used to `float()` the -r value need this.)"""
+    arg = fps_arg_for(fps)
+    if arg is None:
+        return None
+    if "/" in arg:
+        numerator, denominator = arg.split("/")
+        return int(numerator) / int(denominator)
+    return float(arg)
 
 
 # Canonical bitrate ladder in kbps -- 1024/1536 rather than round 1000/1500
@@ -356,9 +373,35 @@ _BITRATE_KBPS_BY_DISPLAY = dict(zip(AUDIO_BITRATES, _AUDIO_BITRATE_KBPS))
 AUDIO_CHANNELS = [SELECT, "Mono", "Stereo", "5.1", "5.2", "7.1", "7.2", "9.1"]
 AUDIO_SAMPLE_RATES = [SELECT, "44100 Hz", "48000 Hz", "96000 Hz"]
 
+# Codecs that are lossless (PCM is uncompressed, which is lossless too): they
+# have no bitrate to set, so the Bitrate dropdown says "Lossless" for them
+# rather than the "—" it shows when there is simply nothing to pick yet.
+LOSSLESS = "Lossless"
+LOSSLESS_AUDIO = {"FLAC", "ALAC", "PCM"}
+
 # Codecs whose rate isn't ours to set (lossless, or nothing picked yet) --
 # offering a bitrate dropdown alongside them would be a dead control.
-_FIXED_RATE_AUDIO = {SELECT, "FLAC", "ALAC", "PCM"}
+_FIXED_RATE_AUDIO = {SELECT} | LOSSLESS_AUDIO
+
+
+def is_lossless_audio(codec):
+    """Whether `codec` is one of the lossless audio codecs (no bitrate to set)."""
+    return codec in LOSSLESS_AUDIO
+
+
+def probed_audio_is_lossless(codec_name, profile=None):
+    """Whether a *probed* audio stream is lossless, from ffprobe's own
+    `codec_name` / `profile`. Wider than `is_lossless_audio`: that answers for
+    the codecs this app can encode to, while a source can also hold Dolby
+    TrueHD / MLP (always lossless) or DTS. DTS is the one that needs the
+    profile -- the core stream and DTS-HD High Resolution are lossy, and only
+    DTS-HD Master Audio ("DTS-HD MA") is lossless. Any PCM variant counts."""
+    name = (codec_name or "").lower()
+    if name in ("flac", "alac", "truehd", "mlp") or name.startswith("pcm_"):
+        return True
+    if name == "dts":
+        return "MA" in (profile or "").upper().split()   # "DTS-HD MA [+ DTS:X]", not "DTS-HD HRA"
+    return False
 
 # Reverse of ffmpeg_vars._CHANNEL_COUNTS -- a probed channel count this app
 # has a named option for. Anything else (5.1.2, ...) has no match, so

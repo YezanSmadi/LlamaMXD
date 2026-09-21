@@ -15,20 +15,24 @@ import re
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPainterPath, QPixmap
-from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QLineEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QVBoxLayout, QWidget
 
 from core import downloader, naming
+from ui import scale
+from ui.scale import fpx, px
 from ui.tabs.media_tab import hrow, set_line_text
 from ui.widgets.controls import (
     NO_OPTION,
     Dropdown,
     MarqueeLabel,
+    ScaledLabel,
+    ScaledLineEdit,
     SegmentedButton,
     button,
     field_label,
     labeled,
     set_enabled,
-    ui_font,
+    set_font_px,
 )
 from ui.widgets.dialogs import confirm_output_path, show_message
 from ui.widgets.panels import BorderedFrame
@@ -104,11 +108,11 @@ class _Thumbnail(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         pw, ph = self.pixmap.width(), self.pixmap.height()
-        scale = min(self.width() / pw, self.height() / ph)
-        target = QRectF(0, 0, pw * scale, ph * scale)
+        k = min(self.width() / pw, self.height() / ph)
+        target = QRectF(0, 0, pw * k, ph * k)
         target.moveCenter(QRectF(self.rect()).center())
         clip = QPainterPath()
-        clip.addRoundedRect(target, 6, 6)
+        clip.addRoundedRect(target, fpx(6), fpx(6))
         p.setClipPath(clip)
         p.drawPixmap(target, self.pixmap, QRectF(self.pixmap.rect()))
 
@@ -147,40 +151,42 @@ class DownloaderTab(QWidget):
         self._last_mode = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 5, 10, 4)
+        scale.margins(root, 10, 5, 10, 4)
         root.setSpacing(0)
+        self._deno_missing = False
 
         # Deno warning — only while the startup check says it's missing.
-        self.deno_banner = QLabel(
+        self.deno_banner = ScaledLabel(
             "⚠  Deno wasn't found — YouTube downloads may be limited or fail. Reinstall LlamaMXD.")
         self.deno_banner.setProperty("role", "warn")
         self.deno_banner.hide()
         root.addWidget(self.deno_banner)
         self._banner_gap = root.count()
         root.addSpacing(0)
+        scale.bind(self, self._apply_banner_gap)
 
         url_row, ul = hrow(spacing=5, align_bottom=False)
-        self.url_entry = QLineEdit()
+        self.url_entry = ScaledLineEdit()
         self.url_entry.setPlaceholderText("Paste a video link here...")
-        self.url_entry.setFixedHeight(28)
+        scale.fixed(self.url_entry, h=28)
         self.url_entry.returnPressed.connect(self.fetch)
         ul.addWidget(self.url_entry, 1)
-        self.paste_btn = button("Paste", width=70)
+        self.paste_btn = button("Paste", role="queue", width=70)
         self.paste_btn.clicked.connect(self.paste_and_fetch)
         ul.addWidget(self.paste_btn)
-        self.fetch_btn = button("Fetch", role="primary", width=80)
+        self.fetch_btn = button("Fetch", role="action", width=80)
         self.fetch_btn.clicked.connect(self.fetch)
         ul.addWidget(self.fetch_btn)
         root.addWidget(url_row)
-        root.addSpacing(6)
+        scale.spacer(root, 6)
 
         # Preview: the bordered placeholder, then thumbnail + title + meta.
         self.preview_frame = _LinkDropFrame(self._on_link_drop)
         pl = QVBoxLayout(self.preview_frame)
-        pl.setContentsMargins(12, 8, 12, 8)
-        pl.setSpacing(4)
-        self.placeholder_label = QLabel(_PLACEHOLDER)
-        self.placeholder_label.setFont(ui_font(14))
+        scale.margins(pl, 12, 8, 12, 8)
+        scale.spacing(pl, 4)
+        self.placeholder_label = ScaledLabel(_PLACEHOLDER)
+        set_font_px(self.placeholder_label, 14)
         self.placeholder_label.setAlignment(Qt.AlignCenter)
         pl.addWidget(self.placeholder_label, 1)
         self.thumb_view = _Thumbnail()
@@ -189,12 +195,12 @@ class DownloaderTab(QWidget):
         self.title_label = MarqueeLabel("", pixel_size=13, bold=True)
         self.title_label.hide()
         pl.addWidget(self.title_label)
-        self.meta_label = QLabel("")
+        self.meta_label = ScaledLabel("")
         self.meta_label.setProperty("role", "meta")
         self.meta_label.hide()
         pl.addWidget(self.meta_label)
         root.addWidget(self.preview_frame, 1)
-        root.addSpacing(10)
+        scale.spacer(root, 10)
 
         self.mode_label = field_label("Mode:")
         self.mode_switch = SegmentedButton(downloader.MODES, current=downloader.MODE_AV)
@@ -203,11 +209,11 @@ class DownloaderTab(QWidget):
         mode_box = QWidget()
         ml = QVBoxLayout(mode_box)
         ml.setContentsMargins(0, 0, 0, 0)
-        ml.setSpacing(1)
+        scale.spacing(ml, 1)
         ml.addWidget(self.mode_label)
         ml.addWidget(self.mode_switch, 0, Qt.AlignLeft)
         root.addWidget(mode_box)
-        root.addSpacing(4)
+        scale.spacer(root, 4)
 
         options, ol = hrow(spacing=10)
         self.codec_menu = Dropdown([downloader.BEST_CODEC], width=132)
@@ -226,28 +232,28 @@ class DownloaderTab(QWidget):
         ol.addWidget(box)
         for menu in (self.codec_menu, self.audio_menu, self.quality_menu, self.format_menu):
             menu.picked.connect(self._on_control_change)
-        self.size_label = QLabel("")
+        self.size_label = ScaledLabel("")
         self.size_label.setProperty("role", "meta")
         ol.addWidget(self.size_label, 0, Qt.AlignBottom)
         root.addWidget(options)
-        root.addSpacing(6)
+        scale.spacer(root, 6)
 
         save, sl = hrow(spacing=6, align_bottom=False)
-        self.save_entry = QLineEdit()
+        self.save_entry = ScaledLineEdit()
         self.save_entry.setPlaceholderText("Save file as...")
-        self.save_entry.setFixedHeight(28)
+        scale.fixed(self.save_entry, h=28)
         set_line_text(self.save_entry, app.downloader_default_location())
         sl.addWidget(self.save_entry, 1)
         self.browse_save_btn = button("Browse", width=80)
         self.browse_save_btn.clicked.connect(self.select_save_location)
         sl.addWidget(self.browse_save_btn)
         root.addWidget(save)
-        root.addSpacing(10)
+        scale.spacer(root, 10)
 
         actions, al = hrow(spacing=8, align_bottom=False)
-        self.queue_btn = button("Queue Task")
+        self.queue_btn = button("Queue Task", role="queue")
         self.queue_btn.clicked.connect(self.add_to_queue)
-        self.download_btn = button("Download", role="primary")
+        self.download_btn = button("Download", role="action")
         self.download_btn.clicked.connect(self.download_now)
         al.addWidget(self.queue_btn, 1)
         al.addWidget(self.download_btn, 1)
@@ -258,11 +264,16 @@ class DownloaderTab(QWidget):
         self._ready = True
 
     def set_deno_missing(self, missing):
-        self.deno_banner.setVisible(bool(missing))
+        self._deno_missing = bool(missing)
+        self.deno_banner.setVisible(self._deno_missing)
+        self._apply_banner_gap()
+
+    def _apply_banner_gap(self):
+        """The gap under the Deno banner: 6 reference px while it's showing."""
         layout = self.layout()
         item = layout.itemAt(self._banner_gap)
         if item is not None and item.spacerItem() is not None:
-            item.spacerItem().changeSize(0, 6 if missing else 0)
+            item.spacerItem().changeSize(0, px(6) if self._deno_missing else 0)
             layout.invalidate()
 
     # ------------------------------------------------------------------ #

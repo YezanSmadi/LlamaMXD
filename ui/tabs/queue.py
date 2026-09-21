@@ -15,7 +15,6 @@ from PySide6.QtGui import QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
-    QLabel,
     QScrollArea,
     QStackedLayout,
     QVBoxLayout,
@@ -27,9 +26,11 @@ from core.ffmpeg_build import compile_command, uses_hdr_tonemap
 from core.ffmpeg_runner import FfmpegJob, partial_path
 from core.utilities import extract_video_thumbnail
 from core.ytdlp_runner import YtDlpJob
+from ui import scale
 from ui import theme as T
+from ui.scale import px
 from ui.tabs.media_tab import hms
-from ui.widgets.controls import IconButton, button, draw_cross, ui_font
+from ui.widgets.controls import IconButton, ScaledLabel, button, draw_cross, ui_font
 from ui.widgets.dialogs import ask_yes_no, show_message
 from ui.workers import pil_to_qimage, run_async
 
@@ -88,7 +89,7 @@ class QueueRow(QWidget):
         self.fraction = 0.0      # what's painted
         self.thumb = None        # QPixmap
         self._hover_x = False
-        self.setFixedHeight(_ROW_H)
+        scale.fixed(self, h=_ROW_H)
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
         self._font = ui_font(13)
@@ -108,13 +109,13 @@ class QueueRow(QWidget):
             self.update()
 
     def _x_rect(self):
-        return QRectF(self.width() - 38, (_ROW_H - 28) / 2, 28, 28)
+        return QRectF(scale.ref_size(self)[0] - 38, (_ROW_H - 28) / 2, 28, 28)
 
     def _status_rect(self):
-        return QRectF(self.width() - 38 - 10 - 80, 0, 80, _ROW_H)
+        return QRectF(scale.ref_size(self)[0] - 38 - 10 - 80, 0, 80, _ROW_H)
 
     def mouseMoveEvent(self, e):
-        over = self._x_rect().contains(e.position())
+        over = self._x_rect().contains(scale.ref_pos(e.position()))
         if over != self._hover_x:
             self._hover_x = over
             self.update()
@@ -127,7 +128,7 @@ class QueueRow(QWidget):
     def mousePressEvent(self, e):
         if e.button() != Qt.LeftButton:
             return
-        if self._x_rect().contains(e.position()):
+        if self._x_rect().contains(scale.ref_pos(e.position())):
             self.removeRequested.emit(self.task_id)
         else:
             self.clicked.emit(self.task_id)
@@ -136,7 +137,8 @@ class QueueRow(QWidget):
         th = T.theme
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        w = self.width()
+        scale.begin(p)
+        w = scale.ref_size(self)[0]
         row = QPainterPath()
         row.addRoundedRect(QRectF(0, 0, w, _ROW_H), _ROW_CORNER, _ROW_CORNER)
 
@@ -176,8 +178,8 @@ class QueueRow(QWidget):
             p.save()
             p.setClipPath(clip)
             pw, ph = self.thumb.deviceIndependentSize().width(), self.thumb.deviceIndependentSize().height()
-            scale = max(_THUMB_W / pw, _THUMB_H / ph)
-            target = QRectF(0, 0, pw * scale, ph * scale)
+            k = max(_THUMB_W / pw, _THUMB_H / ph)
+            target = QRectF(0, 0, pw * k, ph * k)
             target.moveCenter(thumb_rect.center())
             p.setRenderHint(QPainter.SmoothPixmapTransform)
             p.drawPixmap(target, self.thumb, QRectF(self.thumb.rect()))
@@ -199,7 +201,7 @@ class ProgressStrip(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setFixedHeight(8)
+        scale.fixed(self, h=8)
         self.value = 0.0
         T.theme.changed.connect(self.update)
 
@@ -220,10 +222,11 @@ class _DetailPanel(QWidget):
         super().__init__()
         self.setAttribute(Qt.WA_StyledBackground)
         T.theme.changed.connect(self._restyle)
+        scale.changed.connect(self._restyle)
         self._restyle()
 
     def _restyle(self):
-        self.setStyleSheet(f"_DetailPanel {{ background: {T.theme.hex('panel')}; border-radius: 8px; }}")
+        self.setStyleSheet(f"_DetailPanel {{ background: {T.theme.hex('panel')}; border-radius: {px(8)}px; }}")
 
 
 class QueueTab(QWidget):
@@ -241,8 +244,8 @@ class QueueTab(QWidget):
         self._detail_task_id = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 15, 20, 10)
-        root.setSpacing(10)
+        scale.margins(root, 20, 15, 20, 10)
+        scale.spacing(root, 10)
 
         self.progress_bar = ProgressStrip()
         root.addWidget(self.progress_bar)
@@ -252,8 +255,8 @@ class QueueTab(QWidget):
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         host = QWidget()
         self.list_layout = QVBoxLayout(host)
-        self.list_layout.setContentsMargins(0, 0, 4, 0)
-        self.list_layout.setSpacing(8)
+        scale.margins(self.list_layout, 0, 0, 4, 0)
+        scale.spacing(self.list_layout, 8)
         self.list_layout.addStretch(1)
         self.scroll.setWidget(host)
 
@@ -267,7 +270,7 @@ class QueueTab(QWidget):
         # sidesteps that: only one page is ever shown, chosen explicitly by
         # `_show_task_list`/`_show_empty_state` below, so the centring
         # stretches here can never leak into the row list's own layout.
-        self.empty_label = QLabel("No tasks queued yet.")
+        self.empty_label = ScaledLabel("No tasks queued yet.")
         self.empty_label.setProperty("role", "empty")
         self.empty_label.setAlignment(Qt.AlignCenter)
         self._empty_page = QWidget()
@@ -287,32 +290,32 @@ class QueueTab(QWidget):
         # long Encode field list scrolls instead of growing the box.
         self.detail_frame = _DetailPanel()
         dl = QVBoxLayout(self.detail_frame)
-        dl.setContentsMargins(10, 8, 6, 8)
-        dl.setSpacing(4)
+        scale.margins(dl, 10, 8, 6, 8)
+        scale.spacing(dl, 4)
         header = QHBoxLayout()
-        self.detail_title_label = QLabel("")
+        self.detail_title_label = ScaledLabel("")
         self.detail_title_label.setProperty("role", "detailTitle")
         header.addWidget(self.detail_title_label)
         header.addStretch(1)
         self.detail_goto_btn = button("Go to File", width=90, height=24)
-        self.detail_goto_btn.setStyleSheet("min-height: 24px;")
+        scale.bind(self.detail_goto_btn, lambda: self.detail_goto_btn.setStyleSheet(f"min-height: {px(24)}px;"))
         self.detail_goto_btn.clicked.connect(self._go_to_detail_file)
         header.addWidget(self.detail_goto_btn)
         close = IconButton("close", role="ghost", width=24, height=24)
-        close.setStyleSheet("min-height: 24px; padding: 0;")
+        scale.bind(close, lambda: close.setStyleSheet(f"min-height: {px(24)}px; padding: 0;"))
         close.clicked.connect(self.detail_frame.hide)
         header.addWidget(close)
         dl.addLayout(header)
         self.detail_scroll = QScrollArea()
         self.detail_scroll.setWidgetResizable(True)
-        self.detail_scroll.setFixedHeight(_DETAIL_SCROLL_HEIGHT)
+        scale.fixed(self.detail_scroll, h=_DETAIL_SCROLL_HEIGHT)
         self.detail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         dl.addWidget(self.detail_scroll)
         self.detail_frame.hide()
         root.addWidget(self.detail_frame)
 
         controls = QHBoxLayout()
-        controls.setSpacing(8)
+        scale.spacing(controls, 8)
         self.clear_btn = button("Clear Completed", width=140)
         self.clear_btn.clicked.connect(self.clear_completed)
         self.clear_all_btn = button("Clear All", width=90)
@@ -322,7 +325,7 @@ class QueueTab(QWidget):
         controls.addStretch(1)
         self.stop_btn = button("Stop Queue", role="danger", width=140)
         self.stop_btn.clicked.connect(self.stop_queue)
-        self.start_all_btn = button("Start Queue", role="primary", width=140)
+        self.start_all_btn = button("Start Queue", role="action", width=140)
         self.start_all_btn.clicked.connect(self.toggle_queue)
         controls.addWidget(self.stop_btn)
         controls.addWidget(self.start_all_btn)
@@ -481,10 +484,9 @@ class QueueTab(QWidget):
 
         body = QWidget()
         grid = QGridLayout(body)
-        grid.setContentsMargins(0, 0, 8, 0)
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(2)
-        grid.setColumnMinimumWidth(0, 112)
+        scale.margins(grid, 0, 0, 8, 0)
+        scale.grid_spacing(grid, 8, 2)
+        scale.bind(grid, lambda: grid.setColumnMinimumWidth(0, px(112)))
         grid.setColumnStretch(1, 1)
         rows = []
         strip_video = bool(settings.get("strip_video"))
@@ -537,10 +539,10 @@ class QueueTab(QWidget):
         if row.get("error"):
             rows.append(("Error", row["error"], True))
         for r, (label, value, is_error) in enumerate(rows):
-            key_label = QLabel(f"{label}:")
+            key_label = ScaledLabel(f"{label}:")
             key_label.setProperty("role", "detailKey")
             key_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-            value_label = QLabel(value)
+            value_label = ScaledLabel(value)
             value_label.setWordWrap(True)
             value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             if is_error:

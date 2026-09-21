@@ -9,7 +9,9 @@ decide which containers it can be remuxed into (`formats.containers_for`).
 Video and Audio each show a `TrackListBox`: every track the source (or a
 file pulled in via "Add Stream(s)") has, one checkbox apiece, all mapped
 into the output — not the single "Auto"/"Track N" pick this tab used to
-offer."""
+offer. The list itself is editable: "Remove Stream(s)" takes any checked
+track out of it (the source file's own included), the tracks below move up,
+and Undo / Redo step through those edits and Add Stream(s)."""
 import os
 import uuid
 
@@ -18,17 +20,24 @@ from PySide6.QtWidgets import QFileDialog, QSizePolicy, QVBoxLayout, QWidget
 
 from core import formats
 from core.utilities import probe_media
+from ui import scale
+from ui.scale import px
 from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow, set_line_text
 from ui.widgets.controls import NO_OPTION, CheckBox, IconButton, button, button_width_for
 from ui.widgets.dialogs import pick_external_streams, show_message
 from ui.widgets.tooltip import tip
 from ui.widgets.tracklist import TrackListBox
+from ui.widgets.tracklist import describe_stream as _describe_stream
+from ui.widgets.tracklist import row_label as _row_label
 from ui.workers import run_async
 
 _TRACK_TIP = ("Check as many streams as the output should carry — muxing never "
-              "re-encodes them. \"Add Stream(s)\" pulls one in from another file.")
-_REMOVE_TIP = ("Excludes every checked track from the output — one pulled in with "
-               "\"Add Stream(s)\" is dropped outright, a source track is simply unchecked.")
+              "re-encodes them. \"Add Stream(s)\" pulls one in from another file. "
+              "Drag a track up or down to reorder it.")
+_REMOVE_TIP = ("Removes every checked track from the list, the source file's own included — "
+               "the tracks below move up to fill the gap. Undo brings them back.")
+_UNDO_TIP = "Undoes the last Add / Remove Stream(s), reorder, or change of which tracks are selected."
+_REDO_TIP = "Redoes what Undo just took back."
 _SELECT_ALL_TIP = "Checks every track in the box — include all of them in the output."
 _DESELECT_ALL_TIP = "Unchecks every track in the box, without removing any of them."
 
@@ -39,16 +48,7 @@ _AUDIO_BROWSE_FILTER = "Audio Files (%s)" % " ".join(
     "*" + ext for ext in sorted(formats.AUDIO_EXTENSIONS))
 
 
-def _describe_stream(kind, stream):
-    """One row's label: "Track N · codec · ... · language", the video/audio
-    fields chosen per kind (mirrors AudioStreamPickerDialog's own format)."""
-    bits = [f"Track {stream['index'] + 1}"]
-    keys = (("codec", "resolution_display", "language") if kind == "video"
-            else ("codec", "channels_display", "sample_rate_display", "language"))
-    for key in keys:
-        if stream.get(key):
-            bits.append(str(stream[key]))
-    return "  ·  ".join(bits)
+_HISTORY_LIMIT = 50
 
 
 class MuxingTab(MediaTab):
@@ -61,15 +61,33 @@ class MuxingTab(MediaTab):
                    "not the trim, the track picks, or the file paths.")
 
     def _init_state(self):
-        # Streams pulled in from another file via "Add Stream":
-        # {row_id: {"file": path, "index": N, "label": str}}, per kind.
-        self._video_external = {}
-        self._audio_external = {}
+        # The tracks each box lists, in order, per kind: the source file's own
+        # streams (seeded from the probe) then any pulled in with "Add
+        # Stream(s)". This list -- not the probe -- is the truth for what the
+        # box shows, so a source track can be removed like any other. An entry
+        # is never mutated, so a snapshot of the list is just a copy of it:
+        #   {"id": "src:0" | "ext:ab12cd34", "source": "primary" | "external",
+        #    "file": path | None, "index": N (0-based in that file's own
+        #    streams of the kind), "stream": the probe's description of it,
+        #    "name": the external file's name | None}
+        self._tracks = {"video": [], "audio": []}
+        # Undo / redo, per kind: stacks of {"entries": [...], "checked": {ids}}.
+        self._history = {"video": {"undo": [], "redo": []}, "audio": {"undo": [], "redo": []}}
+        # The checked ids an undo/redo wants the box put back to, handed to it by
+        # the next `_sync_controls` (then dropped).
+        self._restore_checked = {}
+        # Which rows were checked as of the last `_sync_controls`: a click on a row's
+        # checkbox has already happened by the time the box says so, and its undo step
+        # is the state from *before* it.
+        self._checked_baseline = {"video": set(), "audio": set()}
         # The file the boxes' rows currently describe -- differs from
         # app.current_file_path exactly when the input just changed, which is
         # when stream indices stop meaning what they meant a moment ago and
         # the boxes need a hard reset rather than a same-id refresh.
         self._tracks_file = None
+        # The probe result the source entries were seeded from: a new one
+        # (another file, or the first probe landing) re-seeds them.
+        self._tracks_info = None
 
     # ------------------------------------------------------------------ #
     #  Panels
@@ -85,17 +103,18 @@ class MuxingTab(MediaTab):
         other themed control — see `IconButton`) sharing a line on top,
         each spanning half of `btn_width` so the pair lines up flush with
         "Add Stream(s)"/"Remove Stream(s)" beneath them; "Add Stream(s)"
-        sits beneath them; "Remove Stream(s)" (which acts on every checked
-        row, deleting the ones it can and unchecking the ones it can't —
-        see `_remove_streams`) shares a line with Strip below that, matching
-        width so the pair stacks flush. Select/Deselect All share a line
-        rather than each getting a full-width row of their own the way Add
-        Stream(s) does — a fourth full row would have pushed this column
-        past the box's own fixed height (see the sizing rule in this
-        module's own history / CLAUDE.md), and a two-across row costs only
-        one row's worth of height for both."""
+        sits beneath them, then "Remove Stream(s)" (which takes every checked
+        row out of the list — see `_remove_streams`) at the same width so the
+        pair stacks flush, and on the bottom line Undo / Redo with the Strip
+        checkbox to their right. Select/Deselect All and Undo/Redo share
+        a line apiece rather than each getting a full-width row the way Add
+        Stream(s) does — full rows would have pushed this column past the
+        box's own fixed height (see the sizing rule in this module's own
+        history / CLAUDE.md). Even so the column is four rows in the
+        Overview page's 118px, so the icon rows are `compact` (min 22px, not
+        the stock 28) and Select/Deselect All take whatever the rest leaves."""
         btn_width = button_width_for(["Add Stream(s)", "Remove Stream(s)"])
-        select_spacing = 8
+        select_spacing = 4      # the column's own vertical gap, so the pairs sit as tight as the rows
         select_width = (btn_width - select_spacing) // 2
         row, rl = hrow(spacing=10, align_bottom=True)
         box = TrackListBox()
@@ -108,35 +127,47 @@ class MuxingTab(MediaTab):
         # just raising the floor -- the box's own height must never move
         # once a file's probed tracks (or several "Add Stream(s)" pulls)
         # populate it; see TrackListBox's own fixed-height comment.
-        overview_height = self.panels.widget(0).sizeHint().height()
-        box.setFixedHeight(max(box.height(), overview_height))
         # Select/Deselect All take whatever height is left in the column once
-        # Add/Remove Stream(s) (one stock 28px button row apiece) and the two
-        # 6px gaps are accounted for, so the pair reaches the box's own top
-        # edge and reads closer to square than the stock 28px-tall button.
-        # Done by fixing the *row's* height and letting the buttons expand
-        # into it: the QPushButton stylesheet's `min-height: 28px` overrides
-        # a `setFixedHeight` on the button itself (it stays at 28).
-        select_height = max(28, box.height() - 2 * 28 - 2 * 6)
-        box.changed.connect(self._on_control_change)
+        # Add/Remove Stream(s) (one stock 28px button row apiece), the Undo/
+        # Redo/Strip row (24px, the checkbox's own height) and the three 4px gaps are accounted for,
+        # so the pair reaches the box's own top edge. Done by fixing the
+        # *row's* height and letting the buttons expand into it: the
+        # QPushButton stylesheet's `min-height` overrides a `setFixedHeight`
+        # on the button itself (28 stock, 22 for role="compact").
+        # Both heights are measured off real widgets (Overview's size hint
+        # follows the stylesheet), so they're re-measured after a rescale.
+        top = None
+
+        def size_box():
+            overview_height = self.panels.widget(0).sizeHint().height()
+            box.setFixedHeight(max(px(92), overview_height))
+            if top is not None:
+                top.setFixedHeight(max(px(22), box.height() - 2 * px(28) - px(24) - 3 * px(4)))
+        box.changed.connect(lambda: self._track_toggled(kind.lower()))
+        box.reordered.connect(lambda ids: self._reorder_tracks(kind.lower(), ids))
         tip(box, _TRACK_TIP)
         rl.addWidget(box, 1)
 
         side = QWidget()
         sl = QVBoxLayout(side)
         sl.setContentsMargins(0, 0, 0, 0)
-        sl.setSpacing(6)
+        # 4px, not the 6 this column had with three rows: the fourth row is
+        # what the gap gives back. The spare it leaves (Overview is 118px,
+        # the rows need 22+28+28+24+12) also absorbs the rounding of five
+        # `px()` lengths, which at 1.25x otherwise made the column 3px taller
+        # than the box and so the whole page taller than Overview.
+        scale.spacing(sl, 4)
         top, tl = hrow(spacing=select_spacing, align_bottom=False)
-        top.setFixedHeight(select_height)
-        # Left-aligned, not spread: the column is as wide as Remove Stream(s)
-        # + Strip, so unaligned the pair drifted apart to fill that width.
+        size_box()
+        # Left-aligned, not spread: the column is as wide as Undo/Redo + Strip,
+        # so unaligned the pair drifted apart to fill that width.
         tl.setAlignment(Qt.AlignLeft)
-        select_all_btn = IconButton("select-multiple", width=select_width)
+        select_all_btn = IconButton("select-multiple", role="compact", width=select_width)
         select_all_btn.clicked.connect(lambda: self._select_all(kind.lower()))
         tip(select_all_btn, _SELECT_ALL_TIP)
         select_all_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         tl.addWidget(select_all_btn)
-        deselect_all_btn = IconButton("deselect-multiple", width=select_width)
+        deselect_all_btn = IconButton("deselect-multiple", role="compact", width=select_width)
         deselect_all_btn.clicked.connect(lambda: self._deselect_all(kind.lower()))
         tip(deselect_all_btn, _DESELECT_ALL_TIP)
         deselect_all_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
@@ -145,35 +176,49 @@ class MuxingTab(MediaTab):
         add_btn = button("Add Stream(s)", width=btn_width)
         add_btn.clicked.connect(lambda: self._add_stream(kind.lower()))
         sl.addWidget(add_btn)
-        bottom, bl = hrow(spacing=8, align_bottom=True)
         remove_btn = button("Remove Stream(s)", role="danger", width=btn_width)
         remove_btn.clicked.connect(lambda: self._remove_streams(kind.lower()))
         tip(remove_btn, _REMOVE_TIP)
-        bl.addWidget(remove_btn)
+        sl.addWidget(remove_btn)
+        history, hl = hrow(spacing=select_spacing, align_bottom=False)
+        hl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        undo_btn = IconButton("undo", role="compact", width=select_width, height=24)
+        undo_btn.clicked.connect(lambda: self._undo(kind.lower()))
+        tip(undo_btn, _UNDO_TIP)
+        hl.addWidget(undo_btn)
+        redo_btn = IconButton("redo", role="compact", width=select_width, height=24)
+        redo_btn.clicked.connect(lambda: self._redo(kind.lower()))
+        tip(redo_btn, _REDO_TIP)
+        hl.addWidget(redo_btn)
+        scale.spacer(hl, 8 - select_spacing)     # 8px from Redo to Strip, as Remove had
         check = CheckBox(f"Strip {kind}", color_key="stop")
         check.clicked.connect(self._on_control_change)
         tip(check, STRIP_TIP)
-        bl.addWidget(check)
-        sl.addWidget(bottom)
+        hl.addWidget(check)
+        sl.addWidget(history)
         rl.addWidget(side, 0, Qt.AlignBottom)
+        scale.bind_after(box, size_box)
 
         page = QWidget()
         outer = QVBoxLayout(page)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addStretch(1)
         outer.addWidget(row)
-        return page, box, add_btn, remove_btn, check, select_all_btn, deselect_all_btn
+        return (page, box, add_btn, remove_btn, check, select_all_btn, deselect_all_btn,
+                undo_btn, redo_btn)
 
     def build_video(self):
         page, self.video_box, self.video_add_btn, self.video_remove_btn, \
             self.strip_video_check, self.video_select_all_btn, \
-            self.video_deselect_all_btn = self._track_panel("Video")
+            self.video_deselect_all_btn, self.video_undo_btn, \
+            self.video_redo_btn = self._track_panel("Video")
         return page
 
     def build_audio(self):
         page, self.audio_box, self.audio_add_btn, self.audio_remove_btn, \
             self.strip_audio_check, self.audio_select_all_btn, \
-            self.audio_deselect_all_btn = self._track_panel("Audio")
+            self.audio_deselect_all_btn, self.audio_undo_btn, \
+            self.audio_redo_btn = self._track_panel("Audio")
         return page
 
     # ------------------------------------------------------------------ #
@@ -185,7 +230,7 @@ class MuxingTab(MediaTab):
             title, types = "Select Video Source", _VIDEO_BROWSE_FILTER + ";;All Files (*.*)"
         else:
             title, types = "Select Audio Source", _AUDIO_BROWSE_FILTER
-        path, _ = QFileDialog.getOpenFileName(self, title, "", types)
+        path, _ = QFileDialog.getOpenFileName(self, title, self._output_directory(), types)
         if not path:
             return
         run_async(probe_media, lambda info: self._stream_probed(kind, path, info), path)
@@ -203,37 +248,82 @@ class MuxingTab(MediaTab):
             if chosen is None:
                 return
             streams = [s for s in streams if s["index"] in chosen]
-        store = self._video_external if kind == "video" else self._audio_external
         name = os.path.basename(path.replace("\\", "/"))
-        for stream in streams:
-            row_id = f"ext:{uuid.uuid4().hex[:8]}"
-            store[row_id] = {
-                "file": path, "index": stream["index"],
-                "label": f"External: {name}  —  {_describe_stream(kind, stream)}",
-            }
-        self._sync_controls()
+        added = [{"id": f"ext:{uuid.uuid4().hex[:8]}", "source": "external", "file": path,
+                  "index": stream["index"], "stream": stream, "name": name} for stream in streams]
+        self._edit_tracks(kind, self._tracks[kind] + added)
 
     def _remove_streams(self, kind):
-        """"Remove Stream(s)": every checked row stops being included in the
-        output. A row "Add Stream(s)" pulled in is dropped outright; a
-        source row — the file's own track — can't actually be deleted (the
-        file still has it), so it's simply unchecked instead, exactly as if
-        its own checkbox had been clicked off. Either way, checking a row
-        and pressing this button means "get rid of this one"."""
+        """"Remove Stream(s)": every checked row leaves the list — the source
+        file's own tracks included (the file itself is untouched; the track
+        just isn't offered any more). The rows below move up, so their numbers
+        ripple: remove track 2 and track 3 becomes track 2. Undo brings them
+        back where they were."""
         box = self.video_box if kind == "video" else self.audio_box
-        store = self._video_external if kind == "video" else self._audio_external
-        checked = box.checked_ids()
+        checked = set(box.checked_ids())
         if not checked:
             show_message(
                 self.app, "Nothing to Remove",
                 f"Check the {kind} track(s) you want removed, then press Remove Stream(s) again.",
             )
             return
-        for row_id in checked:
-            if row_id in store:
-                store.pop(row_id, None)
-            else:
-                box.set_checked(row_id, False)
+        self._edit_tracks(kind, [entry for entry in self._tracks[kind] if entry["id"] not in checked])
+
+    def _reorder_tracks(self, kind, ids):
+        """A drag in the box ended: `ids` is every row's id in its new order. The
+        list follows (renumbering the tracks) and the move is one undo step."""
+        by_id = {entry["id"]: entry for entry in self._tracks[kind]}
+        entries = [by_id[row_id] for row_id in ids if row_id in by_id]
+        if len(entries) == len(by_id) and entries != self._tracks[kind]:
+            self._edit_tracks(kind, entries)
+
+    # ------------------------------------------------------------------ #
+    #  Undo / redo — of the *list* (Add / Remove Stream(s) / reorder), not of the
+    #  checkboxes: ticking a track is one click to undo by hand.
+    # ------------------------------------------------------------------ #
+    def _snapshot(self, kind):
+        """The box as it is now: its list and which rows are checked."""
+        box = self.video_box if kind == "video" else self.audio_box
+        return {"entries": list(self._tracks[kind]), "checked": set(box.checked_ids())}
+
+    def _push_history(self, kind, snapshot=None):
+        """Keeps `snapshot` (default: the box as it is now) as the next Undo step.
+        Anything Redo held is now stale."""
+        history = self._history[kind]
+        history["undo"].append(snapshot or self._snapshot(kind))
+        del history["undo"][:-_HISTORY_LIMIT]
+        history["redo"].clear()
+
+    def _edit_tracks(self, kind, entries):
+        """Every change to a box's list goes through here: the outgoing list
+        is kept for Undo, and the tab resyncs."""
+        self._push_history(kind)
+        self._tracks[kind] = entries
+        self._sync_controls()
+
+    def _track_toggled(self, kind):
+        """A row's checkbox was clicked. Ticking is an Undo step like any other edit:
+        the state kept is the list with the ticks as they were before the click."""
+        self._push_history(kind, {"entries": list(self._tracks[kind]),
+                                  "checked": set(self._checked_baseline[kind])})
+        self._on_control_change()
+
+    def _undo(self, kind):
+        self._travel(kind, "undo", "redo")
+
+    def _redo(self, kind):
+        self._travel(kind, "redo", "undo")
+
+    def _travel(self, kind, take, keep):
+        """Swaps the box — its list *and* which rows are ticked — with the top of
+        the `take` stack, keeping the one it replaces on the `keep` stack."""
+        history = self._history[kind]
+        if not history[take]:
+            return
+        history[keep].append(self._snapshot(kind))
+        snapshot = history[take].pop()
+        self._tracks[kind] = list(snapshot["entries"])
+        self._restore_checked[kind] = snapshot["checked"]
         self._sync_controls()
 
     def _select_all(self, kind):
@@ -241,41 +331,54 @@ class MuxingTab(MediaTab):
         only ever acts on rows already checked, this acts on every row
         regardless of its current state."""
         box = self.video_box if kind == "video" else self.audio_box
-        for row_id in box.item_ids():
-            box.set_checked(row_id, True)
+        if set(box.checked_ids()) != set(box.item_ids()):     # nothing to undo otherwise
+            self._push_history(kind)
+            for row_id in box.item_ids():
+                box.set_checked(row_id, True)
         self._sync_controls()
 
     def _deselect_all(self, kind):
         """Unchecks every row in the box — the non-destructive counterpart
         to "Remove Stream(s)": nothing leaves the box, checked or not."""
         box = self.video_box if kind == "video" else self.audio_box
-        for row_id in box.item_ids():
-            box.set_checked(row_id, False)
+        if box.checked_ids():
+            self._push_history(kind)
+            for row_id in box.item_ids():
+                box.set_checked(row_id, False)
         self._sync_controls()
 
     # ------------------------------------------------------------------ #
     #  Track box contents
     # ------------------------------------------------------------------ #
+    def _reseed_tracks(self, info):
+        """A new probe result: the source's own streams become the list's
+        first rows (a fresh start — nothing carries over from another file),
+        with any tracks pulled in from elsewhere kept after them. Undo history
+        goes too: its snapshots describe the old file's streams."""
+        for kind in ("video", "audio"):
+            primary = [{"id": f"src:{stream['index']}", "source": "primary", "file": None,
+                        "index": stream["index"], "stream": stream, "name": None}
+                       for stream in info.get(f"{kind}_streams") or []]
+            external = [entry for entry in self._tracks[kind] if entry["source"] == "external"]
+            self._tracks[kind] = primary + external
+            self._history[kind] = {"undo": [], "redo": []}
+
     def _items_for(self, kind):
-        streams = self.app.media_info.get(f"{kind}_streams") or []
-        items = [{"id": f"src:{s['index']}", "label": _describe_stream(kind, s)} for s in streams]
-        store = self._video_external if kind == "video" else self._audio_external
-        items += [{"id": row_id, "label": data["label"]} for row_id, data in store.items()]
-        return items
+        """The box's rows — numbered by position, so a removal ripples."""
+        return [{"id": entry["id"], "label": _row_label(kind, entry, number)}
+                for number, entry in enumerate(self._tracks[kind], start=1)]
 
     def _track_args(self, kind):
         """Every checked row in `kind`'s box, translated into the shape
-        `ffmpeg_vars`/`build_mux_command` map straight to a `-map`."""
+        `ffmpeg_vars`/`build_mux_command` map straight to a `-map` — in the
+        box's own order, which is the output's stream order."""
         box = self.video_box if kind == "video" else self.audio_box
-        store = self._video_external if kind == "video" else self._audio_external
+        entries = {entry["id"]: entry for entry in self._tracks[kind]}
         args = []
         for row_id in box.checked_ids():
-            if row_id.startswith("src:"):
-                args.append({"source": "primary", "file": None, "index": int(row_id.split(":", 1)[1])})
-            else:
-                entry = store.get(row_id)
-                if entry:
-                    args.append({"source": "external", "file": entry["file"], "index": entry["index"]})
+            entry = entries.get(row_id)
+            if entry:
+                args.append({"source": entry["source"], "file": entry["file"], "index": entry["index"]})
         return args
 
     # ------------------------------------------------------------------ #
@@ -285,12 +388,15 @@ class MuxingTab(MediaTab):
         """**The only place derived UI state is decided.** Idempotent.
           1. stream presence — both stripped would write an empty file; a
              stream the source doesn't have reads the same as stripped
-          2. the track boxes carry the source's own streams plus any browsed-
-             in external ones — reset (indices renumbered from scratch)
-             exactly when the input file itself just changed
+          2. the track boxes carry `self._tracks` — the source's own streams
+             plus any browsed-in external ones, minus whatever was removed —
+             re-seeded when a new probe lands and reset (rows rebuilt from
+             scratch) exactly when the input file itself just changed
           3. **the container inversion** — the source's own codecs decide
              which containers are reachable
-          4. a stripped or absent stream disables its own panel
+          4. a stripped, absent or emptied (every track removed) stream marks
+             its sub-tab red and greys its panel — an emptied one keeps Add
+             Stream(s) and Undo/Redo live, the ways back
           5. the Overview rundown"""
         stripping_video = self.strip_video_check.isChecked()
         stripping_audio = self.strip_audio_check.isChecked()
@@ -298,34 +404,51 @@ class MuxingTab(MediaTab):
         video_absent = info.get("has_video") is False
         audio_absent = info.get("has_audio") is False
 
-        self.strip_video_check.setEnabled(not (stripping_audio or video_absent))
-        self.strip_audio_check.setEnabled(not (stripping_video or audio_absent))
-        self.sub_tab_bar.set_marked("Video", stripping_video or video_absent)
-        self.sub_tab_bar.set_marked("Audio", stripping_audio or audio_absent)
-        self.carousel.set_strip_state(stripping_video, stripping_audio or audio_absent)
-
         current_path = self.app.current_file_path
         reset = current_path != self._tracks_file
-        self.video_box.set_items(self._items_for("video"), reset=reset)
-        self.audio_box.set_items(self._items_for("audio"), reset=reset)
+        if info is not self._tracks_info:
+            self._reseed_tracks(info)
+            self._tracks_info = info
+        for kind, box in (("video", self.video_box), ("audio", self.audio_box)):
+            box.set_items(self._items_for(kind), reset=reset, checked=self._restore_checked.pop(kind, None))
+            self._checked_baseline[kind] = set(box.checked_ids())
         self._tracks_file = current_path
+
+        # A kind the user has removed every track of reads as stripped: the same
+        # red sub-tab, the same preview (Wave Loop / mute badge) and the same
+        # greyed panel. Only once the probe has *said* the source has that kind
+        # (`is True`) — before it lands the lists are empty for want of a probe.
+        video_emptied = info.get("has_video") is True and not self._tracks["video"]
+        audio_emptied = info.get("has_audio") is True and not self._tracks["audio"]
+
+        # Stripping (or emptying) one kind leaves the other as the only thing
+        # the output can hold, so it can't be stripped too.
+        self.strip_video_check.setEnabled(not (stripping_audio or audio_emptied or video_absent))
+        self.strip_audio_check.setEnabled(not (stripping_video or video_emptied or audio_absent))
+        self.sub_tab_bar.set_marked("Video", stripping_video or video_absent or video_emptied)
+        self.sub_tab_bar.set_marked("Audio", stripping_audio or audio_absent or audio_emptied)
+        self.carousel.set_strip_state(stripping_video or video_emptied,
+                                      stripping_audio or audio_absent or audio_emptied)
 
         video_codec = None if stripping_video else info.get("video")
         audio_codec = None if stripping_audio else info.get("audio")
         self._retarget_container(formats.containers_for(video_codec, audio_codec))
 
-        video_live = not stripping_video and not video_absent
-        audio_live = not stripping_audio and not audio_absent
-        self.video_box.setEnabled(video_live)
-        self.video_add_btn.setEnabled(video_live)
-        self.video_remove_btn.setEnabled(video_live)
-        self.video_select_all_btn.setEnabled(video_live)
-        self.video_deselect_all_btn.setEnabled(video_live)
-        self.audio_box.setEnabled(audio_live)
-        self.audio_add_btn.setEnabled(audio_live)
-        self.audio_remove_btn.setEnabled(audio_live)
-        self.audio_select_all_btn.setEnabled(audio_live)
-        self.audio_deselect_all_btn.setEnabled(audio_live)
+        for kind, stripping, absent in (("video", stripping_video, video_absent),
+                                        ("audio", stripping_audio, audio_absent)):
+            # "open": the panel isn't stripped or absent, so a track can still be added
+            # or a removal undone — an emptied panel stays open for exactly that.
+            # "has rows": there is something in the box to select, check or remove.
+            open_ = not stripping and not absent
+            has_rows = open_ and bool(self._tracks[kind])
+            history = self._history[kind]
+            getattr(self, f"{kind}_box").setEnabled(has_rows)
+            getattr(self, f"{kind}_add_btn").setEnabled(open_)
+            getattr(self, f"{kind}_remove_btn").setEnabled(has_rows)
+            getattr(self, f"{kind}_select_all_btn").setEnabled(has_rows)
+            getattr(self, f"{kind}_deselect_all_btn").setEnabled(has_rows)
+            getattr(self, f"{kind}_undo_btn").setEnabled(open_ and bool(history["undo"]))
+            getattr(self, f"{kind}_redo_btn").setEnabled(open_ and bool(history["redo"]))
 
         self._refresh_summary()
         self._apply_import_gate()
@@ -365,11 +488,16 @@ class MuxingTab(MediaTab):
                 return "— removed —", "stop"
             if info.get(f"has_{kind}") is False:
                 return f"— no {kind} stream —", "stop"
+            if info.get(f"has_{kind}") is True and not self._tracks[kind]:
+                return "— removed —", "stop"
             checked = box.checked_ids()
             if not checked:
                 return "— no streams selected —", "stop"
             bits = ["copy"]
-            actual = formats.short_name(info.get(kind))
+            # The first *checked* track's codec — the source's own first
+            # stream may have been removed, or unticked.
+            first = next(entry for entry in self._tracks[kind] if entry["id"] == checked[0])
+            actual = formats.short_name(first["stream"].get("codec") or first["stream"].get("codec_name"))
             if actual:
                 bits.append(actual)
             count = len(checked)
@@ -437,6 +565,17 @@ class MuxingTab(MediaTab):
             show_message(
                 self.app, "No Audio Track Selected",
                 "Check at least one Audio track to include, or turn on Strip Audio.",
+            )
+            return False
+        # Tracks can be removed outright, so "no rows" no longer means "the
+        # file has none": with nothing left to map anywhere ffmpeg would
+        # refuse to write an empty file.
+        if not ((not settings["strip_video"] and settings["video_tracks"])
+                or (not settings["strip_audio"] and settings["audio_tracks"])):
+            show_message(
+                self.app, "Nothing to Mux",
+                "Every track has been removed or stripped. Keep at least one track "
+                "(Undo brings a removed one back).",
             )
             return False
         return True

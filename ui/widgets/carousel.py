@@ -15,10 +15,11 @@ it's already there, so a direction change walks the highlight back across
 the middle slot first. The row re-flows on the same eased clock as the
 picture slide."""
 import json
+import math
 import os
 import time
 
-from PySide6.QtCore import QByteArray, QEasingCurve, QPointF, QRectF, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QByteArray, QEasingCurve, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import (
     QColor,
     QCursor,
@@ -30,9 +31,13 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QWidget
 
+from core.utilities import fps_text
+from ui import scale
 from ui import theme as T
+from ui.scale import fpx, px
+from ui.widgets.controls import ScaledLabel
 from ui.widgets.panels import ASSETS, local_paths
 
 # Dot indicators (see the module docstring for the design).
@@ -46,11 +51,11 @@ _DOT_ON = QColor(255, 255, 255, 235)
 _DOT_OFF = QColor(255, 255, 255, 90)
 
 _FADE_MS = 100
+_TIP_GRACE_MS = 50      # how long the info tip outlasts the pointer leaving the badge
 _SLIDE_MS = 115
 
 # Wave Loop: rendered by rlottie, dots flattened to white and tinted with the
 # primary→secondary gradient; the dot band is cropped and scaled to fill.
-_WAVE_INTERVAL_MS = 16
 _WAVE_BAND_LO = 0.42
 _WAVE_BAND_HI = 0.95
 _WAVE_FILL = 0.88
@@ -74,9 +79,103 @@ def _force_white_fills(node):
             _force_white_fills(value)
 
 
+def _shift_layer_time(layer, delta):
+    """Moves a Lottie layer `delta` frames in comp time: its start time, its out point,
+    and every keyframe (`{"t": ..., "s": ...}`) anywhere inside it."""
+    layer["st"] = layer.get("st", 0) + delta
+    layer["op"] = layer.get("op", 0) + delta
+
+    def walk(node):
+        if isinstance(node, dict):
+            if "t" in node and "s" in node:
+                node["t"] += delta
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(layer.get("ks"))
+    walk(layer.get("shapes"))
+
+
+def _close_wave_seam(data):
+    """Fixes the visible split down the middle of the Wave Loop, in the parsed JSON
+    (the file on disk is not touched).
+
+    The picture is a 1920px precomp of "Main Dot" columns, placed twice at 50% side by
+    side. Each column bobs up and down with a period of 238 frames and starts 10 frames
+    after its neighbour, so the wave's phase runs 0..240 across the width — but the
+    *last* column is the wrap-around twin of the first (exactly one comp width to its
+    right), so it has to be in the same phase as the first, and 240 is 2 frames past
+    the 238 that would be. Where the two copies meet, the twin columns each show half
+    of every dot, and those halves sat ~2px apart vertically: the split. Moving that
+    one column 2 frames (to 238) makes the halves join into whole dots.
+
+    Guarded on the structure it was found in — columns named "Main Dot …", the last one
+    exactly one comp width from the first, its start time not already a whole number of
+    periods — so a different animation is left alone."""
+    every_layer = list(data.get("layers", [])) + [l for a in data.get("assets", []) for l in a.get("layers", [])]
+    for asset in data.get("assets", []):
+        columns = [l for l in asset.get("layers", []) if str(l.get("nm", "")).startswith("Main Dot")]
+        # A precomp asset has no size of its own; the layers that place it do.
+        width = next((l["w"] for l in every_layer if l.get("refId") == asset.get("id") and l.get("w")), None)
+        if len(columns) < 3 or not width:
+            continue
+        try:
+            def x_of(layer):
+                return layer["ks"]["p"]["k"][0]["s"][0]
+
+            first, last = min(columns, key=x_of), max(columns, key=x_of)
+            keys = first["ks"]["p"]["k"]
+            period = keys[2]["t"] - keys[0]["t"]
+            if period <= 0 or abs(x_of(last) - x_of(first) - width) > 1:
+                continue
+            delta = round(last["st"] / period) * period - last["st"]
+        except (KeyError, IndexError, TypeError):
+            continue
+        if 0.5 < abs(delta) < period / 4:
+            _shift_layer_time(last, delta)
+
+
+def _loop_length(animation, total):
+    """How many of the file's `total` frames make one loop.
+
+    rlottie reports every frame from 0 to the out-point, but the artwork can end by
+    repeating its own start: Wave Loop.json has 240 frames of which 238 and 239 are
+    frames 0 and 1 again (measured: their pixel difference is 0.001 against a normal
+    adjacent step of 1.7). Playing all 240 shows ... 237, 0, 1, 0, 1, 2 ... — a small
+    step *backwards* at every restart, which read as a jitter in an otherwise
+    seamless loop. So: the shortest length near the end whose frame matches frame 0
+    (and whose next one matches frame 1). `total` if nothing repeats. Judged on a
+    tiny render of the alpha channel, so it costs a few milliseconds, once."""
+    width, height = 96, 54
+
+    def alpha(index):
+        return animation.lottie_animation_render(
+            frame_num=index, width=width, height=height, bytes_per_line=width * 4)[3::4]
+
+    def gap(a, b):
+        return sum(abs(x - y) for x, y in zip(a, b)) / len(a)
+
+    first, second = alpha(0), alpha(1)
+    step = gap(first, second)
+    if step <= 0:
+        return total
+    for length in range(max(total // 2, total - 8), total):
+        if gap(alpha(length), first) > 0.05 * step:
+            continue
+        if length + 1 < total and gap(alpha(length + 1), second) > 0.05 * step:
+            continue
+        return length
+    return total
+
+
 def _wave():
-    """`(animation, total_frames, fps)` for Wave Loop.json, loaded once — or
-    `(None, 0, 30)` if rlottie isn't importable / the file won't parse."""
+    """`(animation, loop_frames, fps)` for Wave Loop.json, loaded once — or
+    `(None, 0, 30)` if rlottie isn't importable / the file won't parse.
+    `loop_frames` is the length of one seamless loop (`_loop_length`), which can be
+    shorter than the file's own frame count."""
     if "wave" not in _CACHE:
         _CACHE["wave"] = (None, 0, 30.0)
         try:
@@ -85,10 +184,12 @@ def _wave():
             with open(os.path.join(ASSETS, "Wave Loop.json"), encoding="utf-8") as fh:
                 data = json.load(fh)
             _force_white_fills(data)
+            _close_wave_seam(data)
             animation = LottieAnimation.from_data(json.dumps(data))
+            total = animation.lottie_animation_get_totalframe() or 0
             _CACHE["wave"] = (
                 animation,
-                animation.lottie_animation_get_totalframe() or 0,
+                _loop_length(animation, total) if total > 1 else total,
                 animation.lottie_animation_get_framerate() or 30.0,
             )
         except Exception:
@@ -186,8 +287,12 @@ class WaveLayer(QWidget):
         self._frame = None       # QImage — the current tinted frame
         self._frame_key = None   # (idx, w, h, dpr, theme)
         self._t0 = time.monotonic()
+        # Single-shot, re-armed for the moment the *next frame* is due (`_schedule`),
+        # not a fixed 16ms poll: the file is ~30fps, so polling at ~60Hz showed each
+        # frame for 2 or 3 ticks (measured 25–54ms per 33ms frame) — uneven pacing.
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.PreciseTimer)
+        self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._tick)
         T.theme.changed.connect(self._invalidate)
 
@@ -195,7 +300,7 @@ class WaveLayer(QWidget):
         if not self._timer.isActive():
             self._t0 = time.monotonic()
             if _wave()[0] is not None:
-                self._timer.start(_WAVE_INTERVAL_MS)
+                self._schedule()
         self.show()
         self.raise_()
         self.update()
@@ -216,10 +321,19 @@ class WaveLayer(QWidget):
 
     def _tick(self):
         if not self.isVisible():
-            return
+            return          # not re-armed: `start()` does that when it is shown again
         idx = self._index()
         if self._frame_key is None or self._frame_key[0] != idx:
             self.update()
+        self._schedule()
+
+    def _schedule(self):
+        """Arms the timer for the instant the next frame is due (rounded up, so it can't
+        fire just before the boundary and have to wait another tick)."""
+        _animation, _frames, fps = _wave()
+        elapsed = time.monotonic() - self._t0
+        due = (int(elapsed * fps) + 1) / fps
+        self._timer.start(max(1, math.ceil((due - elapsed) * 1000)))
 
     def _render(self, idx):
         dpr = self.devicePixelRatioF() or 1.0
@@ -262,29 +376,40 @@ class WaveLayer(QWidget):
         self.carousel.paint_badges(p, QRectF(self.rect()))
 
 
-class _InfoTooltip(QLabel):
-    """The info badge's hover tooltip — dark body, primary border."""
+class _InfoTooltip(ScaledLabel):
+    """The info badge's hover tooltip — dark body, primary border.
+
+    It takes the mouse (a real top-level window), so the pointer can move from the
+    badge onto it and keep it up: `entered` / `left` tell the carousel. Nothing here
+    hides it — the carousel decides, with a short grace period (see
+    `ThumbnailCarousel._hide_tooltip_soon`). It used to be made click-through so a tip
+    that landed under the cursor could not steal the mouse; that was the wrong fix for
+    the flicker (the tip was in the wrong place — it is now anchored above the badge)
+    and it made hovering the tip impossible."""
+
+    entered = Signal()
+    left = Signal()
 
     def __init__(self):
         super().__init__(None, Qt.ToolTip | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        # Without this, the tooltip — a real top-level window — can end up
-        # sitting directly under the cursor once shown (worse the bigger the
-        # info icon renders, i.e. the expanded preview): the OS then routes
-        # the next move to *it* instead of the carousel, which reads as the
-        # carousel's mouse having left, fading the whole hover overlay out
-        # and hiding the tooltip, which puts the carousel back under the
-        # cursor and re-triggers everything — a rapid flicker loop. Same
-        # fix WaveLayer already uses for the same class of problem.
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setTextFormat(Qt.PlainText)
         self._restyle()
         T.theme.changed.connect(self._restyle)
+        scale.changed.connect(self._restyle)
+
+    def enterEvent(self, e):
+        self.entered.emit()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self.left.emit()
+        super().leaveEvent(e)
 
     def _restyle(self):
         self.setStyleSheet(
             f"QLabel {{ background: {T.theme.hex('tooltip_bg')}; color: white;"
-            f" border: 1px solid {T.theme.hex('primary')}; padding: 8px 10px;"
+            f" border: {px(1)}px solid {T.theme.hex('primary')}; padding: {px(8)}px {px(10)}px;"
             f" font-family: Arial; font-size: 13px; }}"
         )
 
@@ -317,6 +442,12 @@ class ThumbnailCarousel(QWidget):
         self._scaled = {}            # (index, w, h, dpr) -> QPixmap
         self._prev_press_central = False
         self._tooltip = None
+        # Mouse-driven hides wait a moment (`_hide_tooltip_soon`) so the pointer can
+        # cross the gap from the badge to the tip, and rest on the tip, without it going.
+        self._tooltip_grace = QTimer(self)
+        self._tooltip_grace.setSingleShot(True)
+        self._tooltip_grace.setInterval(_TIP_GRACE_MS)
+        self._tooltip_grace.timeout.connect(self._grace_expired)
         self._expanded = False
 
         self._arrow_alpha = 0.0
@@ -358,6 +489,12 @@ class ThumbnailCarousel(QWidget):
         self._sync_wave()
         self.update()
 
+    def forget_populated(self):
+        """Back to "nothing imported yet": the next non-empty frame set (or audio-only
+        file) fires `populated` again. Without it a rejected import left the flag set,
+        so a later good file never revealed the carousel and the drop box stayed up."""
+        self._populated = False
+
     def set_frames(self, frames):
         """New frame list (QImages). Resets to the first frame; the first
         non-empty set fires `populated` so the tab can reveal the carousel."""
@@ -378,6 +515,7 @@ class ThumbnailCarousel(QWidget):
         if (bool(strip_video), bool(strip_audio)) == (self._strip_video, self._strip_audio):
             return
         self._strip_video, self._strip_audio = bool(strip_video), bool(strip_audio)
+        self._refresh_open_tooltip()      # what it says depends on the mode
         self._cancel_anim()
         self._arrow_alpha = 0.0
         self._sync_wave()
@@ -387,6 +525,7 @@ class ThumbnailCarousel(QWidget):
         if bool(audio_only) == self._audio_only:
             return
         self._audio_only = bool(audio_only)
+        self._refresh_open_tooltip()
         self._cancel_anim()
         self._arrow_alpha = 0.0
         if self._audio_only:
@@ -473,10 +612,11 @@ class ThumbnailCarousel(QWidget):
             return QRectF()
         image = frames[self._index if index is None else index]
         iw, ih = image.width(), image.height()
-        if iw <= 0 or ih <= 0 or self.width() <= 8 or self.height() <= 8:
+        inset = px(8)
+        if iw <= 0 or ih <= 0 or self.width() <= inset or self.height() <= inset:
             return QRectF()
-        scale = min((self.width() - 8) / iw, (self.height() - 8) / ih)
-        w, h = max(1.0, iw * scale), max(1.0, ih * scale)
+        k = min((self.width() - inset) / iw, (self.height() - inset) / ih)
+        w, h = max(1.0, iw * k), max(1.0, ih * k)
         return QRectF(round((self.width() - w) / 2), round((self.height() - h) / 2), round(w), round(h))
 
     def _pixmap(self, index, rect):
@@ -533,10 +673,10 @@ class ThumbnailCarousel(QWidget):
         expand icon, which only shrink once expanded."""
         if w <= 0 or h <= 0:
             return None, None, 0.0
-        disc_r = max(14.0, min(w, h) * 0.12)
+        disc_r = max(fpx(14.0), min(w, h) * 0.12)
         disc_r = min(disc_r, w * 0.16, h * 0.42)
         disc_r *= 0.75
-        margin = max(4.0, disc_r * 0.14)
+        margin = max(fpx(4.0), disc_r * 0.14)
         cy = h / 2
         last = len(self._frames) - 1
         left = (margin + disc_r, cy) if self._index > 0 else None
@@ -544,7 +684,7 @@ class ThumbnailCarousel(QWidget):
         return left, right, disc_r
 
     def _dot_geometry(self, w, h, dot_start):
-        scale = self._dot_scale()
+        k = self._dot_scale()
         n = len(self._frames)
         cluster_lo, cluster_hi = dot_start, dot_start + _DOT_CLUSTER - 1
         lo = max(0, cluster_lo - _DOT_LOOK)
@@ -553,9 +693,9 @@ class ThumbnailCarousel(QWidget):
         geo = {}
         for f in range(lo, hi + 1):
             dist = cluster_lo - f if f < cluster_lo else f - cluster_hi if f > cluster_hi else 0
-            r = (_DOT_R_LARGE if dist == 0 else _DOT_R_MED if dist == 1 else _DOT_R_SMALL) * scale
-            geo[f] = (w / 2 + (f - cluster_mid) * _DOT_GAP * scale, r)
-        return geo, h - 18 * scale
+            r = fpx(_DOT_R_LARGE if dist == 0 else _DOT_R_MED if dist == 1 else _DOT_R_SMALL) * k
+            geo[f] = (w / 2 + (f - cluster_mid) * fpx(_DOT_GAP) * k, r)
+        return geo, h - fpx(18) * k
 
     def _resolve_dot_start(self, new_index, delta, prev_index, prev_start):
         n = len(self._frames)
@@ -664,7 +804,7 @@ class ThumbnailCarousel(QWidget):
             p.drawEllipse(QPointF(cx, cy), disc_r, disc_r)
             half_w, half_h = disc_r * 0.38, disc_r * 0.45
             ox = direction * half_w * 0.13   # optical-centre nudge toward the tip
-            pen = QPen(arrow, max(2.0, disc_r * 0.135))
+            pen = QPen(arrow, max(fpx(2.0), disc_r * 0.135))
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
             p.setPen(pen)
@@ -677,19 +817,19 @@ class ThumbnailCarousel(QWidget):
 
     def _badge_sizes(self, rect):
         short = min(rect.width(), rect.height())
-        mute_size = max(18, round(short * 0.14 * self._icon_scale()))
-        info_size = max(18, round(short * 0.09 * self._info_badge_scale()))
+        mute_size = max(px(18), round(short * 0.14 * self._icon_scale()))
+        info_size = max(px(18), round(short * 0.09 * self._info_badge_scale()))
         return mute_size, info_size
 
     def _info_badge_rect(self, rect):
         _, info_size = self._badge_sizes(rect)
-        margin = max(4, round(info_size * 0.35))
+        margin = max(px(4), round(info_size * 0.35))
         return QRectF(rect.left() + margin, rect.bottom() - info_size - margin, info_size, info_size)
 
     def _expand_icon_rect(self, rect):
         short = min(rect.width(), rect.height())
-        size = max(20, round(short * 0.11 * self._expand_icon_scale()))
-        margin = max(4, round(size * 0.35))
+        size = max(px(20), round(short * 0.11 * self._expand_icon_scale()))
+        margin = max(px(4), round(size * 0.35))
         return QRectF(rect.right() - size - margin, rect.bottom() - size - margin, size, size)
 
     def _paint_expand_icon(self, p, rect):
@@ -723,7 +863,7 @@ class ThumbnailCarousel(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         mute_size, _ = self._badge_sizes(rect)
         if self._strip_audio and not self._expanded:
-            margin = max(4, round(mute_size * 0.28))
+            margin = max(px(4), round(mute_size * 0.28))
             _svg_renderer("audio-mute.svg").render(
                 p, QRectF(rect.left() + margin, rect.top() + margin, mute_size, mute_size))
         if self._media_info:
@@ -802,7 +942,7 @@ class ThumbnailCarousel(QWidget):
 
     def leaveEvent(self, e):
         self._fade_to(0.0)
-        self._hide_tooltip()
+        self._hide_tooltip_soon()
 
     def _local_frame_xy(self, pos):
         rect = self._frame_rect()
@@ -823,7 +963,7 @@ class ThumbnailCarousel(QWidget):
         first frame (no left chevron) or the last (no right chevron), that
         side is just dead space and should double-click like anywhere else."""
         left, right, radius = self._disc_centers(w, h)
-        reach = radius * 2.0 + 16.0
+        reach = radius * 2.0 + fpx(16.0)
         return (left is not None and x < reach) or (right is not None and x > w - reach)
 
     def _press(self, pos, repeat):
@@ -876,9 +1016,13 @@ class ThumbnailCarousel(QWidget):
 
     def mouseMoveEvent(self, e):
         if self._over_info_badge(e.position()):
-            self._show_tooltip()
+            # Already up: moving within the badge leaves it alone (re-showing it on
+            # every move made the popup window itself flicker).
+            self._tooltip_grace.stop()
+            if self._tooltip is None or not self._tooltip.isVisible():
+                self._show_tooltip()
         else:
-            self._hide_tooltip()
+            self._hide_tooltip_soon()
         self.setCursor(self._hover_cursor(e.position()))
 
     def _over_chevron(self, pos):
@@ -932,7 +1076,11 @@ class ThumbnailCarousel(QWidget):
         if not self._media_info:
             return False
         if self._wave_mode():
-            wave_pos = self.mapTo(self.wave, pos.toPoint())
+            # The wave layer is a sibling of the carousel (both children of the tab), not
+            # an ancestor, so `mapTo(self.wave, ...)` — which walks *up* to `wave` — has
+            # nowhere to arrive and returned garbage: the badge never registered a hover
+            # while the video was stripped or for an audio-only file. Via screen coords.
+            wave_pos = self.wave.mapFromGlobal(self.mapToGlobal(pos.toPoint()))
             badge = self._info_badge_rect(QRectF(self.wave.rect()))
             point = QPointF(wave_pos)
         else:
@@ -979,15 +1127,68 @@ class ThumbnailCarousel(QWidget):
     def _show_tooltip(self):
         if self._tooltip is None:
             self._tooltip = _InfoTooltip()
+            self._tooltip.entered.connect(self._tooltip_grace.stop)
+            self._tooltip.left.connect(self._hide_tooltip_soon)
+        self._tooltip_grace.stop()
         self._tooltip.setText(self._info_text())
         self._tooltip.adjustSize()
-        origin = self.mapToGlobal(self.rect().bottomLeft())
-        self._tooltip.move(origin.x() + 8, origin.y() - self._tooltip.height() - 34)
+        # Anchored to the badge, above it and never over it. It used to hang off the
+        # carousel's own bottom-left corner at a fixed offset, which sat just above
+        # the badge in the small preview but *on top of it* in the expanded one (the
+        # badge there is bigger, and further from that corner) — the tooltip under the
+        # cursor, so the carousel lost the mouse, faded, hid the tooltip, and the
+        # loop flickered without ever showing the info.
+        badge = self._badge_global_rect()
+        gap = max(px(12), round(badge.height() * 0.4))     # clears the badge's own hover margin
+        x, y = badge.left(), badge.top() - self._tooltip.height() - gap
+        screen = self.screen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            x = max(avail.left(), min(x, avail.right() - self._tooltip.width()))
+            if y < avail.top():           # no room above: beside the badge instead
+                x, y = badge.right() + gap, max(avail.top(), badge.bottom() - self._tooltip.height())
+        self._tooltip.move(x, y)
         self._tooltip.show()
 
+    def _badge_global_rect(self):
+        """The info badge in screen coordinates — where it is actually drawn, which
+        is on the Wave Loop layer (not the carousel) in wave mode."""
+        if self._wave_mode():
+            rect, host = self._info_badge_rect(QRectF(self.wave.rect())), self.wave
+        else:
+            rect, host = self._info_badge_rect(self._frame_rect()), self
+        box = rect.toRect()
+        return QRect(host.mapToGlobal(box.topLeft()), box.size())
+
+    def _refresh_open_tooltip(self):
+        """Re-words (and re-anchors: the badge moves between the picture and the wave
+        layer) a tip that is showing while the preview's mode changes under it."""
+        if self._tooltip is not None and self._tooltip.isVisible():
+            self._show_tooltip()
+
     def _hide_tooltip(self):
+        """Hides the tip at once — for a change of state (file, collapse, teardown)."""
+        self._tooltip_grace.stop()
         if self._tooltip is not None:
             self._tooltip.hide()
+
+    def _hide_tooltip_soon(self):
+        """The pointer left the badge (or the tip): hide after a short grace, so it can
+        travel from one to the other and keep the tip up."""
+        if self._tooltip is not None and self._tooltip.isVisible():
+            self._tooltip_grace.start()
+
+    def _grace_expired(self):
+        """Hides the tip unless the pointer has come to rest on it or back on the badge —
+        judged from where the cursor is now, so a missed enter/leave can't strand it."""
+        if self._tooltip is None or not self._tooltip.isVisible():
+            return
+        cursor = QCursor.pos()
+        if self._tooltip.frameGeometry().contains(cursor):
+            return
+        if self._over_info_badge(QPointF(self.mapFromGlobal(cursor))):
+            return
+        self._tooltip.hide()
 
     @staticmethod
     def _mastering_text(info):
@@ -1010,7 +1211,12 @@ class ThumbnailCarousel(QWidget):
         lines = []
         if info.get("container"):
             lines.append(f"Container: {info['container']}")
-        if info.get("has_video") is False:
+        # The Wave Loop shows for stripped video and for audio-only input: there the
+        # badge speaks of the audio only — no Video line, no mastering line, not even
+        # "Video: none".
+        if self._wave_mode():
+            pass
+        elif info.get("has_video") is False:
             lines.append("Video: none")
         elif info.get("video"):
             bits = [info["video"]]
@@ -1020,6 +1226,8 @@ class ThumbnailCarousel(QWidget):
                 bits.append(f"L{info['video_level']}")
             if info.get("width") and info.get("height"):
                 bits.append(f"{info['width']}x{info['height']}")
+            if info.get("fps"):
+                bits.append(f"{fps_text(info['fps'])} fps")      # right beside the resolution
             if info.get("hdr"):
                 bits.append("HDR")
             lines.append("Video: " + " · ".join(bits))
@@ -1034,7 +1242,7 @@ class ThumbnailCarousel(QWidget):
                     bits.append(info[key])
             streams = info.get("audio_streams") or []
             if len(streams) > 1:
-                bits.append(f"{len(streams)} tracks")
+                bits.append(f"+ {len(streams)} tracks")
             lines.append("Audio: " + " · ".join(bits))
         if info.get("duration"):
             total = int(info["duration"])
@@ -1100,7 +1308,8 @@ class _ExpandedPreviewOverlay(QWidget):
     def _layout_carousel(self):
         if self._carousel is None:
             return
-        avail = self.rect().adjusted(self._MARGIN, self._MARGIN, -self._MARGIN, -self._MARGIN)
+        m = px(self._MARGIN)
+        avail = self.rect().adjusted(m, m, -m, -m)
         self._carousel.setGeometry(avail)
 
     def show_with(self, carousel):

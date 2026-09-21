@@ -9,7 +9,9 @@ from PySide6.QtCore import QEasingCurve, QPoint, QRectF, Qt, QTimer, QVariantAni
 from PySide6.QtGui import QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
 
+from ui import scale
 from ui import theme as T
+from ui.scale import px
 from ui.widgets.controls import ui_font
 
 _TOAST_WIDTH = 260
@@ -35,7 +37,7 @@ class Toast(QWidget):
         self._dismissed = False
         self.retiring = False
         self._rest = QPoint()
-        self.setFixedSize(_TOAST_WIDTH, _TOAST_HEIGHT)
+        scale.fixed(self, _TOAST_WIDTH, _TOAST_HEIGHT)
         self.setCursor(Qt.PointingHandCursor)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
@@ -56,9 +58,10 @@ class Toast(QWidget):
 
     def start(self, rest):
         self._rest = rest
-        self._slide.setStartValue(float(rest.y() - _TOAST_HEIGHT - _INSET))
+        offscreen = px(_TOAST_HEIGHT) + px(_INSET)
+        self._slide.setStartValue(float(rest.y() - offscreen))
         self._slide.setEndValue(float(rest.y()))
-        self.move(rest.x(), rest.y() - _TOAST_HEIGHT - _INSET)
+        self.move(rest.x(), rest.y() - offscreen)
         self.show()
         self.raise_()
         self._slide.start()
@@ -112,8 +115,9 @@ class Toast(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setOpacity(self._opacity)
+        scale.begin(p)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), _CORNER, _CORNER)
+        path.addRoundedRect(scale.ref_rect(self), _CORNER, _CORNER)
         p.fillPath(path, th.color("primary"))
         p.setPen(th.color("primary_text"))
         p.setFont(ui_font(13))
@@ -141,8 +145,8 @@ class ToastManager:
     def _slot(self, index):
         frame = self._frame()
         top_right = frame.mapTo(self.window, frame.rect().topRight())
-        return QPoint(top_right.x() - _TOAST_WIDTH - _INSET + 1,
-                      top_right.y() + _INSET + index * (_TOAST_HEIGHT + _STACK_GAP))
+        return QPoint(top_right.x() - px(_TOAST_WIDTH) - px(_INSET) + 1,
+                      top_right.y() + px(_INSET) + index * (px(_TOAST_HEIGHT) + px(_STACK_GAP)))
 
     def forget(self, toast):
         if toast in self._toasts:
@@ -156,6 +160,11 @@ class ToastManager:
                 continue
             toast.reposition(self._slot(index))
             index += 1
+
+    def raise_all(self):
+        """Bring every live toast back above whatever was raised since."""
+        for toast in self._toasts:
+            toast.raise_()
 
     def clear(self):
         for toast in list(self._toasts):

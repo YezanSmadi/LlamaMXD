@@ -248,7 +248,10 @@ FPS_ARG = None              # -r value when FPS picks a real rate, else None
 # One entry per *included* source audio stream (EncodingTab's Audio Track
 # dropdown + Choose Stream(s) picker), in output order -- [] when
 # STRIP_AUDIO or the source has no audio at all. Each entry:
-#   {"src_index": 0,            -- which source stream (-map 0:a:<src_index>)
+#   {"src_index": 0,            -- which stream of its file (-map <input>:a:<src_index>)
+#    "source": "primary",       -- "primary" (the job's input) or "external" (a
+#    "file": None,              -- browsed-in file, whose path this is) -- the
+#                               -- same shape Muxing's tracks use
 #    "codec_arg": "aac",        -- -c:a:<output position>, or "copy"
 #    "bitrate_arg": "192k",     -- -b:a:<output position>, or None (omit)
 #    "channels_arg": 2,         -- -ac:<output position>, or None (omit)
@@ -315,6 +318,8 @@ def _audio_stream_args(entry):
     sample_rate = entry.get("sample_rate") or formats.SELECT
     return {
         "src_index": int(entry.get("index") or 0),
+        "source": entry.get("source") or "primary",
+        "file": entry.get("file"),
         "codec_arg": "copy" if passthru else formats.AUDIO_ENCODERS.get(codec, "copy"),
         "bitrate_arg": None if passthru else formats.bitrate_arg_for(bitrate),
         "channels_arg": None if passthru else _CHANNEL_COUNTS.get(channels),
@@ -364,7 +369,7 @@ def _fps_arg(fps, source_fps):
     target = formats.fps_arg_for(fps)
     if not target:
         return None
-    if source_fps and float(target) > source_fps + 0.1:
+    if source_fps and formats.fps_number_for(fps) > source_fps + 0.1:
         return None
     return target
 
