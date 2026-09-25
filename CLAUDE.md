@@ -5,8 +5,8 @@ PySide6 (Qt 6). Wraps ffmpeg and yt-dlp behind a tabbed interface. Repo:
 `https://github.com/YezanSmadi/LlamaMXD`. **GPL-3.0-or-later** (the `LICENSE.txt` file is the FSF's GPLv3
 text; every `.py` file starts with `# SPDX-License-Identifier: GPL-3.0-or-later` and `# Copyright (C)
 2026 Yezan Smadi` — **put the same two lines on any new source file**, as the "or later" is stated there).
-It was the Unlicense up to v0.5.0-beta.3; those releases stay public domain. Currently
-v0.5.0-beta.3 (the sidebar footer — `VERSION` in `ui/widgets/panels.py`).
+It was the Unlicense up to v0.5.0-beta.3 (beta.4 is the first GPL release); those releases stay public domain. Currently
+v0.5.0-beta.4 (the sidebar footer — `VERSION` in `ui/widgets/panels.py`).
 
 ## Running
 

@@ -24,7 +24,7 @@ from ui.widgets.controls import (
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ASSETS = os.path.join(_REPO_ROOT, "assets")
-VERSION = "v0.5.0-beta.3"
+VERSION = "v0.5.0-beta.4"
 
 MEDIA_FILTER = (
     "Media files (*.mp4 *.mkv *.mov *.webm *.avi *.m4v *.mxf *.ts *.vob "
