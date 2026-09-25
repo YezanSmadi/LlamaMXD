@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Live theme state for the UI.
 
 The brand palettes come from `core.theme` (THEMES / get_theme /

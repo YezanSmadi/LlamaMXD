@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """A themed hover tooltip for option controls, attached with `tip(widget, text)`.
 
 Mirrors `carousel._InfoTooltip`'s look (dark body, primary border) but is
@@ -44,11 +46,18 @@ class _Tooltip(ScaledLabel):
         scale.changed.connect(self._restyle)
 
     def _restyle(self):
-        self.setStyleSheet(
+        # Connected to `scale.changed` (this manager's tooltip is one shared,
+        # always-alive widget), which fires on every live-resize step
+        # regardless of which tab is showing: skip the setStyleSheet call
+        # when the text it would set hasn't actually changed.
+        css = (
             f"QLabel {{ background: {T.theme.hex('tooltip_bg')}; color: white;"
             f" border: {px(1)}px solid {T.theme.hex('primary')}; border-radius: {px(4)}px;"
             f" padding: {px(6)}px {px(9)}px; font-family: Arial; font-size: 12px; }}"
         )
+        if css != getattr(self, "_last_css", None):
+            self._last_css = css
+            self.setStyleSheet(css)
 
     def fade_in(self):
         self.setWindowOpacity(0.0)

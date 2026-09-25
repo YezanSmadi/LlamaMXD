@@ -8,10 +8,10 @@ this file is a per-file reference instead.
 Directory layout:
 
 ```
-LlamaPY GUI/
+LlamaMXD/
 ├── main.py
 ├── requirements.txt
-├── LICENSE
+├── LICENSE.txt
 ├── .gitignore
 ├── .vscode/
 │   └── settings.json
@@ -117,10 +117,23 @@ practice installed globally, no venv):
 pip packages — they're bundled in the gitignored `dependables/` folder and
 resolved by `core/tools.py`.
 
-### `LICENSE`
+### `LICENSE.txt`
 
-The [Unlicense](https://unlicense.org) — public-domain dedication, no
-copyright restrictions and no warranty.
+The [GNU General Public License, version 3](https://www.gnu.org/licenses/gpl-3.0.html), or
+(at your option) any later version — `GPL-3.0-or-later`. Every source file carries an
+`SPDX-License-Identifier` line and a copyright line at its top, which is where the "or later" is
+stated. Releases before this relicense (up to v0.5.0-beta.3) were published under the Unlicense
+and stay public domain. The About tab in Settings shows GNU's short notice and has a
+View License button that opens this file (a `.txt`, so Windows opens it in the default text editor).
+
+### `licenses/`
+
+The licenses of the programs, libraries and fonts LlamaMXD uses, in 15 files: `README.txt` (an index with
+each component's version, license and source URL), one file per library or font (each opens with a header
+and then holds that component's license texts, unedited), and a folder each for ffmpeg and yt-dlp — the
+two GPL programs — with a `SOURCE.txt` pointing to their exact source. The GPL text for all of them is the
+root `LICENSE.txt`. Unlike `dependables/`, the folder is tracked in git. The installer ships it, and `LICENSE.txt`,
+beside the app; Settings > About has a button that opens it.
 
 ### `.gitignore`
 
@@ -143,8 +156,6 @@ Everything the app loads at runtime, all read `__file__`-anchored.
 - **`LlamaMXD-Logo.svg`** — the sidebar logo (a vector), rendered at 4x
   oversample and re-tinted to `primary_text` so it follows the theme
   (`ui/widgets/panels.py`'s `Sidebar._load_logo`).
-- **`LlamaMXD-Logo2.svg`** — the earlier raster-in-SVG version of the logo;
-  kept in the folder, nothing loads it.
 - **`RCA Cable Yellow.svg`** — the RCA cable that plugs from the active nav
   button into the tab frame (`_TabPipe`, `ui/widgets/panels.py`). Drawn in its
   own fixed colours — not theme-tinted.

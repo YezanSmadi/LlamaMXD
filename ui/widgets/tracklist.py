@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """`TrackListBox` — Muxing's inline, checkable track picker: a scrollable,
 secondary-bordered box (see `BorderedFrame`) where each row is one stream the
 output can carry, checked to include it. It's the same "one checkbox per

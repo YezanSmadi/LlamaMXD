@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Output file naming: the template Settings stores (`{source}-{title}` by
 default) and the tokens it can hold. Pure data + string handling, no UI code.
 

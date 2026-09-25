@@ -1,0 +1,14 @@
+
+yt-dlp.exe
+yt-dlp 2026.08.19, the official Windows executable from the yt-dlp project
+
+License: yt-dlp's own code is the Unlicense (public domain). The executable is a PyInstaller bundle that also
+contains Python and other libraries, some under the GNU GPL, so the executable as a whole is distributed under
+the GPL v3 or later. The GPL text is the file LICENSE.txt in the LlamaMXD folder (and is also inside
+THIRD_PARTY_LICENSES.txt). Every bundled component and its license text is in THIRD_PARTY_LICENSES.txt, which
+the yt-dlp project publishes with the executable.
+
+Source code:
+  yt-dlp 2026.08.19:  https://github.com/yt-dlp/yt-dlp/tree/2026.08.19
+  Source of the bundled third-party components is available from their original projects (see
+  THIRD_PARTY_LICENSES.txt for each one's URL).

@@ -1,0 +1,25 @@
+
+ffmpeg.exe and ffprobe.exe (also ffplay.exe, kept for later)
+FFmpeg 9.0.2, "full build" for Windows by gyan.dev
+
+License: GNU General Public License v3 or later. This build enables FFmpeg's GPL and version-3 parts
+(--enable-gpl --enable-version3) and contains no non-free components. The license text is the file LICENSE.txt
+in the LlamaMXD folder.
+  gyan-build-README.txt    the build's own readme: version, license, source commit, and the list of external
+                           libraries it is built with
+  FFmpeg's own overview of its licensing: https://github.com/FFmpeg/FFmpeg/blob/n9.0.2/LICENSE.md
+
+Source code (the "corresponding source" the GPL asks for):
+  FFmpeg, the exact commit this build was made from:
+      https://github.com/FFmpeg/FFmpeg/commit/946fcce07b
+  FFmpeg 9.0.2 release archive:
+      https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+  The build itself (binaries and build notes):
+      https://github.com/GyanD/codexffmpeg/releases/tag/9.0.2
+      https://www.gyan.dev/ffmpeg/builds/
+
+The build links the external libraries listed in gyan-build-README.txt (x264, x265, libvpx, libaom, SVT-AV1,
+libplacebo, ...) statically. Each is under its own license (GPL, LGPL, BSD, MIT, ...), all of which allow the
+combined program to be distributed under the GPL v3. Their sources are available from their own projects.
+
+FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.

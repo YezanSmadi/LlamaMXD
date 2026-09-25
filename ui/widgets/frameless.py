@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """The borderless window's own chrome. A frameless window has no OS title bar
 or border, so this module supplies what the OS would have: `ResizeGrips`
 (eight invisible strips hugging the outline that hand the drag to the OS with

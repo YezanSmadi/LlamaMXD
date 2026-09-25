@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Small themed controls, each painting itself from `ui.theme.theme`.
 
 Every widget paints in one QPainter pass into Qt's backing store and Qt
@@ -691,6 +693,7 @@ class Dropdown(QComboBox):
     _OPEN_MS = 150
     _GAP = 3
     _ARROW_W = 28.0
+    open_one = None      # the dropdown whose list is showing, if any (the keyboard routes to it)
 
     def __init__(self, values=(), width=None, parent=None):
         super().__init__(parent)
@@ -786,6 +789,7 @@ class Dropdown(QComboBox):
             self.blockSignals(False)
         super().showPopup()
         self._open = True
+        Dropdown.open_one = self
         c = self._container
         gap = px(self._GAP)
         below = self.mapToGlobal(self.rect().bottomLeft())
@@ -815,7 +819,29 @@ class Dropdown(QComboBox):
         # so only a popup that was genuinely open counts as closing.
         if self._open:
             self._open = False
+            if Dropdown.open_one is self:
+                Dropdown.open_one = None
             self.popupClosed.emit()
+
+    def move_highlight(self, delta):
+        """Keyboard: move the open list's highlighted row by `delta` (clamped at the ends), as
+        hovering it would — `hovered` fires, so Settings' theme preview follows the arrow keys."""
+        view = self.view()
+        row = view.currentIndex().row()
+        row = self.currentIndex() if row < 0 else row
+        row = max(0, min(self.count() - 1, row + delta))
+        index = self.model().index(row, 0)
+        view.setCurrentIndex(index)
+        view.scrollTo(index)
+        self.hovered.emit(self.itemText(row))
+
+    def pick_highlighted(self):
+        """Keyboard: choose the open list's highlighted row, exactly as clicking it would."""
+        row = self.view().currentIndex().row()
+        self.hidePopup()
+        if row >= 0:
+            self.setCurrentIndex(row)
+            self._on_activated(row)
 
     def _unroll_step(self, t):
         c = self._container
@@ -1097,13 +1123,25 @@ class SegmentedButton(QWidget):
         self.update()
 
     def mousePressEvent(self, e):
-        i = self._hit(scale.ref_pos(e.position()).x())
+        self.select(self._hit(scale.ref_pos(e.position()).x()))
+
+    def select(self, i):
+        """Slide to segment `i` and report it (a user choice, from a click or the keyboard)."""
         if i >= 0 and i != self._index and self.isEnabled():
             self._from = self._pos
             self._index = i
             self._slide.stop()
             self._slide.start()
             self.changed.emit(self._options[i])
+
+    def nav_stops(self):
+        """The keyboard's stops: `(rect in real pixels, activate)` per segment."""
+        f = scale.factor()
+        edge, stops = 2, []
+        for i, w in enumerate(self._widths):
+            stops.append((QRectF(edge * f, 0, w * f, self.height()).toRect(), lambda i=i: self.select(i)))
+            edge += w
+        return stops
 
     def changeEvent(self, e):
         self.update()
@@ -1247,10 +1285,10 @@ class _TimeField(QWidget):
         p.drawPath(path)
 
         enabled = self.isEnabled()
-        # Muted like a placeholder while every digit's still 0 — a duration
+        # Muted like a placeholder while every digit's still 0 — a time
         # that's never been touched (or was clicked back down to it) reads
         # as "not set" rather than "00:00:00, the number zero". Only applies
-        # to fields opted into it (Clip Duration, not Start Time).
+        # to fields opted into it (both trim fields: Start Time and Clip Duration).
         muted = self._mute_when_zero and all(d == "0" for d in self.digits)
         rects = self._char_rects()
         p.setFont(self._font)

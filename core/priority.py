@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Process priority for the encode/download jobs the Queue runs (Settings'
 "Priority Level"). Windows priority classes, by the same names Task Manager
 uses; `REALTIME` is deliberately not offered — it can starve the mouse and

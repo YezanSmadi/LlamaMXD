@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Shared hover-tooltip copy for codec and container/format dropdowns.
 
 Both Encoding and Downloader offer a codec choice, and Muxing/Encoding/

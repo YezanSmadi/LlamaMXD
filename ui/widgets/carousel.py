@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """The preview carousel — up to ten frames of the selected file, with hover
 chevrons, a sliding transition, a re-flowing dot row, the info badge + its
 tooltip, the mute badge, and the Wave Loop visualiser for stripped video /
@@ -33,12 +35,13 @@ from PySide6.QtGui import (
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QWidget
 
+from core import llamalog
 from core.utilities import fps_text
 from ui import scale
 from ui import theme as T
 from ui.scale import fpx, px
 from ui.widgets.controls import ScaledLabel
-from ui.widgets.panels import ASSETS, local_paths
+from ui.widgets.panels import ASSETS, force_white_fills, local_paths
 
 # Dot indicators (see the module docstring for the design).
 _DOT_R_LARGE = 4.0
@@ -51,6 +54,10 @@ _DOT_ON = QColor(255, 255, 255, 235)
 _DOT_OFF = QColor(255, 255, 255, 90)
 
 _FADE_MS = 100
+# The chevrons and the expand icon grow to this size while the pointer is on them, eased over
+# _HOVER_MS, and ease back when it leaves.
+_HOVER_GROW = 1.2
+_HOVER_MS = 120
 _TIP_GRACE_MS = 50      # how long the info tip outlasts the pointer leaving the badge
 _SLIDE_MS = 115
 
@@ -61,22 +68,6 @@ _WAVE_BAND_HI = 0.95
 _WAVE_FILL = 0.88
 
 _CACHE = {}
-
-
-def _force_white_fills(node):
-    """Flatten every static Bodymovin shape fill to opaque white, so a frame
-    is a clean coverage mask the gradient can tint."""
-    if isinstance(node, dict):
-        if node.get("ty") == "fl":
-            colour = node.get("c")
-            if (isinstance(colour, dict) and isinstance(colour.get("k"), list)
-                    and colour["k"] and not isinstance(colour["k"][0], dict)):
-                colour["k"] = [1, 1, 1, 1]
-        for value in node.values():
-            _force_white_fills(value)
-    elif isinstance(node, list):
-        for value in node:
-            _force_white_fills(value)
 
 
 def _shift_layer_time(layer, delta):
@@ -183,7 +174,7 @@ def _wave():
 
             with open(os.path.join(ASSETS, "Wave Loop.json"), encoding="utf-8") as fh:
                 data = json.load(fh)
-            _force_white_fills(data)
+            force_white_fills(data)
             _close_wave_seam(data)
             animation = LottieAnimation.from_data(json.dumps(data))
             total = animation.lottie_animation_get_totalframe() or 0
@@ -193,7 +184,8 @@ def _wave():
                 animation.lottie_animation_get_framerate() or 30.0,
             )
         except Exception:
-            pass
+            llamalog.get("ui").warning("The Wave Loop animation is unavailable (rlottie missing, or the file "
+                                       "didn't load); a plain gradient is drawn instead", exc_info=True)
     return _CACHE["wave"]
 
 
@@ -377,7 +369,9 @@ class WaveLayer(QWidget):
 
 
 class _InfoTooltip(ScaledLabel):
-    """The info badge's hover tooltip — dark body, primary border.
+    """The info badge's hover tooltip — dark body, `subtab_active`-colored border
+    (primary, except Terminal's black-on-dark-frame swap to secondary — the same
+    accent a selected sub-tab uses, so the border doesn't vanish there either).
 
     It takes the mouse (a real top-level window), so the pointer can move from the
     badge onto it and keep it up: `entered` / `left` tell the carousel. Nothing here
@@ -407,11 +401,18 @@ class _InfoTooltip(ScaledLabel):
         super().leaveEvent(e)
 
     def _restyle(self):
-        self.setStyleSheet(
+        # Connected to `scale.changed`, which fires on every live-resize step
+        # regardless of which tab is showing (there's one of these per media
+        # tab, always alive): skip the setStyleSheet call when the text it
+        # would set hasn't actually changed.
+        css = (
             f"QLabel {{ background: {T.theme.hex('tooltip_bg')}; color: white;"
-            f" border: {px(1)}px solid {T.theme.hex('primary')}; padding: {px(8)}px {px(10)}px;"
+            f" border: {px(1)}px solid {T.theme.hex('subtab_active')}; padding: {px(8)}px {px(10)}px;"
             f" font-family: Arial; font-size: 13px; }}"
         )
+        if css != getattr(self, "_last_css", None):
+            self._last_css = css
+            self.setStyleSheet(css)
 
 
 class ThumbnailCarousel(QWidget):
@@ -455,6 +456,15 @@ class ThumbnailCarousel(QWidget):
         self._fade.setDuration(_FADE_MS)
         self._fade.valueChanged.connect(self._set_alpha)
 
+        # How far each control is into its hover growth, 0 (normal) to 1 (full size).
+        self._hover = {"left": 0.0, "right": 0.0, "expand": 0.0}
+        self._hover_anims = {}
+        for name in self._hover:
+            anim = QVariantAnimation(self)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.valueChanged.connect(lambda value, n=name: self._set_hover(n, value))
+            self._hover_anims[name] = anim
+
         self._slide_t = 1.0
         self._slide_from = None      # (pixmap, rect) of the outgoing frame
         self._slide_dir = 1
@@ -486,6 +496,7 @@ class ThumbnailCarousel(QWidget):
         self._cancel_anim()
         self._arrow_alpha = 0.0
         self._audio_only = False
+        self._reset_hover()
         self._sync_wave()
         self.update()
 
@@ -508,6 +519,7 @@ class ThumbnailCarousel(QWidget):
         if self._frames and not self._populated:
             self._populated = True
             self.populated.emit()
+        self._sync_hover()
         self._sync_wave()
         self.update()
 
@@ -591,6 +603,7 @@ class ThumbnailCarousel(QWidget):
     def hideEvent(self, e):
         self.wave.stop()
         self._hide_tooltip()
+        self._reset_hover()
 
     def resizeEvent(self, e):
         self._scaled.clear()
@@ -791,14 +804,17 @@ class ThumbnailCarousel(QWidget):
                 p.drawEllipse(QPointF(cx, cy), r, r)
 
     def _paint_chevrons(self, p, w, h):
-        left, right, disc_r = self._disc_centers(w, h)
-        primary = T.theme.color("primary")
-        disc = T.with_alpha(primary, 230 / 255)
-        arrow = T.theme.color("primary_text")
-        for center, direction in ((left, -1), (right, 1)):
+        left, right, base_r = self._disc_centers(w, h)
+        secondary = T.theme.color("secondary")
+        disc = T.with_alpha(secondary, 230 / 255)
+        arrow = T.theme.color("secondary_text")
+        for name, center, direction in (("left", left, -1), ("right", right, 1)):
             if center is None:
                 continue
-            cx, cy = center
+            disc_r = base_r * self._hover_scale(name)
+            # Grows about its centre, but never past the picture's edge: the margin
+            # the chevron sits in is smaller than the growth on a large preview.
+            cx, cy = min(max(center[0], disc_r), w - disc_r), center[1]
             p.setPen(Qt.NoPen)
             p.setBrush(disc)
             p.drawEllipse(QPointF(cx, cy), disc_r, disc_r)
@@ -834,18 +850,20 @@ class ThumbnailCarousel(QWidget):
 
     def _paint_expand_icon(self, p, rect):
         """Bottom-right, hover-only like the chevrons — expand.svg while
-        embedded, shrink.svg once expanded, on the same primary disc the
+        embedded, shrink.svg once expanded, on the same secondary disc the
         chevrons use."""
         icon_rect = self._expand_icon_rect(rect)
+        grown = icon_rect.width() * self._hover_scale("expand")
+        icon_rect = QRectF(icon_rect.center().x() - grown / 2, icon_rect.center().y() - grown / 2, grown, grown)
         p.save()
         p.setRenderHint(QPainter.Antialiasing)
         p.setOpacity(self._arrow_alpha)
         p.setPen(Qt.NoPen)
-        p.setBrush(T.with_alpha(T.theme.color("primary"), 230 / 255))
+        p.setBrush(T.with_alpha(T.theme.color("secondary"), 230 / 255))
         p.drawEllipse(icon_rect)
         name = "shrink.svg" if self._expanded else "expand.svg"
         inset = icon_rect.width() * 0.22
-        _svg_renderer(name, T.theme.hex("primary_text")).render(p, icon_rect.adjusted(inset, inset, -inset, -inset))
+        _svg_renderer(name, T.theme.hex("secondary_text")).render(p, icon_rect.adjusted(inset, inset, -inset, -inset))
         p.restore()
 
     def paint_badges(self, p, rect):
@@ -886,6 +904,59 @@ class ThumbnailCarousel(QWidget):
         self._fade.setEndValue(float(target))
         self._fade.start()
 
+    def _hover_scale(self, name):
+        """The size factor for control `name` ("left", "right" or "expand") right now."""
+        return 1.0 + (_HOVER_GROW - 1.0) * self._hover[name]
+
+    def _set_hover(self, name, value):
+        self._hover[name] = value
+        self.update()
+
+    def _hover_to(self, name, target):
+        """Ease control `name` toward `target` (1 = grown, 0 = normal). A reversal partway
+        through takes only as long as the distance it has left to travel."""
+        anim = self._hover_anims[name]
+        current = self._hover[name]
+        if abs(current - target) < 1e-3 and anim.state() != QVariantAnimation.Running:
+            return
+        if anim.state() == QVariantAnimation.Running and anim.endValue() == float(target):
+            return
+        anim.stop()
+        anim.setDuration(max(1, round(_HOVER_MS * abs(target - current))))
+        anim.setStartValue(current)
+        anim.setEndValue(float(target))
+        anim.start()
+
+    def _hovered_control(self, pos):
+        """Which control a pointer at `pos` is on — the same hit areas a click uses — or None."""
+        if self._wave_mode() or not self._frames:
+            return None
+        if self._over_expand_icon(pos):
+            return "expand"
+        if len(self._frames) > 1:
+            xy, rect = self._local_frame_xy(pos)
+            if xy is not None:
+                return self._hit_disc(xy[0], xy[1], rect.width(), rect.height())
+        return None
+
+    def _sync_hover(self, pos=None):
+        """Grow the control under the pointer, ease every other one back. With no `pos`, the
+        pointer is read from the cursor — for a change the pointer didn't cause (stepping
+        moved or removed a chevron under it, the preview was expanded or replaced)."""
+        if pos is None:
+            cursor = self.mapFromGlobal(QCursor.pos())
+            pos = QPointF(cursor) if self.isVisible() and self.rect().contains(cursor) else None
+        target = self._hovered_control(pos) if pos is not None else None
+        for name in self._hover:
+            self._hover_to(name, 1.0 if name == target else 0.0)
+
+    def _reset_hover(self):
+        """Everything back to normal size at once, no easing (the controls just moved or went)."""
+        for name, anim in self._hover_anims.items():
+            anim.stop()
+            self._hover[name] = 0.0
+        self.update()
+
     def _set_slide(self, t):
         self._slide_t = t
         self.update()
@@ -918,6 +989,7 @@ class ThumbnailCarousel(QWidget):
         self._index = new_index
         self.indexChanged.emit(new_index)
         self._dot_start = self._resolve_dot_start(new_index, delta, prev_index, prev_start)
+        self._sync_hover()      # the chevron under the pointer may have just gone (first / last frame)
         if show_arrows:
             self._fade.stop()
             self._arrow_alpha = 1.0
@@ -943,6 +1015,8 @@ class ThumbnailCarousel(QWidget):
     def leaveEvent(self, e):
         self._fade_to(0.0)
         self._hide_tooltip_soon()
+        for name in self._hover:
+            self._hover_to(name, 0.0)
 
     def _local_frame_xy(self, pos):
         rect = self._frame_rect()
@@ -1015,6 +1089,7 @@ class ThumbnailCarousel(QWidget):
             self._press(e.position(), repeat=True)
 
     def mouseMoveEvent(self, e):
+        self._sync_hover(e.position())
         if self._over_info_badge(e.position()):
             # Already up: moving within the badge leaves it alone (re-showing it on
             # every move made the popup window itself flicker).
@@ -1115,6 +1190,16 @@ class ThumbnailCarousel(QWidget):
         # under a mouse that hasn't — re-derive the cursor from the current
         # global position rather than assuming it's still over anything.
         self.setCursor(self._hover_cursor(self.mapFromGlobal(QCursor.pos())))
+        self._reset_hover()     # the icon jumped to a new place; whatever is under the pointer now grows afresh
+        self._sync_hover()
+
+    def toggle_expand(self):
+        """The keyboard's route to the corner icon: shrinks whenever expanded, expands only where
+        the icon is offered (frames to show, not the Wave Loop). True if it did anything."""
+        if not self._expanded and (self._wave_mode() or not self._frames):
+            return False
+        self._toggle_expand()
+        return True
 
     def force_collapse(self):
         """Shrink back from the expanded overlay if currently expanded —
