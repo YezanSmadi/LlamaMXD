@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Which of the four main tabs the app opens on (Settings' "Startup Tab").
 Plain names only, matching `MainWindow.tabs` — Settings itself isn't offered,
 since it is a place to visit, not to live."""

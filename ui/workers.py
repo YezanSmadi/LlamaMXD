@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Off-thread work with results delivered back on the GUI thread.
 
 A signal emitted from a worker thread is delivered as a *queued* call on the
@@ -11,6 +13,8 @@ import threading
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QImage
+
+from core import llamalog
 
 
 class _Bridge(QObject):
@@ -40,8 +44,8 @@ def run_async(fn, on_done, *args):
     def work():
         try:
             result = fn(*args)
-        except Exception as exc:   # a worker must never take the app down
-            print(f"background task failed: {exc!r}")
+        except Exception:   # a worker must never take the app down
+            llamalog.get("workers").exception("Background task %s failed", getattr(fn, "__qualname__", fn))
             result = None
         _bridge.delivered.emit(on_done, result)
 

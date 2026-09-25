@@ -1,27 +1,14 @@
-"""The Downloader tab's logic, with no UI code: fetching a URL's info, turning its
-format list into the tab's Codec / Quality / Format options, resolving a
-choice to the exact streams yt-dlp should fetch, and building the argv.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 
-**Everything runs through the bundled `yt-dlp.exe`** (`core.tools`), never
-the `yt_dlp` Python package — one copy of yt-dlp, updatable without an app
-release, and a frozen app has no `python -m yt_dlp` to fall back on anyway.
+# The Downloader for LlamaMXD, using yt-dlp.exe. 
 
-**The option tree mirrors the rest of the app: nothing illegal is ever
-offered.** Mode decides which kinds of stream count; Codec narrows them;
-Quality picks among what that codec actually has; Format is the output
-container that can carry the result *without re-encoding*, judged by the
-same compatibility matrix Muxing uses (`formats.containers_for`). Every
-list is derived from the one fetch — changing a dropdown never re-fetches.
+# This is just the tab's logic; no UI. The following fetches a URL's info, 
+# turning its format list into the tab's Codec / Quality / Format options, resolving a
+# choice to the exact streams yt-dlp should fetch, and building the argv.
 
-**"Best" means what yt-dlp itself would pick.** yt-dlp returns `formats`
-sorted worst -> best by its own preference order (resolution, then codec,
-protocol, bitrate...), so the best entry matching a filter is simply the
-*last* one. Resolution here therefore agrees with yt-dlp's own `bv*+ba`
-rather than re-implementing its ranking, and pins the exact format IDs so
-the size budget, the output extension and the container check are all known
-at queue time. A fallback selector rides along in case YouTube has rotated
-an ID by the time the job runs.
-"""
+# A fallback selector rides along in case a site has rotated
+# an ID by the time the job runs.
 
 import json
 import os
@@ -29,7 +16,7 @@ import re
 import subprocess
 import threading
 
-from core import formats
+from core import formats, llamalog
 from core.tools import find_tool, tool_dir, tool_path
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -43,19 +30,17 @@ BEST_CODEC = "Best Available"
 BEST_QUALITY = "Best"
 ORIGINAL = "Original"
 
-# Output containers a video download can be merged/remuxed into. .mov is left
-# out on purpose: the matrix allows it for H.264, but it adds nothing over
-# .mp4 for a web download and invites codec mismatches it can't hold.
+# Output containers a video download can be merged/remuxed into.
+# I've left out '.mov' on purpose. While the matrix allows it for H.264, it adds 
+# nothing over '.mp4' for a web download and invites codec mismatches it can't hold.
 VIDEO_CONTAINERS = [".mp4", ".mkv", ".webm"]
-# Audio-only outputs. "Original" keeps the source stream exactly as served;
-# everything else is a real conversion by yt-dlp's own ffmpeg.
-AUDIO_CONVERSIONS = [".mp3", ".m4a", ".opus", ".flac", ".wav"]
+AUDIO_CONVERSIONS = [".mp3", ".m4a", ".opus", ".flac", ".wav"] # Audio-only outputs.
 _LOSSLESS = {".flac", ".wav"}
 BEST_VBR = "Best (VBR)"
 LOSSY_BITRATES = [BEST_VBR, "320 kbps", "256 kbps", "192 kbps", "128 kbps", "96 kbps"]
 
-# Deno versions older than this are refused by yt-dlp's own EJS support
-# (DenoJsRuntime.MIN_SUPPORTED_VERSION) — treated the same as "missing".
+# Deno versions older than this are refused by yt-dlp's EJS support
+# (DenoJsRuntime.MIN_SUPPORTED_VERSION). It's treated the same as "missing".
 _DENO_MIN_VERSION = (2, 3, 0)
 _FETCH_TIMEOUT_SECS = 90
 
@@ -81,7 +66,7 @@ _AUDIO_FAMILIES = [
 _VIDEO_PREFIX = {"H.264": "avc1", "H.265": "hvc1", "VP9": "vp09", "VP8": "vp8", "AV1": "av01"}
 _AUDIO_PREFIX = {"AAC": "mp4a", "Opus": "opus", "Vorbis": "vorbis", "MP3": "mp3"}
 
-# Windows-illegal filename characters, and yt-dlp's own look-alike swaps for
+# Illegal filename characters in WIndows and yt-dlp's own look-alike swaps for
 # them, so the suggested file name reads like the title rather than a row of
 # underscores.
 _FILENAME_SWAPS = str.maketrans({
@@ -97,15 +82,15 @@ _MAX_STEM = 120
 _deno_checked = False
 _deno_path = None
 # The startup check runs on a worker thread while the GUI thread may already be
-# building an argv — without the lock a second caller would see "checked,
+# building an argv. Without the lock, a second caller would see "checked,
 # nothing found" mid-check and quietly omit Deno.
 _deno_lock = threading.Lock()
 
 
 def deno_path():
-    """Absolute path to a usable Deno (bundled, else PATH), or None when it's
-    missing or too old for yt-dlp. Checked once per process (a `deno
-    --version` subprocess) — call it off the GUI thread the first time."""
+    # Absolute path to a usable Deno (bundled, else PATH), or None when it's
+    # missing or too old for yt-dlp. Checked once per process (a 'deno
+    # --version' subprocess) and is called off the GUI thread the first time.
     global _deno_checked, _deno_path
     with _deno_lock:
         if not _deno_checked:
@@ -119,24 +104,23 @@ def deno_path():
                     match = re.search(r"deno (\d+)\.(\d+)\.(\d+)", completed.stdout or "")
                     if match and tuple(int(g) for g in match.groups()) >= _DENO_MIN_VERSION:
                         _deno_path = path
-                except (OSError, subprocess.SubprocessError):
-                    pass
+                except (OSError, subprocess.SubprocessError) as exc:
+                    llamalog.get("downloader").debug("deno --version failed: %s", exc)
             _deno_checked = True
     return _deno_path
 
 
 def base_args():
-    """The start of every yt-dlp argv: the bundled binary plus the flags no
-    call may go without.
+    # The start of every yt-dlp argv; the bundled binary plus the essential flags 
+    # for all calls.
 
-    * `--ignore-config` — a user's own yt-dlp config would otherwise leak into
-      every job (confirmed on this dev machine: a personal config forcing
-      `-f best` and a fixed output folder).
-    * absolute `--js-runtimes deno:` / `--ffmpeg-location` — yt-dlp silently
-      ignores a relative runtime path (confirmed), and without a location it
-      would use whatever `ffmpeg` Windows finds rather than the bundled one.
-    * `--no-playlist` — playlists are a later phase; a video URL that also
-      names a playlist fetches just the video."""
+    # * '--ignore-config': a user's own yt-dlp config would otherwise leak into
+    #   every job.
+    # * absolute '--js-runtimes deno:' / '--ffmpeg-location': yt-dlp silently
+    #   ignores a relative runtime path; without a location it would use whatever 
+    #   'ffmpeg' Windows finds rather than the bundled one.
+    # * '--no-playlist': playlists are a future feature. For now it's just 
+    #   individual videos
     args = [tool_path("yt-dlp"), "--ignore-config", "--no-playlist"]
     deno = deno_path()
     if deno:
@@ -148,8 +132,8 @@ def base_args():
 
 
 def subprocess_env():
-    """yt-dlp.exe's environment: UTF-8 output, so a title in any script
-    survives the pipe instead of degrading to the console code page."""
+    # yt-dlp.exe's environment: UTF-8 output, so a title in any script
+    # survives the pipe instead of degrading to the console code page.
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
@@ -160,9 +144,9 @@ def subprocess_env():
 #  Fetch
 # ---------------------------------------------------------------------- #
 def fetch_info(url):
-    """`(info, error)` for `url` — yt-dlp's full `-J` JSON, or None plus a
-    short, user-readable reason. Blocking (several seconds on YouTube while
-    Deno solves its challenge): call it off the GUI thread."""
+    # '(info, error)' for 'url'. yt-dlp's '-J' JSON, or None plus a
+    # short, user-readable reason. Blocking (several seconds on YouTube while
+    # Deno solves its challenge) is called off the GUI thread.
     url = (url or "").strip()
     if not url:
         return None, "Paste a video link first."
@@ -195,8 +179,8 @@ def fetch_info(url):
 
 
 def error_reason(lines):
-    """The most useful line of yt-dlp's output for a failure message: its
-    last `ERROR:` line, minus the `ERROR: [extractor] id:` prefix."""
+    # yt-dlp's last 'ERROR:' line, minus the 'ERROR: [extractor] id:' prefix. 
+    # Very useful info.
     for line in reversed(lines):
         line = line.strip()
         if line.startswith("ERROR:"):
@@ -207,9 +191,9 @@ def error_reason(lines):
 
 
 def download_thumbnail(url):
-    """A PIL image of `url` (a video's thumbnail), or None. Blocking — worker
-    thread only. Black letterbox bars are trimmed off: an old video's only
-    thumbnail is often a 4:3 frame with the real 16:9 picture boxed inside."""
+    # A PIL image of 'url' (a video's thumbnail), or None. Blocking: worker
+    # thread only. Black letterbox bars are trimmed off; an old video's only
+    # thumbnail is often a 4:3 frame with a 16:9 picture boxed inside.
     if not url:
         return None
     import io
@@ -226,12 +210,13 @@ def download_thumbnail(url):
         if box and (box[3] - box[1]) < img.height * 0.95 and (box[2] - box[0]) > img.width * 0.5:
             img = img.crop((0, box[1], img.width, box[3]))
         return img
-    except Exception:
+    except Exception as exc:
+        llamalog.get("downloader").warning("Couldn't fetch the thumbnail %s: %s", url, exc)
         return None
 
 
 def safe_stem(title):
-    """A Windows-safe file name stem from a video title."""
+    # Windows-safe file name stem from a video title.
     stem = (title or "download").translate(_FILENAME_SWAPS)
     stem = re.sub(r"[\x00-\x1f]", "", stem).strip().rstrip(". ")
     return (stem[:_MAX_STEM].rstrip(". ") or "download")
@@ -241,8 +226,8 @@ def safe_stem(title):
 #  Format model
 # ---------------------------------------------------------------------- #
 def _family(codec, table):
-    """Codec display name for a yt-dlp vcodec/acodec string, "?" when it's a
-    real stream of an unrecognized codec, None when there's no such stream."""
+    # Codec display name for a yt-dlp vcodec/acodec string, '?' when it's a
+    # stream of an unrecognized codec, None when there's no such stream.
     if codec == "none":
         return None
     if not codec:
@@ -255,9 +240,9 @@ def _family(codec, table):
 
 
 def parse_formats(info):
-    """yt-dlp's `formats` -> a compact list this module works with, still in
-    yt-dlp's worst -> best order. Storyboards and DRC (dynamic-range-
-    compressed, a quieter duplicate of an existing track) are dropped."""
+    # yt-dlp's 'formats' is a compact list this module works with, in worst to best order. 
+    # Storyboards and DRC (dynamic-range-compressed, a quieter duplicate of an existing track) 
+    # are dropped.
     duration = info.get("duration") or 0
     out = []
     for f in info.get("formats") or []:
@@ -288,7 +273,7 @@ def parse_formats(info):
 
 
 def _quality_label(fmt):
-    """"1080p60 HDR"-style label for a video format."""
+    # Label for a video format (e.g. 1080p60)
     label = f"{fmt['height']}p" if fmt["height"] else "Unknown"
     fps = round(fmt["fps"] or 0)
     if fps > 30:
@@ -299,12 +284,12 @@ def _quality_label(fmt):
 
 
 def _bitrate_label(fmt):
-    """"129 kbps"-style label for an audio format."""
+    # Label for an audio format (e.g. 129 kbps).
     return f"{round(fmt['abr'])} kbps" if fmt["abr"] else "Unknown bitrate"
 
 
 def modes_for(fmts):
-    """Which modes this video can actually be downloaded in."""
+    # Which modes this video can be downloaded in.
     modes = []
     if any(f["video"] for f in fmts):
         modes.append(MODE_AV)
@@ -316,23 +301,22 @@ def modes_for(fmts):
 
 
 def _video_pool(fmts, mode):
-    """Formats that can supply the picture in a video mode: video-only
-    streams, plus (Video + Audio) streams that already carry both."""
+    # Formats that can supply the picture in a video mode; Video-Only
+    # streams and Video + Audio streams.
     if mode == MODE_VIDEO:
         return [f for f in fmts if f["video"] and not f["audio"]]
     return [f for f in fmts if f["video"]]
 
 
 def _audio_pool(fmts):
-    """Audio-only streams, or — for a site that only serves combined
-    streams — anything with audio, which `-x` can still pull a track out of."""
+    # Formats that can supply audio in Audio-Only streams
     solo = [f for f in fmts if f["audio"] and not f["video"]]
     return solo or [f for f in fmts if f["audio"]]
 
 
 def codecs_for(fmts, mode):
-    """Codec dropdown: Best Available first, then every recognized codec
-    this video offers for the mode, in a stable order."""
+    # Codec dropdown. Best Available first, then every recognized codec
+    # this video offers for the mode.
     if mode == MODE_AUDIO:
         found = {f["audio"] for f in _audio_pool(fmts)}
         order = [name for _, name in _AUDIO_FAMILIES]
@@ -343,15 +327,15 @@ def codecs_for(fmts, mode):
 
 
 def _matches_codec(fmt, codec, key):
-    """Whether `fmt` fits the Codec dropdown's pick."""
+    # Whether 'fmt' fits the Codec dropdown's pick.
     return codec == BEST_CODEC or fmt[key] == codec
 
 
 def qualities_for(fmts, mode, codec, audio_format=None):
-    """Quality dropdown. Video modes: Best, then each distinct resolution/
-    frame-rate/HDR the codec has, best first. Audio Only: depends on the
-    output — the source bitrates for Original, a target bitrate for a lossy
-    conversion, nothing at all (disabled) for a lossless one."""
+    # Quality dropdown. Video modes: Best, then each distinct resolution/
+    # frame-rate/HDR the codec has, best first. 
+    # Audio Only: depends on the output. The source bitrates for Original, a 
+    # target bitrate for a lossy conversion, nothing at all (disabled) for a lossless one.
     if mode == MODE_AUDIO:
         if audio_format in _LOSSLESS:
             return []
@@ -379,14 +363,14 @@ def qualities_for(fmts, mode, codec, audio_format=None):
 
 
 def formats_for(fmts, mode, codec, quality, audio_codec=BEST_CODEC):
-    """Format dropdown: the containers this exact pick resolves into without
-    re-encoding (video modes), or Original + the conversions (Audio Only).
+    # Format dropdown: the containers this exact pick resolves into without
+    # re-encoding (video modes), or Original + the conversions (Audio Only).
 
-    `audio_codec` (Video + Audio only) narrows this to containers that can
-    also carry that specific audio codec — so once the user has picked an
-    audio codec beyond the default, Video Format adapts to fit *it*, rather
-    than Audio staying limited to whatever Video Format happened to allow
-    first (see audio_codecs_for)."""
+    # 'audio_codec' (Video + Audio only) narrows this to containers that can
+    # also carry that specific audio codec. Once the user has picked an
+    # audio codec beyond the default, Video Format adapts to fit it, rather
+    # than Audio staying limited to whatever Video Format happened to allow
+    # first (see audio_codecs_for).
     if mode == MODE_AUDIO:
         has_solo = any(f["audio"] and not f["video"] for f in fmts)
         return ([ORIGINAL] if has_solo else []) + list(AUDIO_CONVERSIONS)
@@ -395,18 +379,11 @@ def formats_for(fmts, mode, codec, quality, audio_codec=BEST_CODEC):
 
 
 def audio_codecs_for(fmts, mode, codec, quality):
-    """Video + Audio's Audio Format dropdown: Best Available, then every
-    codec a real separate audio-only stream can actually supply for this
-    video pick. Deliberately **not** filtered by the currently-selected
-    Video Format container — Video Format is what adapts to this pick (see
-    formats_for), rather than this list being limited to whatever container
-    happens to be selected first, which used to mean an .mp4 default (the
-    fresh-fetch default) hid every codec but AAC even when the source also
-    offered e.g. Opus. Probed against ".mkv" (the one container that accepts
-    every codec this app knows) purely to answer "is there a real separate
-    audio stream to swap here at all" — a pick that already carries its own
-    embedded audio has nothing to choose. Empty (disabled) in the other
-    modes."""
+    # Video + Audio's Audio Format dropdown: Best Available, then every
+    # codec a separate audio-only stream can supply for this video pick. Deliberately 
+    # not filtered by the currently-selected Video Format container; Video Format is 
+    # what adapts to this pick (see formats_for), rather than this list being limited 
+    # to whatever container happens to be selected first.
     if mode != MODE_AV:
         return []
     plan = resolve(fmts, mode, codec, quality, ".mkv")
@@ -418,16 +395,16 @@ def audio_codecs_for(fmts, mode, codec, quality):
 
 
 def default_format(mode, allowed):
-    """The Format a fresh fetch (or a mode switch) lands on: .mp4 when it can
-    hold the pick, else the first legal container; Original for audio."""
+    # The format a fresh fetch (or a mode switch) lands on; '.mp4' when it can
+    # hold the pick, else the first legal container. Original for audio.
     if mode == MODE_AUDIO:
         return ORIGINAL if ORIGINAL in allowed else (allowed[0] if allowed else "")
     return ".mp4" if ".mp4" in allowed else (allowed[0] if allowed else "")
 
 
 def _fits(container, video, audio):
-    """Whether `container` carries this codec pair without re-encoding. An
-    unrecognized ("?") codec is only trusted in .mkv, the catch-all."""
+    # Whether 'container' carries this codec pair without re-encoding. An
+    # unrecognized ("?") codec is only trusted in .mkv.
     if video == "?" or audio == "?":
         return container == ".mkv"
     return container in formats.containers_for(video, audio)
@@ -437,21 +414,19 @@ def _fits(container, video, audio):
 #  Resolution + argv
 # ---------------------------------------------------------------------- #
 def resolve(fmts, mode, codec, quality, container, duration=0, audio_codec=BEST_CODEC):
-    """The exact download for one dropdown combination, or None when it
-    can't be satisfied. Returns a plain, JSON-safe dict (it rides in the
-    queue task's settings):
+    # The exact download for one dropdown combination, or None when it
+    # can't be satisfied. Returns a plain, JSON-safe dict:
 
-        format     the `-f` selector: pinned IDs, then a fallback
-        ext        the output extension yt-dlp will produce
-        args       mode-specific flags (merge / remux / extract audio)
-        parts      [{"id", "kind": "video"|"audio"|"both", "size"}] in
-                   download order — the progress bar's byte budget
-        post       None, or {"kind": "merge"|"remux"|"convert",
-                   "expected_bytes", "media_secs"} for the step after
+    #     format     the '-f' selector; pinned IDs, then a fallback
+    #     ext        the output extension yt-dlp will produce
+    #     args       mode-specific flags (merge / remux / extract audio)
+    #     parts      [{"id", "kind": "video"|"audio"|"both", "size"}] in
+    #                download order
+    #     post       None, or {"kind": "merge"|"remux"|"convert",
+    #                "expected_bytes", "media_secs"} for the step after
 
-    `audio_codec` (Video + Audio only) narrows the separate audio stream to
-    one codec; Best Available takes the best one the container can hold.
-    """
+    # `audio_codec` (Video + Audio only) narrows the separate audio stream to
+    # one codec; Best Available takes the best one the container can hold.
     if mode == MODE_AUDIO:
         return _resolve_audio(fmts, codec, quality, container, duration)
 
@@ -462,7 +437,6 @@ def resolve(fmts, mode, codec, quality, container, duration=0, audio_codec=BEST_
         and (f["video"] == "?" or _fits(container, f["video"], None))
     ]
     fmt_ext = container.lstrip(".")
-    # Best first = the end of yt-dlp's worst -> best list.
     for video in reversed(candidates):
         if mode == MODE_VIDEO:
             if not _fits(container, video["video"], None):
@@ -475,7 +449,6 @@ def resolve(fmts, mode, codec, quality, container, duration=0, audio_codec=BEST_
                 "post": _post("remux", video["size"], duration) if video["ext"] != container else None,
             }
         if video["audio"]:
-            # Already carries its own audio — a single download, remuxed.
             if not _fits(container, video["video"], video["audio"]):
                 continue
             return {
@@ -506,8 +479,8 @@ def resolve(fmts, mode, codec, quality, container, duration=0, audio_codec=BEST_
 
 
 def _best_audio_for(fmts, container, video_family, audio_codec=BEST_CODEC):
-    """The best audio-only stream `container` can carry beside this video,
-    optionally limited to one codec."""
+    # The best audio-only stream the container can carry beside this video,
+    # optionally limited to one codec.
     pool = [f for f in fmts if f["audio"] and not f["video"] and f["audio"] != "?"
             and _matches_codec(f, audio_codec, "audio")]
     for audio in reversed(pool):
@@ -517,7 +490,7 @@ def _best_audio_for(fmts, container, video_family, audio_codec=BEST_CODEC):
 
 
 def _resolve_audio(fmts, codec, quality, container, duration):
-    """Audio Only: the source stream as-is (Original) or converted."""
+    # Audio Only. The source stream stays as-is (Original) or gets converted.
     pool = [f for f in _audio_pool(fmts) if _matches_codec(f, codec, "audio")]
     if not pool:
         return None
@@ -555,7 +528,7 @@ def _resolve_audio(fmts, codec, quality, container, duration):
 
 
 def _converted_size(container, quality, source, duration):
-    """Rough output size of an audio conversion, for the progress estimate."""
+    # Rough output size of an audio conversion, for the Queue's progress estimate.
     if container == ".wav":
         return int(duration * 48000 * 2 * 2)
     if container == ".flac":
@@ -573,8 +546,8 @@ def _post(kind, expected_bytes, duration):
 
 
 def _fallback_video(codec, quality, only=False):
-    """yt-dlp selector matching the same codec/height, used only if a pinned
-    ID has vanished by the time the job runs."""
+    # yt-dlp selector matching the same codec/height; used only if a pinned
+    # ID has vanished by the time the job runs.
     base = "bv" if only else "b"
     filters = ""
     if codec in _VIDEO_PREFIX:
@@ -586,8 +559,8 @@ def _fallback_video(codec, quality, only=False):
 
 
 def _fallback_audio(container, audio_codec=BEST_CODEC):
-    """Fallback audio selector restricted to what `container` can hold (and
-    to the Audio dropdown's codec, when one is picked)."""
+    # Fallback audio selector restricted to what the container can hold (and
+    # to the Audio dropdown's codec, when one is picked).
     if audio_codec in _AUDIO_PREFIX:
         return f"ba[acodec^={_AUDIO_PREFIX[audio_codec]}]"
     allowed = [name for name in _AUDIO_PREFIX if container in formats.containers_for(None, name)]
@@ -598,17 +571,17 @@ def _fallback_audio(container, audio_codec=BEST_CODEC):
     return "(" + "/".join(f"ba[acodec^={_AUDIO_PREFIX[name]}]" for name in allowed) + ")"
 
 
-def build_download_args(plan, url, work_dir):
-    """The full yt-dlp argv for one queued download (see `resolve` for
-    `plan`). Everything is written into `work_dir` — the job's own private
-    folder — and `core.ytdlp_runner.YtDlpJob` moves the finished file into
-    place, so a stopped or failed download never touches the user's folder.
+def build_download_args(plan, url, work_dir, verbose=False):
+    # The full yt-dlp argv for one queued download (see 'resolve' for
+    # 'plan'). Everything is written into 'work_dir', the job's own private
+    # folder, and 'core.ytdlp_runner.YtDlpJob' moves the finished file into
+    # place, so a stopped or failed download never touches the user's folder.
 
-    The marker lines are what YtDlpJob parses: which formats were really
-    picked (and their sizes), per-stream byte progress, post-processing
-    start/finish, and the final file's path. `--print` implies quiet +
-    simulate, hence `--no-simulate --progress`."""
+    # The marker lines are what YtDlpJob parses; which formats were picked (and their sizes), 
+    # per-stream byte progress, post-processing start/finish, and the final file's path. '--print' implies 
+    # quiet + simulate, thus '--no-simulate --progress'.
     return base_args() + [
+        *(["-v"] if verbose else []),   # Detailed log detail; yt-dlp's debug lines join the job output
         "-f", plan["format"],
         *plan["args"],
         "-P", work_dir,

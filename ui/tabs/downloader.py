@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Downloader: a link's video (or just its audio), through the queue.
 
 A link can be pasted, typed, or dragged onto the preview box — only a single
@@ -32,7 +34,6 @@ from ui.widgets.controls import (
     field_label,
     labeled,
     set_enabled,
-    set_font_px,
 )
 from ui.widgets.dialogs import confirm_output_path, show_message
 from ui.widgets.panels import BorderedFrame
@@ -186,7 +187,13 @@ class DownloaderTab(QWidget):
         scale.margins(pl, 12, 8, 12, 8)
         scale.spacing(pl, 4)
         self.placeholder_label = ScaledLabel(_PLACEHOLDER)
-        set_font_px(self.placeholder_label, 14)
+        # An instance-level stylesheet rule, not `set_font_px` -- see the
+        # identical fix (and its full reasoning) on DropBox's own prompt/
+        # or_label in `ui/widgets/panels.py`: `set_font_px`'s plain
+        # `.setFont()` can lose its race with the next `ensurePolished()`
+        # while this tab is hidden behind another one, leaving the label
+        # stuck at a real-pixel 14 instead of the reference 14 intended.
+        self.placeholder_label.setStyleSheet("font-size: 14px;")
         self.placeholder_label.setAlignment(Qt.AlignCenter)
         pl.addWidget(self.placeholder_label, 1)
         self.thumb_view = _Thumbnail()

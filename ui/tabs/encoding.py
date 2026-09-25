@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Encoding: the superset tab — Overview (container, trim, presets, rundown),
 Video (encoder / profile / level / preset, quality, HDR→SDR, Strip Video) and
 Audio (multi-stream: track, codec, passthru, bitrate, channels, sample rate,
@@ -364,7 +366,10 @@ class EncodingTab(MediaTab):
             self.app.start_hdr_render(self._preview_path)
 
     def on_hdr_frames_ready(self, path, _frames):
-        if path == self._preview_path:
+        """The render finished. With the switch off there is nothing to change — the render
+        starts on import, so it usually lands while the raw previews are being scrubbed, and
+        re-applying them would reset the carousel under the user's cursor."""
+        if path == self._preview_path and self.hdr_switch.isChecked():
             self._apply_preview_frames()
 
     def _apply_preview_frames(self):

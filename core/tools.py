@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Finds the external command-line tools this app launches -- `ffmpeg`,
 `ffprobe`, `yt-dlp` and `deno` -- as absolute paths.
 

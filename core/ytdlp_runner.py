@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Runs one YT-DLP download off the GUI thread, with the same contract as
 `core.ffmpeg_runner.FfmpegJob` so the Queue tab drives both identically:
 `start()` / `suspend()` / `resume()` / `stop()` / `poll_events()`, emitting
@@ -49,7 +51,7 @@ import threading
 import time
 import uuid
 
-from core import downloader
+from core import downloader, llamalog
 from core import priority as process_priority
 from core.ffmpeg_runner import _replace_output, _set_suspended
 
@@ -145,14 +147,21 @@ class YtDlpJob:
     """One yt-dlp download plus the thread that watches it. `plan` is
     `core.downloader.resolve()`'s dict, as carried in the task's settings."""
 
-    def __init__(self, url, plan, final_path, priority=process_priority.DEFAULT_LEVEL):
+    def __init__(self, url, plan, final_path, priority=process_priority.DEFAULT_LEVEL, label=None):
         self.url = url
         self._priority = priority
         self._last_priority_sync = 0.0
         self.plan = plan
         self.final_path = os.path.abspath(final_path)
         self.work_dir = work_dir_for(self.final_path)
-        self.args = downloader.build_download_args(plan, url, self.work_dir)
+        self.args = downloader.build_download_args(plan, url, self.work_dir, verbose=llamalog.is_detailed())
+        # The log's name for the job, its output as a bounded ring buffer (whole for a failed job,
+        # the last 100 lines for a successful one — see `core.llamalog.JobOutput`), and where it
+        # was written once the job has ended.
+        self.label = label or os.path.basename(self.final_path)
+        self.output = llamalog.JobOutput()
+        self.log_path = None
+        self._recorded = False
 
         self._proc = None
         self._job_handle = None
@@ -217,6 +226,7 @@ class YtDlpJob:
         if os.name == "nt":
             _set_suspended(self._proc.pid, False)   # created suspended — let it run
         self._started_at = time.monotonic()
+        llamalog.log_job_start("ytdlp", self.label, self.args)
         self._events.put(("stage", "Preparing..."))
         threading.Thread(target=self._watch, daemon=True).start()
 
@@ -273,9 +283,10 @@ class YtDlpJob:
             try:
                 self._proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                pass
+                llamalog.get("ytdlp").warning('yt-dlp for "%s" was still running 10s after being killed', self.label)
         self._close_job()
         self._discard_work_dir()
+        self._record("stopped", self._proc.returncode if self._proc is not None else None)
         return True
 
     def poll_events(self):
@@ -386,17 +397,23 @@ class YtDlpJob:
             if not line:
                 continue
             try:
+                # Everything but the per-update download progress goes in the job's kept output.
                 if line.startswith("LLAMA_DL "):
                     self._on_download(line)
                 elif line.startswith("LLAMA_PP "):
+                    self.output.add(line)
                     self._on_postprocess(line)
                 elif line.startswith("LLAMA_FORMATS ") or line.startswith("LLAMA_FORMAT "):
+                    self.output.add(line)
                     self._on_formats(line)
                 elif line.startswith("LLAMA_FILE "):
+                    self.output.add(line)
                     self._final_file = line[len("LLAMA_FILE "):].strip()
                 else:
+                    self.output.add(line)
                     self._tail.append(line)
             except (ValueError, KeyError, TypeError):
+                self.output.add(line)
                 self._tail.append(line)
         returncode = self._proc.wait()
         self._settle(returncode)
@@ -527,6 +544,7 @@ class YtDlpJob:
             self._finished = True
         self._close_job()
         self._discard_work_dir()
+        self._record(outcome[0], returncode, outcome[1] if len(outcome) > 1 else "")
         if outcome[0] == "done":
             self._events.put(("progress", 1.0))
         self._events.put(outcome)
@@ -596,7 +614,19 @@ class YtDlpJob:
         with self._lock:
             self._finished = True
         self._discard_work_dir()
+        self._record("failed", reason=reason)
         self._events.put(("failed", reason))
+
+    def _record(self, outcome, returncode=None, reason=""):
+        """Writes the job's end to the log, once: a summary line, and the output file its ring buffer
+        rule calls for (`log_path`)."""
+        with self._lock:
+            if self._recorded:
+                return
+            self._recorded = True
+        seconds = self._active_elapsed() if self._started_at else 0.0
+        self.log_path = llamalog.record_job("ytdlp", self.label, self.args, outcome, self.output,
+                                            returncode=returncode, reason=reason, seconds=seconds)
 
 
 def _folder_bytes(folder):

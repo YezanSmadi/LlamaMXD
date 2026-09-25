@@ -1,9 +1,12 @@
-# LlamaMXD (LlamaPY GUI)
+# LlamaMXD
 
 A Windows desktop GUI for video muxing/encoding/downloading, built with
 PySide6 (Qt 6). Wraps ffmpeg and yt-dlp behind a tabbed interface. Repo:
-`https://github.com/YezanSmadi/LlamaMXD`. Public domain (Unlicense). Currently
-v0.5.0-beta.3 (the sidebar footer — `VERSION` in `ui/widgets/panels.py`).
+`https://github.com/YezanSmadi/LlamaMXD`. **GPL-3.0-or-later** (the `LICENSE.txt` file is the FSF's GPLv3
+text; every `.py` file starts with `# SPDX-License-Identifier: GPL-3.0-or-later` and `# Copyright (C)
+2026 Yezan Smadi` — **put the same two lines on any new source file**, as the "or later" is stated there).
+It was the Unlicense up to v0.5.0-beta.3 (beta.4 is the first GPL release); those releases stay public domain. Currently
+v0.5.0-beta.4 (the sidebar footer — `VERSION` in `ui/widgets/panels.py`).
 
 ## Running
 
@@ -19,8 +22,8 @@ in `requirements.txt` (`pip install -r requirements.txt`) but still installed
 globally in practice: `PySide6` 6.11.2 (the UI), `opencv-python` (cv2) 5.0
 (preview frame decode), `numpy` 2.4 (pulled in by opencv-python, but also imported
 directly by `ui/widgets/panels.py` to crop the sidebar cable art), `Pillow` 11.3, `rlottie-python` 1.3.8 (the Wave Loop
-visualiser — a missing/broken import degrades to a flat gradient wash, never
-a crash), `ffmpeg-python` 0.2.0 (+ its `future` dependency — builds the ffmpeg
+visualiser and the import spinner — a missing/broken import degrades to a flat gradient
+wash / a plain drawn ring, never a crash), `ffmpeg-python` 0.2.0 (+ its `future` dependency — builds the ffmpeg
 commands), `yt-dlp[default]` 2026.08.19 (the Downloader's dev environment;
 `default` pulls in `yt-dlp-ejs`, the YouTube JS challenge solver — the app
 itself runs the bundled `yt-dlp.exe`, not this package). No `deno` extra: pip
@@ -33,12 +36,72 @@ registered by `main.py`.
 in `dependables/` at the repo root — **gitignored**, each is far over GitHub's
 100MB file limit — and the release's setup wizard copies them beside the app.
 Every launch goes through `core/tools.py` (see "External tools" below), so
-nothing needs to be on PATH; PATH is only the last fallback.
+nothing needs to be on PATH; PATH is only the last fallback. **The folder was emptied by mistake on
+2026-09-21 and reinstalled the same day** from the publishers' own releases, each download checked
+against the SHA-256 the publisher lists: **ffmpeg 9.0.2 full build** (`GyanD/codexffmpeg`, the
+gyan.dev author's GitHub mirror — `ffmpeg-9.0.2-full_build.zip`, `bin\ffmpeg.exe` / `ffprobe.exe` /
+`ffplay.exe`; it has libplacebo + Vulkan, NVENC, libx265 and SVT-AV1 with a 0-13 preset range),
+**yt-dlp 2026.08.19** (`yt-dlp.exe` from `yt-dlp/yt-dlp`) and **deno 2.9.7**
+(`deno-x86_64-pc-windows-msvc.zip` from `denoland/deno`; the bundled one had been 2.9.6). Verified
+after: all four resolve from `dependables\` (not PATH), `libplacebo_problem()` is None, and a real
+Downloader run (`fetch_info` on a public video, then a `YtDlpJob` with a merge) finished through
+Preparing, Downloading video, Downloading audio, Merging and Finishing into a valid AV1 + AAC file.
+The notes below that say "9.0.1" / "gyan 2025" describe the builds those measurements were taken on.
+
+## Licenses
+
+**The project is GPL-3.0-or-later** (`LICENSE.txt`, plus the SPDX + copyright header on every `.py` file).
+The rule for everything else: *if someone else's file ends up on the user's PC, their license text goes
+with it.* **`licenses/`** (tracked in git, unlike `dependables/`) is **16 files**: `README.txt` (an index:
+version, license and source URL of every component), one file per library or font (`deno.txt`, `python.txt`,
+`qt-pyside6.txt`, `opencv-python.txt`, `numpy.txt`, `pillow.txt`, `rlottie.txt`, `ffmpeg-python.txt`,
+`future.txt`, `fonts.txt`, `artwork.txt` — the CC BY 4.0 and Lottie Simple License texts), and a folder each for the two GPL programs, which need a source pointer —
+`ffmpeg/` (`SOURCE.txt` + the publisher's `gyan-build-README.txt`) and `yt-dlp/` (`SOURCE.txt` + the
+publisher's `THIRD_PARTY_LICENSES.txt`). Each single file starts with a header (component, version,
+license, source URL) and holds that component's license texts **verbatim**, each under a divider naming
+it — that is what makes merging them sound: never edit a text, only add a header. **There is one copy of
+the GPL text for the whole distribution: the root `LICENSE.txt`**, which the `SOURCE.txt` files point to (so no
+per-program copies, and no Unlicense copy for yt-dlp, which has no conditions). **The installer must ship
+`LICENSE.txt` and `licenses/` beside the app** (Settings > About's View License and Third-party Licenses
+buttons open them). Texts came from each project's own repo or the installed package (an earlier
+55-file layout was merged into these 15 with a script that checked every text still appears verbatim and
+every source URL survived). The ffmpeg build's own readme says "License: GPL v3" and names its source commit;
+yt-dlp's exe is GPLv3+ and its file lists what it bundles. The root `LICENSE.txt` is gnu.org's copy, which differs
+from the older FSF copy some packages ship only in four `http://` -> `https://` URLs. numpy's 16 per-component
+licenses are real notices (not repeated in its top-level file), so they stay inside `numpy.txt`.
+**When a bundled version changes** (an ffmpeg / yt-dlp / deno update, a `requirements.txt` bump), update that
+component's header version and URLs (they name exact tags) and replace the text if the license changed.
+**The GPL duty for ffmpeg and yt-dlp is source availability**: `SOURCE.txt` links the exact source, and
+attaching the FFmpeg source archive to each GitHub release is the robust way (a third party's link can die).
+**`licenses/README.txt`'s Artwork section records every asset's origin now**: the SVG Repo icons —
+`audio-mute.svg` (Public Domain), `close-window.svg`/`maximize-window.svg` (CC Attribution, Konstantin
+Filatov), `select-multiple.svg` (CC Attribution, krystonschwarze), `expand.svg` (CC Attribution,
+zwicon), `minimize-window.svg` (Apache 2.0, Richard9394), `undo.svg` (MIT, halfmage), `info.svg` (SIL Open Font License 1.1, kudakurage) —
+plus `redo.svg`/`deselect-multiple.svg`/`shrink.svg` as Yezan Smadi's own edits of
+`undo.svg`/`select-multiple.svg`/`expand.svg` (not separate SVG Repo downloads, so each inherits the
+license *and* credited author of the one it was made from: MIT, halfmage; CC Attribution, krystonschwarze; CC
+Attribution, zwicon); `Wave Loop.json` under the Lottie Simple License (FL 9.13.21), Copyright (c) 2021
+Design Barn Inc.; and `LlamaMXD-Logo.svg`/`RCA Cable Yellow.svg`/`LlamaDiscLoading/*.png` as Yezan
+Smadi's own original artwork, **deliberately not GPL'd** (GPL-3.0-or-later covers the program's source
+code, not its visual identity) but not identically licensed: the logo and the loading animation, each
+picturing Pak the Llama and (the animation) the coined "PAK-RW"/"LlamaDisc" wordmark, are LlamaMXD's
+actual branding — Copyright (c) 2026 Yezan Smadi, all rights reserved (may not be copied, modified,
+redistributed, or used to represent a modified/unofficial build of LlamaMXD, without permission) — the
+same reason Mozilla/Blender/GNOME/VLC keep their own logos out of their code's open-source license —
+while the cable graphic, purely decorative, is Copyright (c) 2026 Yezan Smadi under CC Attribution 4.0
+(CC BY 4.0), reusable with credit. **"LlamaMXD" and "Pak the
+Llama"** (`core.about.MASCOT_NAME` — the llama pictured in `LlamaMXD-Logo.svg`) **are unregistered
+trademarks of Yezan Smadi** (`core.about.TRADEMARK_NOTICE`), claimed by use rather than registered with
+a trademark office — hence "LlamaMXD™"/"Pak the Llama™", not the registered-mark "®" — stated in both
+`licenses/README.txt` and Settings' About page, as an uncaptioned `role="hint"` line (muted, smaller
+than the rest of the page) trailing under the License section's own notice box and buttons — fine print
+under everything else, not a fourth row alongside GitHub/Issue Tracker/License. A build with
+`--enable-nonfree` must never be bundled.
 
 ## Architecture
 
 ```
-main.py                   QApplication (Fusion style), bundled fonts, theme, MainWindow
+main.py                   logging first, then QApplication (Fusion style), bundled fonts, theme, MainWindow
 core/formats.py           container/codec compatibility + the option cascade (pure data)
 core/gpu.py               GPU vendor detection + hardware-encoder selection (NVENC/QSV/AMF)
 core/system_info.py       CPU/RAM/disk facts for the Settings tab's system-info block
@@ -49,7 +112,10 @@ core/priority.py          Settings' "Priority Level" -> Windows process priority
 core/window_mode.py       Settings' "Window Mode" names: Windowed / Borderless / Fixed
 core/window_style.py      Win32 window styles Qt leaves stale on a live window: maximize box, dark title bar
 core/startup_tab.py       Settings' "Startup Tab" names: the four main tabs + the Encoding default
+core/keybinds.py          the remappable shortcuts: action table, default keys, contexts, conflict rule (no Qt)
 core/theme.py             brand palettes, contrast helpers, settings.json read/write
+core/about.py             Settings' About page: repo / issue-tracker URLs, the GPL short notice, paths to LICENSE.txt and licenses/
+core/llamalog.py          LlamaLog: the rotating log file, crash hooks, URL scrubbing, per-job output ring buffer
 core/utilities.py         ffprobe media probe + duration, capability checks, preview frame decode
 core/ffmpeg_vars.py       one queued job's settings flattened into module globals (raw + *_ARG)
 core/ffmpeg_build.py      builds a Mux or Encode job's ffmpeg-python Stream / full argv
@@ -62,13 +128,17 @@ ui/app.py                 MainWindow — the hub: shared state, file-selection b
 ui/theme.py               ThemeManager (live theme + System/Light/Dark) + the generated stylesheet
 ui/scale.py               the one UI scale factor: px()/fpx(), bound setters, design-space painting
 ui/workers.py             run_async: daemon thread → result delivered on the GUI thread; pil_to_qimage
+ui/qt_log.py              routes Qt's own warnings/errors into the log
+ui/single_instance.py     InstanceLock: a per-user lock file so only one LlamaMXD runs (main.py checks it first)
+ui/keymap.py              KeyMap: the live shortcuts + matching a QKeyEvent against them
+ui/keynav.py              KeyNav: Tab / Enter selection of a tab's controls (the ring) + an open dropdown's keys
 ui/tips.py                shared hover-tooltip copy (codec / container / audio-format explanations)
 ui/widgets/controls.py    Dropdown, CheckBox, Switch, SegmentedButton, TimeSpinner, MarqueeLabel,
                           IconButton (✕ / ▲ / ▼ / select-all / deselect-all / undo / redo), ScaledLabel / ScaledButton /
                           ScaledLineEdit (stock text painted through the scaled painter — see
                           "UI scale") + helpers
                           (button, labeled, set_enabled, draw_cross)
-ui/widgets/panels.py      SubTabBar, DropBox, BorderedFrame, SummaryPanel, Sidebar, TabIndicator
+ui/widgets/panels.py      SubTabBar, DropBox, LoadingSpinner, BorderedFrame, SummaryPanel, Sidebar, TabIndicator
 ui/widgets/tracklist.py   TrackListBox — Muxing's checkable, scrollable track picker
 ui/widgets/carousel.py    ThumbnailCarousel + WaveLayer + the info tooltip
 ui/widgets/dialogs.py     MessageDialog, show_message / ask_yes_no / ask_text,
@@ -77,11 +147,114 @@ ui/widgets/toast.py       Toast / ToastManager
 ui/widgets/frameless.py   ResizeGrips (the borderless window's eight native-resize handles) +
                           WindowControls (its close / maximise / minimise icons)
 ui/widgets/tooltip.py     tip(widget, text) — the shared themed hover tooltip
+ui/widgets/keyfield.py    KeyField — Settings' click-then-press-a-key box
 ui/tabs/media_tab.py      MediaTab — the frame Muxing and Encoding share
 ui/tabs/muxing.py, encoding.py, downloader.py, queue.py, settings.py
 ```
 
 `core/` has no UI code at all — nothing in it imports Qt.
+
+### Logging (`core/llamalog.py`, `ui/qt_log.py`)
+
+**Where and how.** `%LOCALAPPDATA%\LlamaMXD\logs\llamamxd.log` — writable wherever the app is
+installed and untouched by an update; it falls back to `%TEMP%\LlamaMXD-logs`, and with no writable
+folder at all `setup()` returns None and every call is a no-op (logging must never raise into the app).
+A `RotatingFileHandler`, ~1MB x 5 backups. `main.py` calls `llamalog.setup(version=VERSION)` **before
+anything else** (so a failure while building the window is on record), then reads `settings.json` and
+applies the saved detail (`set_detail`), then `describe_environment_async()`. A line is
+`2026-09-21 13:49:02.123 INFO     app        | [thread] message` — the thread's name only when it isn't
+the main one; areas are `llamamxd.<area>` loggers (`app`, `queue`, `ffmpeg`, `ytdlp`, `probe`, `gpu`,
+`settings`, `downloader`, `workers`, `ui`, `qt`). The session opens with a header: version, Python, OS,
+the packages (PySide6 / OpenCV / numpy / Pillow / rlottie / ffmpeg-python, each with its version or
+MISSING), then — from a thread, since the version checks launch processes — CPU, RAM, GPU, and each
+bundled tool's path and version (a missing tool is a WARNING). Two instances running at once share the
+file and can trip rotation on Windows; `logging.raiseExceptions` is off, so that is silent.
+
+**Levels.** Settings' **Normal** is INFO and up, **Detailed** adds DEBUG (`app.log_detail`, saved as
+`log_detail`). Detailed also changes what jobs record: ffmpeg runs `-loglevel level+info` instead of
+`error` (`llamalog.ffmpeg_loglevel()`, passed to `compile_command(loglevel=)`), and yt-dlp runs with
+`-v` (`build_download_args(verbose=)`). **The failure message must not come from that noise**: with
+`level+info` every stderr line is tagged (`[error] ...`, or `[ctx @ 0x..] [error] ...`), and the last
+three lines of a failed run are `[info]` ones ("Conversion failed!" is `[info]`), so
+`FfmpegJob._reason` prefers the level-tagged `[error]` / `[fatal]` lines (`_errors`, tag stripped) and only
+falls back to the stderr tail — which is exactly the Normal-mode behaviour, unchanged. Checked with a
+real failing encode in Detailed mode.
+
+**What it catches.** `setup()` installs `sys.excepthook`, `threading.excepthook` and
+`sys.unraisablehook` (each logs at CRITICAL/ERROR with the traceback, and the default hook still runs
+when there is a stderr — there is none under `pythonw`), `ui/qt_log.install()` routes Qt's message
+handler into the `qt` area (warnings and up at their level, Qt's debug/info at DEBUG), and
+`ui/workers.run_async` logs a failed background task with its full traceback (it printed only
+`repr(exc)` before). **`faulthandler` writes native crashes to `crash.log`** (an access violation in a
+driver, OpenCV or libplacebo bypasses every Python hook — this app has met several); at the next
+start a `crash.log` holding more than its session header is logged as a WARNING with the first 40 lines,
+set aside as `crash-<time>.log` (5 kept) and a fresh one started, so a crash is reported exactly once.
+Verified by really segfaulting a subprocess with `ctypes.string_at(0)`.
+
+**Privacy.** File paths are logged in full. **URLs are logged without their query string, fragment
+and `user:pass@`**, enforced where a line is written rather than at each call site: the formatter
+scrubs every line (`scrub`), `JobOutput` scrubs every stored line, and job files scrub their header.
+yt-dlp echoes a link's tail *without* its scheme (`[generic] watch?v=abc&token=...: Unable to
+download webpage`), which no URL pattern catches — so `scrub` remembers the query text of every link it
+has seen (`_hidden`, 64, at least 6 characters) and removes it wherever else it appears (found by a real
+yt-dlp failure against an unresolvable link; the token was in both the log and the job file before
+this). Consequence worth knowing: a YouTube link loses its `?v=` video id, so it reads as
+`https://www.youtube.com/watch`.
+
+**Job output — the ring buffer.** Each `FfmpegJob` / `YtDlpJob` owns a `llamalog.JobOutput`: a
+bounded in-memory deque (2000 lines, oldest dropped and counted) fed from the reader thread — ffmpeg's
+stderr, and yt-dlp's merged output minus its per-update `LLAMA_DL` progress lines (ffmpeg's `-progress`
+stdout is not fed either). When the job ends the runner calls `_record`, once (`_recorded`), which
+calls `llamalog.record_job`: the main log gets one summary line (`ffmpeg job "x.mp4" failed after 1m 15s
+(exit code 1) | reason | output: <path>` — ERROR for a failure, INFO otherwise) and the output goes to
+`logs\jobs\<time>-<area>-<name>-<outcome>.log`, whose header carries the outcome, duration, exit code,
+reason and the full command line. **A failed or stopped job's whole buffer is written** (and always gets
+a file, even with no output); **a successful job's last 100 lines are** (`JOB_SUCCESS_LINES`), and a
+successful job that said nothing writes no file — ffmpeg at `-loglevel error` says nothing when it
+succeeds, which is why Detailed raises it. The file says how many earlier lines were not kept. Files are
+pruned: the newest 50 failed and 50 stopped, the newest 20 successful (so a run of good jobs cannot push
+out the failures you go looking for). Every path out of a job records it: finishing, failing (nonzero
+exit, the output couldn't be saved, the HDR colour-tag check), `stop()`, and failing before the process
+started (`_fail_early`). `job.log_path` is the file once the job has ended. A job's start is logged with
+its full command line (this replaces the two `print`s the queue had).
+
+**Events.** File selected, the probe summary (`_probe_summary`: container, video codec and size,
+HDR, audio, duration, size), preview decode time, an audio-only file, a rejected file (WARNING), HDR
+render start / finish / cancel (a cancelled render's late empty result is dropped without a WARNING and
+without replacing the cached frames — `_hdr_cancelled_token`), the capability probes (libplacebo/Vulkan,
+`-fps_mode`), the Deno check, link fetches, queue add / remove / start / pause / stop / finish and each
+task's end, When Done, settings changes (priority, window mode, GPU, reset), and closing. **Swallowed
+exceptions**: the ones whose failure means something got a line — `probe_media` failing (WARNING; it then
+returns what it can), the post-encode colour-tag check and the capability checks not running, every HDR
+preview frame that fails (WARNING, with ffmpeg's exit code and last stderr line; the set was silently
+shorter before), GPU adapter / encoder queries, a failed power action, `presets.json` unreadable or unsaveable
+(a *missing* one is normal and silent), a thumbnail fetch, a partial output that can't be deleted (not one that was
+never created), a process still alive 10s after being killed, a pause / resume that didn't take,
+the default save folder, and the Wave Loop / loading animations being unavailable (once, with the
+traceback). The routine parse fallbacks (`_parse_frame_rate`, the per-field `ValueError`s) stay silent by
+design, and the per-file duration / metadata probes log at DEBUG.
+
+**Verified** with harnesses run against a sandboxed `LOCALAPPDATA` (never the real one): line format, both
+detail levels, idempotent setup, URL scrubbing through messages, tracebacks and job files, hooks for a
+thread / the main thread / `__del__`, thread names, the ring buffer (2500 lines -> 2000 + "500 earlier lines
+not kept"; a successful job's last 100 of 300; none for a quiet success; a stopped job with no output),
+pruning (60 failed -> 50, 30 done -> 20), rotation at 1MB, a native crash and the next-start report, no
+writable folder, the temp fallback, real ffmpeg jobs (good, failing, stopped, level+info, both outcomes)
+and a real yt-dlp failure in both detail levels, a real `MainWindow` (settings / Deno / libplacebo /
+environment lines, an exception inside a Qt slot, a Qt warning, a failing `run_async` task, importing a
+video / HDR / audio / unreadable file, the cancelled render, queue actions, the Settings section, Reset
+to Default, a corrupt `settings.json`, closing), and each instrumented failure path. That last harness found
+a `NameError` in a first version of the HDR-frame logging (it read a result the code never assigned) —
+which would have broken every HDR preview frame; the earlier full-app run predated that edit, so
+**rerun the whole set after any edit, not only the harness for the part you touched.**
+
+**Windows-only pieces, for the later Linux / macOS port** (the app targets Windows for now; nothing
+here has been run elsewhere): the log folder comes from `%LOCALAPPDATA%` (falling back to
+`~/AppData/Local`, which would be the wrong place on a Mac or Linux box — they want `~/Library/Logs/LlamaMXD`
+and `$XDG_STATE_HOME` / `~/.local/state/llamamxd`); `open_log_folder` uses `os.startfile` (it fails safely into
+an error dialog; the equivalents are `open` and `xdg-open`); and the environment header's GPU line comes from
+`core.gpu` (WMI / PowerShell). Everything else in `core/llamalog.py` is plain Python (`logging`, `faulthandler`,
+the hooks, the ring buffer, scrubbing).
 
 ### External tools (`core/tools.py`)
 
@@ -254,8 +427,10 @@ sitting on screen until the newly-picked file's own frames finish decoding
 (`_load_thumbnails`, below, only rebroadcasts synchronously on a cache hit;
 a genuine decode takes a worker round-trip, during which the preview would
 otherwise still show the previous file) — then for each media tab:
-`set_selected_file` (the marquee label, and the DropBox collapses to just
-its Browse button) and `_autofill_output_path`, then `_load_thumbnails(path)`.
+`set_selected_file` (the marquee label; the preview area goes back to the DropBox, which now
+shows only the **loading spinner** until frames arrive — see "DropBox" below — over a carousel
+that is cleared and forgets it was populated, so a *replacement* file shows the spinner too
+rather than a blank carousel) and `_autofill_output_path`, then `_load_thumbnails(path)`.
 
 **`_autofill_output_path`: the FILENAME always re-derives from the file just
 picked; only the DIRECTORY persists** — whatever folder is currently in the
@@ -417,14 +592,33 @@ genuinely ran and found none; `None` (unknown) must never read as absent.
 **Audio-only inputs.** `extract_video_thumbnails` returns `[]` for an audio
 file. `_is_audio_only(path)` (the probe says audio-but-no-video, or with no
 probe the extension is in `formats.AUDIO_EXTENSIONS`) triggers
-`set_audio_only(True)` on every carousel — from both the probe delivery and
-the empty frame delivery — which reveals the carousel and shows the Wave Loop
-visualiser with navigation disabled. Real frames arriving clear it again.
+`set_audio_only(True)` on every carousel — from the probe delivery, the
+cached-probe branch of `_load_thumbnails` (a re-selected audio file has no fresh probe
+to deliver it) and the empty frame delivery — which reveals the carousel and shows the Wave
+Loop visualiser with navigation disabled. Real frames arriving clear it again.
+**Do not wait on the frame decode for an audio file: OpenCV's `cap.read()` never returns on
+an audio-only file** (m4a, mp3 and flac all hang, 5/5 runs, with no frame count reported), so
+its worker thread is stuck for good and `_deliver_thumbnails` never fires — the Wave Loop
+comes from the probe, not from that decode. Harmless while the probe path reveals the
+carousel; it is why the cached path above must not rely on the decode, or the import spinner
+would spin forever. (Each audio import leaks one such daemon thread.)
 
 **HDR→SDR preview renders** (`start_hdr_render`, `_deliver_hdr`): one
 tone-mapped render per file (`extract_hdr_tonemapped_thumbnails`), cached on
 the app and token-guarded; a no-op when already cached or already running for
-that path. Delivered to any tab with `on_hdr_frames_ready`. **A render in
+that path. Delivered to any tab with `on_hdr_frames_ready` (which only re-applies the
+frames when the HDR→SDR switch is on — the render now lands while the raw previews are
+being scrubbed, and re-applying them would reset the carousel).
+
+**The render starts on import, not on the switch.** `_prerender_hdr(path)` runs right after
+the raw previews are broadcast (`_deliver_thumbnails`, and the cached-frames branch of
+`_load_thumbnails`) and starts `start_hdr_render` when the probe says `hdr` is `True` — so
+only an HDR file pays for it, the raw previews are never delayed, and the switch is
+instant once the set is ready (0.4ms measured). A switch pressed earlier just waits for the
+rest of the render already in flight. It runs **alongside a running queue job** by design
+(the user can multitask); it is not held while one is active. Measured on a real 4K HDR10
+file (Beauty and the Beast HDR, 210s): raw previews 4.5s, then the tone-mapped set 8-10s
+after them (it was 14.6s, sequential, before). **A render in
 flight is interrupted the instant the file changes**, not left to finish for
 a file nobody's looking at any more: `update_global_file` calls
 `_cancel_hdr_render` (a `threading.Event` passed into
@@ -443,23 +637,72 @@ dropped; a success is cached in `ytdlp_cache`. The Deno check
 
 ### Keybinds
 
-An application-level event filter (`_Keybinds`) so they work wherever focus
-is — unless a modal is open, or focus is on something the key already means
-something for:
+**Every shortcut is remappable and can be switched off** (Settings -> Shortcuts, below).
+`core/keybinds.py` is the table — `ACTIONS` (id, name, default key, contexts, tooltip) — and
+`MainWindow.keymap` (`ui/keymap.py`, a `KeyMap`) holds what the user has made of it, persisted as
+`keybinds: {id: {"key": "Left", "enabled": true}}`. Keys are Qt's portable strings; `event_spec`
+turns a key press into one (keypad Enter is `Return`, Qt's `Backtab` is `Shift+Tab`, a bare
+modifier is ""), which is what both the capture box and the matcher use, so they always agree.
 
-- **Left / Right** → steps the current tab's carousel (`carousel.step`,
-  which doesn't light the chevrons). Ignored while a line edit or the
-  TimeSpinner field has focus (they own the arrow keys).
-- **Space** → `QueueTab.toggle_queue()` (start / pause), on the Queue tab
-  only, ignored for auto-repeat and when focus is on a line edit, the time
-  field, a button or a combo box.
-- **Escape** → collapses whichever media tab's carousel is currently
-  expanded (the preview's expand/shrink icon — see `ThumbnailCarousel` in
-  Widgets below), if any. Ignored while a line edit or the TimeSpinner field
-  has focus, same as Left/Right.
+An application-level event filter (`_Keybinds` in `ui/app.py`) decides *when* each may fire — so
+they work wherever focus is, unless a modal is open, the window isn't active, or focus is on
+something the key already means something for. The defaults:
+
+| Action | Key | When |
+|---|---|---|
+| Scroll Preview Left / Right | Left / Right | steps the current tab's carousel (`carousel.step`, no chevron glow); repeats while held |
+| Expand Preview | F | `carousel.toggle_expand()` — expands (only where the corner icon is offered: frames, not the Wave Loop) or shrinks |
+| Exit Expanded Preview | Esc | collapses whichever media tab's preview is expanded |
+| Start / Pause Queue | Space | Queue tab only; not when a button / dropdown has focus |
+| Previous / Next Tab | Up / Down | `MainWindow.cycle_tab`: Muxing, Encoding, Downloader, Queue, Settings, wrapping; **not while a preview is expanded** |
+| Select Next Option | Tab (Shift+Tab back) | `KeyNav.step`, see below; not while a preview is expanded |
+| Press Selected Option | Enter | `KeyNav.activate` |
+| Dropdown: Previous / Next Option | Up / Down | only while a dropdown list is open |
+| Fullscreen Window | F11 | `MainWindow.toggle_fullscreen` |
+
+Only F11 and Tab work from inside a text field (F11 means nothing there, and Tab is how you leave
+it); everything else stands aside while a line edit, the TimeSpinner field or a `KeyField` (marked
+`captures_keys`) has focus. Tab is **always consumed** when it is the Select Next Option key —
+Qt's own Tab hops into the next text field, which then swallowed every following shortcut (found
+by a harness: Tab with the preview expanded left focus in the save-path entry and Esc / Right went
+dead). Auto-repeat is swallowed for everything but the two preview keys.
+
+**Contexts and conflicts.** Each action lists where it can fire (`window`, `dropdown`); two
+*enabled* actions may share a key only if their contexts don't overlap — that is how Up / Down are
+both Previous / Next Tab and the dropdown's previous / next option. Settings refuses a conflicting
+capture, and refuses to switch a row on if its key was taken since — both with a "Shortcut Already Used" popup (`show_message`) naming the other shortcut, not a toast.
+
+**An open dropdown owns the arrow keys and Enter** (`Dropdown.open_one`, checked first in the
+filter, ahead of the active-window test since the list is a popup): its two option keys move the
+highlight (`Dropdown.move_highlight`, which also fires `hovered` so Settings' theme preview follows)
+and Press Selected Option picks it (`pick_highlighted` -> `_on_activated`, the same as a click).
+Qt's own handling of Up / Down / Enter in the list is swallowed when they aren't a matching action,
+so switching one off (or moving it) really turns it off. Esc is left to Qt (closes the list).
+
+**Full-screen (F11).** In Borderless it is the Settings Fullscreen box (`SettingsTab.set_fullscreen`
+-> remembered and saved). In Windowed and Fixed it is `MainWindow._session_fullscreen`: for this
+session only, and picking a window mode in Settings clears it. `_wants_fullscreen()` is the flag OR
+the Borderless setting; a Fixed window that is fullscreen has its size limits freed for as long as it
+is (`_apply_window_mode`), and comes back to the fixed size and centre. Verified on a real display in
+all three modes (fills the screen, returns to the exact size).
+
+**Tab / Enter navigation (`ui/keynav.py`).** Every clickable is `Qt.NoFocus`, so this doesn't use
+Qt's focus chain: `KeyNav` keeps its own selected stop and draws a `_Ring` (an overlay child of the
+window, transparent to the mouse, following its target by a 60ms poll, kept under the toasts by
+`_restack`). Stops are collected fresh on each press from the *current tab* (the sidebar has Up /
+Down): every visible, enabled `QAbstractButton` (checkboxes, switches, icon buttons; a time field's
+▲ / ▼ `stepper` buttons are skipped), `Dropdown`, `SegmentedButton` segment (`nav_stops`),
+`SubTabBar` tab (`nav_stops`), track row (the ring goes round the whole `_TrackRow`) and text field
+(`QLineEdit` / `_TimeField` take real focus, since typing needs it, and draw their own). Order is
+reading order — rows top to bottom (centres within `px(10)`), left to right in a row — and it wraps.
+First press selects the first stop (the last, for Shift+Tab); from a clicked-into text field it
+continues from there. Enter clicks / opens / selects (`QAbstractButton.click`, `showPopup`,
+`SegmentedButton.select`, `SubTabBar.set_active`); a text field lets Enter through to Qt. A mouse
+press, or leaving the tab, drops the selection. Not stops: sliders (Left / Right are the preview
+keys), queue rows, the carousel, and the sidebar.
 
 Clickables are `Qt.NoFocus` (see Conventions), so clicking a sidebar button
-never swallows the Space bind. Add new binds here rather than on tabs.
+never swallows the Space bind. Add new binds to `core/keybinds.py` and `_Keybinds`, not on tabs.
 
 **The same filter also clears a text field's focus on a click elsewhere.**
 Every clickable being `Qt.NoFocus` has a side effect Qt's own default click
@@ -663,11 +906,36 @@ Three rules cover every kind of size:
   calls inside `ui.theme.stylesheet()` (regenerated on a scale change), and a
   real widget's other font needs go through `set_font_px(widget, px)` (which
   the stylesheet's own font rules override on a label — it does nothing
-  there). Widths from
+  there: confirmed directly — right after `set_font_px` the font reads the size given, and
+  the very next `ensurePolished()` [what a real show() triggers] puts it straight back to
+  whatever the matching stylesheet rule says, since Qt's own style engine's `.setFont()`
+  call runs after and wins over a plain one. The one thing that *does* survive a later
+  restyle is the label's own *instance*-level `setStyleSheet()` — Settings' About notice
+  binds `notice.setStyleSheet(f"font-size: {scale.font_px(12)}px;")` on every scale change
+  for exactly this reason; see "About" under Settings below). Widths from
   `Dropdown.width_for` / `button_width_for` are reference pixels too.
   The carousel is the exception: it paints in real pixels (its frame and
   hit-testing are fractions of a real rect), with `px()` / `fpx()` on its few
   absolute constants — margins, dot sizes, badge floors.
+
+**Scans re-run 2026-09-21** (after the loading spinner, the carousel hover growth, the LlamaLog
+row, the Start Time muting and the background HDR render), each against a plain `git archive` of the
+previous commit for comparison. **Squeeze: 0 squeezed of 4,660 layout checks** (19 page states x 5 scales x
+exact / wider / taller windows; the previous commit: 0 of 4,615). **Proportions: the same 165 widgets
+drift more than 3px, at 1.5x-2.6x, in both trees, and none of the 60 new widgets' checks exceeds
+1.2px** — i.e. rounding that already existed (4 to 16 widgets per Muxing/Encoding page at 2.6x, up to
+~3.6px, apart from the stale-hint case below), not something added. Both scans were shown able to fail (an unscaled +40px on a Settings
+dropdown; the Video page forced 4px tall — both caught). `_Grip` (the borderless window's resize
+strips) is excluded from the proportions scan: it is real pixels by design. **Two pre-existing findings
+from the same runs, both identical on the previous commit**: (1) the sizing INVARIANT slips by 1px at two
+of 42 scales (1.415x and 2.38x: the Encoding *Audio* page is 1px taller than Overview, so the Encoding
+preview is 1px shorter than Muxing's — 352 vs 353); at 1.0x the two DropBoxes are identical (670x253);
+(2) **Muxing's panel stack is left too tall after the window is dragged bigger and then smaller**
+(1.0x -> 2.6x -> 1.0x gives 164px, not 118, and 1.0x -> 1.5x -> 1.0x gives 134; the stale height
+sits on a *hidden* sub-page's size hint and clears when that page is shown; Encoding is unaffected).
+It shrinks the preview and breaks the Muxing/Encoding invariant until then. Not fixed here (a task is
+queued for it). **The scan harness needs the window in a known state: an earlier scale change can leave
+this stale hint behind, which is what produced a 116px "deviation" in the first proportions run.**
 
 **Verified**: a harness that renders every page (Muxing/Encoding x
 Overview/Video/Audio with and without a file, Downloader, Queue with rows and
@@ -791,13 +1059,14 @@ rows, toasts) paints itself.
 `appearance_mode`, `default_save_location`, `gpu_enabled`,
 `downloader_separate_save`, `downloader_save_location`, `naming_template`,
 `priority_level`, `when_done`, `when_done_reset`, `window_mode`,
-`borderless_fullscreen`, `startup_tab`; missing keys or a
+`borderless_fullscreen`, `startup_tab`, `log_detail`, `keybinds`; missing keys or a
 missing/corrupt file — or a stored `naming_template` / `when_done` /
-`priority_level` / `window_mode` / `startup_tab` that's no longer valid (a hand-edited file) —
+`priority_level` / `window_mode` / `startup_tab` / `log_detail` that's no longer valid (a hand-edited file) —
 fall back to their defaults: `Lemon` / `System` / `~/Videos/LlamaMXD
 Export` / `True` (GPU) / `False` / `""` (the last two back Settings' "Separate
 Save for Downloader" — see "Tabs → Settings" below), then the naming format,
-`Normal`, `Do Nothing` / `True`, `Fixed` / `False` and `Encoding`. **Presets**
+`Normal`, `Do Nothing` / `True`, `Fixed` / `False`, `Encoding` and `Normal` (the log detail). A corrupt
+`settings.json` is logged as a WARNING before the defaults are used. **Presets**
 (`core/presets.py`) live in a gitignored
 `presets.json`, shaped `{tab: {name: settings}}`. A preset is a **recipe, not
 a job**: `PRESET_KEYS` limits it to the container and codec/quality choices
@@ -946,7 +1215,8 @@ the encoder auto-resolved to the source's own codec. Encoding is the superset.
 They share one frame, `MediaTab`, top to bottom:
 - **Header**: a `SubTabBar` (Overview / Video / Audio) and the `Selected
   File:` `MarqueeLabel` (double-click to reselect).
-- **Preview**: a `QStackedLayout` holding the `DropBox` until the carousel's
+- **Preview**: a `QStackedLayout` holding the `DropBox` (its loading spinner, once a file
+  is picked) until the carousel's
   `populated` signal, then the `ThumbnailCarousel`. It takes all leftover
   height.
 - **Sub-tab panels**: a `QStackedWidget`, which sizes itself to its tallest
@@ -1010,8 +1280,8 @@ succeeds); everything else is validated on click.
 
 **Muxing / Video** and **Muxing / Audio**: a `TrackListBox`
 (`ui/widgets/tracklist.py`) — a scrollable box bordered in the theme's
-*secondary* colour (blue on Lemon), deliberately distinct from DropBox's own
-primary border — with one checkbox per stream the source actually has,
+*secondary* colour (blue on Lemon), the same border colour DropBox itself
+uses — with one checkbox per stream the source actually has,
 every checked one mapped into the output. This replaced the original single
 `Auto`/`Track N` dropdown: Muxing now mixes and matches any combination of a
 file's own tracks, not just one at a time. The box carries no caption of its
@@ -1705,13 +1975,112 @@ Video + Audio only (absent otherwise, so the details popup skips it).
 
 #### Settings (`ui/tabs/settings.py`)
 
-**Three sub-tabs** (the same `SubTabBar` Muxing/Encoding use, over a
-`QStackedWidget` inside a scroll area so a revealed row can never clip):
+**Five sub-tabs** (the same `SubTabBar` Muxing/Encoding use, over a
+`QStackedWidget` where **each page has its own `QScrollArea`** so a revealed row can never clip):
 **Appearance** (Theme, Appearance Mode, Window Mode + its Borderless-only
 Fullscreen checkbox), **Output** (Default Save Location +
 disk space, Separate Save for Downloader, File Naming), **Performance**
-(Hardware Acceleration, Priority Level, When Done, Startup Tab). Reset to Default / Save are
-pinned below the pages and act on *every* setting, whichever page is showing.
+(Hardware Acceleration, Priority Level, When Done, Startup Tab, and a **LlamaLog:** section at the
+bottom), **Shortcuts** (one row per `core.keybinds` action: its name on the left, a `KeyField` in
+the middle — click it, press the new key, it shows "Press a key…" while listening and clicking away
+leaves it unchanged; every key is takeable, Esc and Tab included — and an on/off `Switch` on the right,
+which dims the row; a **Reset Shortcuts** button under the list; see "Keybinds" above), **About** (the
+version — `VERSION` in `ui/widgets/panels.py` —, then a **`GitHub:`** and an **`Issue Tracker:`** row (each
+`SettingsTab._about_link_row`: a bold `field_label` caption beside the *actual URL text* — `core.about.REPO_URL`
+/ `ISSUES_URL` — as a `ClickableLabel` styled as a real hyperlink: underlined, coloured in the theme's
+`secondary`, `T.theme.changed` reconnected so it restyles live on a theme switch, `PointingHandCursor`,
+`clicked` opens it in the default browser; by request, over naming these two as buttons — a URL you can
+actually read beats one only a tooltip names), and under a plain `License:` caption (naming
+the type isn't needed — the notice right under it already says GPL v3) GNU's **short, selectable notice**
+(`about.NOTICE`: the standard "This program is free software…" text from the GPLv3's "How to Apply" section,
+with the copyright line filled in), **in a secondary-bordered box** (`BorderedFrame`, the same widget as
+Muxing's `TrackListBox`, its margins a little tighter — `9, 5, 5, 5` against `TrackListBox`'s own `9, 7, 5,
+7` — see the fit note below for why; sized to its content, no scrolling, since the notice is always this
+same short, fixed text), and two buttons below the box, **each sized to its own text, not to the wider of
+the two** (`button_width_for(["View License"])` / `(["Third-party Licenses"])` separately, not one shared
+`button_width_for` call over both — a narrow "View License" doesn't need to match its neighbour's width):
+**View License**, which opens the full text, `LICENSE.txt` (`about.license_path()`: beside a frozen app's
+exe, else the repo root), in the default text editor, and **Third-party Licenses**, which opens the
+`licenses/` folder (`about.licenses_dir()`, same lookup); each shows a message if its target is missing.
+This is the "about box" the GPL itself describes,
+and it covers GPLv3 §5(d)'s Appropriate Legal Notices (copyright, no warranty, the right to redistribute,
+how to view the license). **The full text lives in files, not in the app**, and the file is `LICENSE.txt`
+rather than `LICENSE` so Windows opens it in the default text editor instead of asking which program to use.
+The installer must copy `LICENSE.txt` and `licenses/` next to the app. An earlier version showed the whole
+license in a scrollable box (a `TextView` widget and a paragraph-reflow helper, both removed); the notice
+replaced it. **Trailing under all of it, uncaptioned**: one `role="hint"` line combining
+`about.LOGO_COPYRIGHT_NOTICE` ("The LlamaMXD logo (Pak the Llama) is Copyright © 2026 Yezan Smadi, all
+rights reserved") and `about.TRADEMARK_NOTICE` ("LlamaMXD™ and Pak the Llama™ are unregistered
+trademarks of Yezan Smadi") — two separate legal facts (copyright protects the artwork, trademark
+protects the names) in one fine-print sentence pair, Pak the Llama being `about.MASCOT_NAME`, the llama
+pictured in `LlamaMXD-Logo.svg`. The trademark claim is made by use, not registration, hence "™" and not
+the registered-mark "®"; both are separate from the GPL notice above, the same way the logo's own
+copyright in `licenses/README.txt` is kept out of the GPL grant. By request, no `Trademark:` caption of
+its own (it first shipped as a fourth captioned row alongside GitHub/Issue Tracker/License, moved here
+after) — reads as fine print under the license rather than another thing to label.
+
+**The notice is a stock `QLabel`, not `ScaledLabel`** — same reasoning and the same
+`Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard` + I-beam cursor as `MessageDialog`'s message (see
+"Dialogs" below), verified the same way (a real Ctrl+A/Ctrl+C round-trip through the clipboard). Unlike a
+dialog, though, this label lives on the *persistent* main window, where a live rescale is a real, common
+case (this app frequently launches below 1.0x — see "starts at 35% of the screen's width" — not just during
+a drag), so it needs its font kept correctly scaled after the fact, not just once at build time. **`set_font_px`
+does not do this — confirmed with a throwaway repro, not just CLAUDE.md's own existing warning that it "does
+nothing on a label": right after `set_font_px(label, 12)` the font reads 12px, and after the very next
+`ensurePolished()` — which real widgets get the moment they're actually shown — it's back to whatever the
+base `QWidget { font-size: font_px(13)px }` stylesheet rule says, because that rule's `.setFont()` call from
+Qt's own style engine runs *after* and unconditionally overwrites a plain `.setFont()` call. What actually
+survives a later restyle is an *instance*-level stylesheet override (the same trick the system-info label
+above already uses successfully, just static there since it's a `ScaledLabel` reinterpreting an unchanging
+number) — so the notice's font is `scale.bind(notice, lambda: notice.setStyleSheet(f"font-size:
+{scale.font_px(12)}px;"), "font-size")`, re-applied on every scale change like any other bound setter.
+Verified live: 12px at 1.0x, 18px at 1.5x, still 18px after switching away to another sub-tab and back, back
+to 12px on returning to 1.0x.**
+
+**Every sub-page has its own `QScrollArea` — the five pages do *not* share one.** They used to: one shared
+`QScrollArea` wrapped the whole `QStackedWidget`, and a `QStackedWidget`'s `QStackedLayout` sizes the widget
+to its *tallest ever-shown* child at the C++ layout-activation level — a layer overriding `sizeHint()`/
+`minimumSizeHint()` in a Python subclass can't reach (confirmed directly: even calling
+`widget.resize(widget.sizeHint())` right after switching pages snapped straight back to the tallest page's
+height). Measured before the fix: `self.pages.height()` was a constant 505 (Shortcuts' own height) on
+*every* sub-page, so Appearance, at 244, scrolled inside a box it never needed — About did too, even once
+its own content fit. Wrapping each page's own widget in its own `QScrollArea` and stacking *those* sidesteps
+the whole class of problem: each scroll area only ever sizes off its own single child, so switching sub-tabs
+now genuinely changes whether a scrollbar shows — Shortcuts (its many keybind rows, 505 tall) and
+Performance (443, its own five sections) still get one; Appearance and Output (244 / 265) don't. **About
+is right on the line and the exact call can't be trusted from a sandboxed measurement**: it briefly grew
+to 430 when the trademark/copyright disclaimer (below) shipped as its own captioned `Trademark:` row
+between Issue Tracker and License; moving it to an uncaptioned `hint`-role line trailing under the
+License section (by request — no fourth thing to label) measured back at exactly 385/385, no scrollbar,
+stable across a stress sequence of scale round-trips with every sub-tab revisited at each one — **but
+that measurement used whatever font a headless `QT_QPA_PLATFORM=offscreen` process substitutes for
+`role="hint"`'s CSS `font-family: Arial`, which isn't in `assets/fonts` and came back with an empty
+`QFontInfo(...).family()` and no exact match in this sandbox** — i.e. a font nobody will actually see the
+app render with. Swapping in Roboto (bundled, so genuinely available here) for the same text at the same
+644px width wrapped to 2 lines instead of 1, ~10px taller — which would put the real, Arial-rendered page
+over 385 more likely than not. **Confirm in the real app before trusting this fits**: if the About page
+shows a scrollbar, the disclaimer text or a spacer above it needs trimming, the same kind of pass this
+section originally took. Nothing else on this page has slack left either way — treat 385 as the ceiling.
+**Getting About genuinely under its 385-tall viewport, not just close, mattered [historical — the margin
+this established was spent by the trademark/copyright line above, and its exact current fit is unverified
+for the reason just given]**: at 393 (its size before
+the margin trim above) it was only 8px over, and right at that margin Qt's own scrollbar-visibility check
+turned out to be racy — the identical content height and viewport measurement showed no scrollbar the first
+time a resize-then-switch sequence was run, then *did* show one after a further 1.0x→1.5x→1.0x round-trip
+with other sub-tabs visited in between (reproduced 3 times in a row before the trim; 0 times in 18 further
+measurements across a 1.0/1.5/1.0/2.0/0.8/1.0 stress cycle after it, repeated 3 times). Trimmed by tightening
+two spacers (10→6) and the notice box's own margins (9,7,5,7→9,5,5,5) and the spacer after it (4→2), landing
+it at 379/385 — a real 6px margin, not a coin flip. **Re-run that stress sequence (several scale round-trips,
+switching through every sub-tab at each one, watching each page's own `verticalScrollBar().isVisible()`) after
+touching any spacer on a page that's meant to fit — a single "fits" measurement at one scale, once, is not
+enough to trust near this edge.** On a relicense change `about.LICENSE_NAME`, `COPYRIGHT` and `NOTICE`
+together. Nothing on the page is a setting. **The About page ends in
+`addStretch(1)`**: now that this page has its own scroll area sized off nothing but its own content, this
+just keeps the content hugging the top rather than being spread out once the scroll area stretches the page
+to fill whatever room it's given. The header row (five tabs + the 230px system info)
+has 8 reference px to spare, so a sixth tab or a wider info block would squeeze it
+(`layout().totalMinimumSize()` against the row's width). Reset to Default / Save are
+pinned below the pages (outside the stack entirely) and act on *every* setting, whichever page is showing.
 Side padding is 10px (`_SIDE_PAD`) and the tab bar's top padding 5px
 (`_TOP_PAD`), both matching Muxing/Encoding's, so the tab bar sits in the same
 place on every tab. Option names use the stock 12px `field` caption role (the same size as
@@ -1765,7 +2134,7 @@ else). **Reset to Default** (`role="danger"`, `ask_yes_no` confirmation)
 resets theme, appearance mode, window mode (back to Fixed, Fullscreen off),
 default save location, the Downloader's
 separate-save toggle and location, GPU acceleration, file naming, priority
-level, When Done and Startup Tab all back to their defaults in one action, then autosaves — the one Settings control that
+level, When Done, Startup Tab, log detail and the keyboard shortcuts all back to their defaults in one action, then autosaves — the one Settings control that
 touches every persisted key at once rather than just its own. **File
 Naming** (an entry under the output paths, with the token list beneath it
 turning into a STOP_RED reason while what's typed is invalid — unknown
@@ -1793,7 +2162,11 @@ was saved. **Startup Tab** (Muxing / Encoding / Downloader / Queue — never
 Settings; `core/startup_tab.py`, default **Encoding**, held on
 `app.startup_tab`) is which tab `MainWindow` opens on: `current_tab` starts as
 it. Picking one only changes the *next* launch — the running session stays
-where it is. **Save**
+where it is. **LlamaLog:** (last section of Performance, a caption over a row of two controls)
+is the log detail dropdown (**Normal** / **Detailed**, `llamalog.LEVELS`, held on
+`app.log_detail`, saved as `log_detail`; applied to the log at once and to jobs started
+afterwards) and an **Open Log Folder** button (`llamalog.open_log_folder`, an error dialog if there
+is no folder). Reset to Default puts the detail back to Normal. See "Logging" above. **Save**
 persists and toasts "Settings saved." (no jump to the Queue). Settings also
 autosave when the tab is left and on close.
 
@@ -1828,7 +2201,13 @@ autosave when the tab is left and on close.
   and advances, Backspace steps back then clears, Delete clears in place,
   Left/Right/Home/End move, minutes/seconds clamp to 59, a click lands on the
   nearest digit, and a block cursor shows while focused. `valueChanged` fires
-  on **every** change, typing and `set_seconds` included.
+  on **every** change, typing and `set_seconds` included. **`mute_when_zero`** paints the
+  digits in the disabled-text grey while every digit is 0 and in the normal colour the moment
+  it is spun, typed into or set off 0 (and grey again if it is brought back to 0) — both
+  trim spinners opt in: **Clip Duration** (00:00:00 means "to the end of the file") and
+  **Start Time** (00:00:00 means "from the beginning"), so neither reads as a real value until
+  the user has touched it. Start Time used to be left normal on purpose; it now matches.
+  Muxing and Encoding get it together, since both build the spinners in `MediaTab`.
 - **MarqueeLabel** — scrolls sub-pixel and time-based (40px/s, 1.5s hold per
   loop) only when the text overflows, and only while shown.
   **MarqueeGroup** — one shared clock *and timer* several `MarqueeLabel`s can
@@ -1875,19 +2254,77 @@ autosave when the tab is left and on close.
   showed through as a thin seam under the selected tab. Confirmed by pixel
   colours (a row of exactly 60% primary over the frame grey); after the fix the
   worst deviation across 241 scales from 0.6 to 3.0 is 2/765.
-- **DropBox** — primary rounded border; drop / double-click / Browse (which, like
+- **DropBox** — secondary rounded border; drop / double-click / Browse (which, like
   the file label's and carousel's reselect dialog, and both **Add Stream(s)** buttons —
   Muxing's and Encoding's Choose Stream(s) popup, which is handed the folder as
   `start_dir` — opens in the tab's current
   output folder — `MediaTab._output_directory` — not the app's working folder);
   lights up
-  on drag-over; `collapse()` leaves only Browse once a file is chosen,
+  on drag-over; `collapse()` — once a file is chosen — drops the border, prompt *and* Browse
+  and shows the **`LoadingSpinner`** (below) in their place, until the carousel takes over,
   `reset()` is the reverse — back to its pristine pre-import state, used
   when a picked file turns out to be unreadable (`app._reject_file`, see
   "File selection is a broadcast" above) rather than leaving the box
   stranded mid-import. `show_no_preview()` is the third state: the border
   and Browse with "No Preview Available" in place of the prompt, for a file that
-  is selected but has no preview frames.
+  is selected but has no preview frames (both it and `reset()` stop the spinner and
+  bring Browse back).
+  **LoadingSpinner** (`panels.py`) — `assets/LlamaDiscLoading/000.png`…`142.png`: a spinning CD-R
+  (label side "PAK-RW"/"LlamaDisc" plus a llama head, flipping to a rainbow holographic underside),
+  a 143-frame, 60fps, **640px PNG sequence** (exported at 2000px from Expressive Animator and
+  downscaled with Pillow LANCZOS; ~14MB on disk, ~234MB decoded). Drawn in its own full colour —
+  branded art (Pak the Llama, the wordmark), not a monochrome icon. It replaced a Lottie version
+  (`LlamaDisc-Loading.json`) that rlottie couldn't render correctly (no blend-mode support, a
+  precomp size bug, missing keyframe end values), which had grown a keyframe rewriter, a precomp
+  fix and a 306MB baked rainbow sprite sheet; **none of that exists any more** — a raster
+  sequence has no renderer to work around. rlottie is still used by the Wave Loop.
+  `_ensure_frames` decodes the sequence once on a `run_async` worker (~2s; `QImage`s cross
+  threads, as everywhere) at the first `LoadingSpinner`; until then, or if a frame is missing, the
+  spinner draws a plain ring tinted in `subtab_active`, so it is never blank. Plays only while
+  shown (`showEvent`/`hideEvent`, one single-shot timer re-armed for each frame's due time) and is
+  transparent to the mouse.
+  **Two things on the label side are themed**, both recoloured at paint time: the pink divider
+  stripe and outer rim (to the theme's `primary`), and the hub's inner edge — the label's
+  translucent hub overlay (`#FAD39B` at 50% alpha) lying over that same pink, so its colour is
+  `0.5 × overlay + 0.5 × pink` = (236.5,154,159.5) ≈ `#ED9A9F`. Themed, it must be the overlay
+  laid over the *theme's* colour: `_ring_colour(base) = α·overlay + (1−α)·base` with α = 0.5, so
+  a pixel of the ring moves by `_ring_colour(theme) − _ring_colour(pink)` (= half the stripe's
+  move). Colours are as rendered into the PNGs (pink 223,97,164 — not exactly `#DA65A4`).
+  At load `_stroke_weights` scores every pixel (`_share`): a pixel is a blend of a stroke colour
+  and whatever it is drawn against, so its share of the stroke is where it falls on the RGB line
+  between the two, provided it is within `_TOLERANCE` (16) of that line, which keeps the rainbow's
+  own pinks out. Backgrounds per stroke (`_STROKES`): the stripe/rim against the label orange
+  *and the hub collar* (the collar was missing at first, and left a thin pink line where the
+  stripe meets the hub — its edge pixels are pink-to-collar blends), the ring against the collar
+  and the overlay. A pixel goes to the stroke it matches best. Scoring runs on each frame's
+  distinct colours (`np.unique`) rather than every pixel, ~2x faster (load ~4s on a worker).
+  A frame with fewer than 100 strong stripe pixels (the whole rainbow side, and the edge-on
+  frames 36-39 / 108) has nothing themed — anything that matched there is a look-alike. Only
+  the themed pixels' indices, weights, kinds and original colours are stored; `_recolor` copies the
+  frame and shifts them by `weights × move[kind]` — ~0.5ms, done every paint, so a theme switch
+  needs no cache invalidation. Checked on Lemon, Vaporwave, black and green themes; on the
+  narrow squashed frames a faint dotted fringe can remain on the ring's edge.
+
+  **It fills the DropBox's own height, not a fixed reference size**: `DropBox._resize_spinner`
+  (called from `resizeEvent` and `collapse()`) sizes it to `min(box height, box width) −
+  2×scale.px(8)` (no border is drawn while collapsed — see `DropBox.paintEvent` — so there's
+  nothing else in the frame to leave room for) and centres it — height, not width, since the
+  box is normally landscape and a square animation sized to the wider dimension would run off
+  the top/bottom. **It is a floating overlay — `LoadingSpinner(self)`, never added to `lay` —
+  not a layout item**, the same pattern as the Wave Loop layer or the tab pipe: a
+  layout-managed widget's `setFixedSize` becomes part of its *parent's* own
+  `minimumSizeHint()`, so once the spinner had grown to fill a large box it permanently
+  floored that box (and the window under it) from ever shrinking back below that size again —
+  confirmed directly (shrinking the host after a collapse left the box pinned at the
+  last-set spinner size, satisfied only by re-checking `box.width()/height()` after each
+  resize rather than trusting a single measurement). Taking it out of the layout and
+  positioning it with `move()`/`resize()` from `_resize_spinner` breaks that feedback loop
+  entirely; `LoadingSpinner.set_side()` also switched from `setFixedSize` to a plain `resize()`
+  for the same reason (`setFixedSize` pins a widget's size *policy* to Fixed, which only
+  matters for a layout-managed widget, but there's no reason to leave it set here). Verified
+  across a landscape box, a short one, and a portrait one (width becomes the constraint) that
+  the spinner tracks each resize and the box itself shrinks and grows freely with no residual
+  floor from a larger prior size.
   **BorderedFrame** is the border alone, `color_key` defaulting to `primary`
   (Muxing's `TrackListBox`, `ui/widgets/tracklist.py`, passes `secondary` for
   a visually distinct blue-on-Lemon box). **SummaryPanel** —
@@ -1951,7 +2388,20 @@ autosave when the tab is left and on close.
     a control rather than dominating the frame) and flush to its edge, with
     an optical-centre nudge toward the tip; they and the dots fade in on
     hover (100ms). Navigation clamps at both ends (only a chevron that leads
-    somewhere is drawn).
+    somewhere is drawn). **The chevrons and the expand/shrink icon grow to 1.2x while the
+    pointer is on them** (`_HOVER_GROW`, eased over `_HOVER_MS` = 120ms, OutCubic) and ease
+    back when it leaves — one `QVariantAnimation` per control (`_hover`, `_hover_to`), driven
+    by `_sync_hover`, which uses the same hit areas a click does (`_hovered_control`), so a
+    control grows exactly where it would respond. The hit areas are the *un-grown* geometry
+    (growing them would flicker at the edge). A reversal partway takes only as long as the
+    distance left. Called from `mouseMoveEvent`, and — with the pointer read from the cursor —
+    when something changes under a still pointer: stepping (`_step`; the chevron under it may
+    just have gone at the first/last frame), `set_frames`, and expanding/shrinking
+    (`_toggle_expand`, where the icon jumps, so hover is reset without easing first).
+    `clear_preview` and `hideEvent` reset it. A grown chevron is clamped inside the picture
+    (the margin it sits in is smaller than the growth on a large preview). Verified with real
+    mouse events: disc area x1.45 (1.2 squared) on the chevron and x1.47 on the icon, back to
+    the exact base area after, no pixels outside the picture, and the states above.
   - **Clicks**: a press on a disc steps (so spam-clicking runs to the end);
     a double-click in the *central* area — outside the chevron band, with the
     previous press also central — emits `reselect`. The band exclusion means
@@ -2082,11 +2532,26 @@ autosave when the tab is left and on close.
     reveals the carousel), `indexChanged` (user scrubs only), `fileDropped`,
     `expandToggled(bool)`. `step(delta)` is the keybind stepper; `sync_index`
     jumps silently.
-- **Dialogs** — `MessageDialog` (a `QDialog`: bold title, wrapped message,
+- **Dialogs** — `MessageDialog` (a `QDialog`: bold title, wrapped **selectable** message,
   optional entry, buttons right-aligned; the **first button is the affirmative
   one** and gets the `action` role — primary — the rest the `queue` role, i.e.
   secondary, both swappable by a theme like the tab buttons). Enter confirms; Escape (and Alt+F4) decline,
-  so a dismissed confirmation can never destroy work. **Every popup is
+  so a dismissed confirmation can never destroy work. **The message is a stock `QLabel`, not
+  `ScaledLabel`** (`Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard`, an I-beam cursor;
+  drag-select, Ctrl+A, Ctrl+C and the right-click Copy menu all work — verified with a real
+  Ctrl+A/Ctrl+C round-trip through the system clipboard) — genuine text selection needs Qt's
+  own text control, and that control only ever agrees with what's on screen when Qt paints the
+  label itself; `ScaledLabel`'s custom-scaled painter draws the text somewhere else, so its hit
+  areas would land wrong at any scale but 1.0. Safe here specifically because a dialog rebuilds
+  its whole stylesheet fresh on every `__init__` (`T.stylesheet()`, already baked to the current
+  scale) and a modal dialog can't be live-resized after that — the one place a plain `QLabel`
+  genuinely doesn't need `ScaledLabel`'s continuous-rescale machinery. **The title stays a
+  `ScaledLabel`** (not selectable): its `dialogTitle` role's `font-size: 15px` is a *reference*
+  value only `ScaledLabel` reinterprets, so a native `QLabel` would render it as a literal,
+  unscaled 15 real px — correct only exactly at 1.0x (and this app very often launches below
+  1.0x — see "starts at 35% of the screen's width" above), and titles are short, fixed strings
+  with no variable content worth copying anyway. `CountdownDialog`'s per-second
+  `self.message_label.setText(...)` is unaffected (`QLabel.setText` either way). **Every popup is
   borderless** (`Qt.FramelessWindowHint`, all subclasses inherit it): a
   translucent window whose `paintEvent` draws the rounded panel — the window
   colour outlined 2px in the theme's `primary`, 8px radius — and, with no title
@@ -2379,7 +2844,42 @@ picks the toast. **Only one ffmpeg runs at a time.**
     same frame indices `extract_video_thumbnails`'s cv2 seek samples
     (`_interior_sample_frames`, shared by both) so the two sets stay
     index-for-index aligned. Ten short seeks measured well under the cost of
-    one full linear decode on a real multi-GB HDR10 source. Empty (no preview
+    one full linear decode on a real multi-GB HDR10 source. **The frames render in parallel**
+    (`hdr_preview_workers`: 3 processes at once with 8 or more logical CPUs, else 2 — never 1),
+    each at `-threads 4` (or the CPU count if lower) and **below-normal priority**, with a 90s
+    per-frame timeout (a frame that times out is a hole in a set that must stay aligned with
+    the raw one, and a frame sharing the machine with an encode takes far longer than the
+    ~1.5s it takes alone). Measured on that 4K file, 10 frames: one ffmpeg at a time 14.6-15.2s;
+    4 at once 7.1s but 70 CPU-seconds and ~5GB at once; **3 at once with `-threads 4` 8.8s at
+    40 CPU-seconds (the sequential run's 43) and ~0.73GB per process**. Confined to 8 / 4 / 2 / 1
+    logical CPUs (affinity, verified inherited by the children) 1 -> 2 -> 3 workers took
+    18.6 -> 11.7 -> 10.0s / 20.1 -> 13.9 -> 13.2s / 36.5 -> 25.4 -> 24.3s / 54.4 -> 41.7 -> 41.0s:
+    a third worker helps at 8, barely at 4, and two beat one even on a single CPU (each process
+    waits on the GPU, using 0.5-0.7 of a core). Tried and **not** worth it, all measured: libplacebo's
+    `shader_cache` (no cache file written, no speedup), hardware decode (no change — decode
+    is ~6 of the 14.6s, the other ~9s is per-process libplacebo/Vulkan start-up and tone
+    mapping), one ffmpeg with ten `-ss/-i` inputs (slower, 8.4s, and pixels differ by up to
+    5/255 from separate processes), and downscaling the output (no time saved; the frames
+    stay full 4K anyway, since the expanded preview shows them that large). **Alongside an
+    encode** (12s slice of the same file, encode at normal priority; single run each, so the
+    percentages are indicative): software H.265 13.5s alone / 16.0s with the render running (+18%),
+    the render 9.9s alone / 13.5s with it (+37%); HDR->SDR + x264 6.5s / 8.7s (+32%), render 9.6s /
+    12.6s (+32%); NVENC HEVC 3.1s / 3.8s (+22%), render 9.9s / 11.0s (+11% — the encode ended
+    first, so most of that render ran alone). **Memory, measured on real 4K HDR files** (Mulan,
+    3600x2160, and Beauty and the Beast; process memory from `GetProcessMemoryInfo`, the render's
+    ffmpegs sampled every 80ms): every preview frame is a `Format_RGBA8888` QImage —
+    **29.7MB at 3600x2160** (`pil_to_qimage`, 4 bytes a pixel), so a set of ten is **297MB**. An HDR file
+    therefore holds two sets (raw + tone-mapped) = ~594MB of frames: the app went from 811MB private
+    (a window with no file) to 1146MB with the raw previews (+335MB) and 1442MB once the tone-mapped
+    set landed (+296MB), and stayed there — turning the switch on, scrubbing all ten frames and
+    expanding the preview added ~14MB (the carousel's scaled-pixmap cache). **While the render runs**
+    the 3 ffmpeg processes hold ~2.7GB private between them (~0.9GB each on a 10-bit 3600x2160 HEVC
+    source; 0.73GB measured earlier on Beauty and the Beast) and the app's own peak commit reached
+    ~2GB (the worker's transient PIL images beside the QImages), for the ~10s the render takes.
+    **The tone-mapped set of the previous file is not released when the next file is an SDR one**:
+    `hdr_frames` is only replaced by the next *render*, so after an HDR file an SDR clip still held
+    the old 316MB (1232MB private with a 9MB clip loaded); it is never reused either (returning to
+    that file re-rendered it, because the cache holds one set). Not changed — reported. Empty (no preview
     change) whenever `supports_libplacebo()` is false or the geometry probe
     fails — callers must check the former themselves to tell "no HDR to show"
     apart from "libplacebo isn't available".
@@ -2771,6 +3271,9 @@ without an app release; a frozen app has no `python -m yt_dlp` anyway.
 - **Worker threads never touch a widget**: `run_async` / `emit_progress` only,
   and `QImage` (not `QPixmap`) across threads.
 - **One constraint pass per tab** (`_sync_controls`) — no pairwise handlers.
+- **No `print`.** Anything worth a line goes through `core.llamalog` (`llamalog.get("area")`, then
+  `.info` / `.warning` / `.debug`); a swallowed exception whose failure matters gets a log line
+  (`exc_info=True` when the traceback helps) rather than a bare `pass`.
 - Layout goes through layouts (`hrow`, `labeled`, `stream_page`), never
   absolute positioning, except overlays that must float: the tab pipe, the
   Wave Loop layer, toasts.
@@ -2839,6 +3342,14 @@ without an app release; a frozen app has no `python -m yt_dlp` anyway.
   whatever it had tested. Neutralise it before building the window:
   `import ui.tabs.settings as st; st.save_settings = lambda *a, **k: None`
   (patching one `on_leave` is not enough — three runs proved it).
+- **A headless script can die with a native access violation as the interpreter exits**, after
+  everything it did has already succeeded (`Windows fatal exception: access violation`, `<no Python
+  frame>`, exit code 139 under bash). Measured on the same import -> expand -> shrink -> exit script:
+  7 of 30 runs on a clean checkout of `HEAD` from before the logging work, 5 of 30 on the tree with it —
+  so it predates LlamaLog and is Qt/native teardown, not the hooks (the script never even installs
+  them). Check the *exit code* of a harness as well as its last line, and don't chase a crash after
+  the final `print` without comparing against `HEAD` first. The real app would now report the same
+  thing at its next start (`crash.log`, see "Logging").
 - **Headless testing**: `QT_QPA_PLATFORM=offscreen` works for scripted runs and
   `widget.grab()` screenshots, but its virtual screen is tiny (the window came
   out 280px wide) — pin the window to 896x540 first (or, on a real display,

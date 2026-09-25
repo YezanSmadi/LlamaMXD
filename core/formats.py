@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Container <-> codec compatibility, and the option cascade hanging off it.
 
 The Encoding/Muxing option tree has exactly one root: the **output

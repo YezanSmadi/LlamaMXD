@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """CPU / RAM / disk facts for the Settings tab's system info block. No UI
 code, no extra dependency (psutil isn't in requirements.txt) -- everything
 here goes through the registry or ctypes' Win32 calls directly. Every

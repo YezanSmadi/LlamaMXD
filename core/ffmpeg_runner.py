@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Runs one ffmpeg job off the GUI thread: start, real pause/resume, stop,
 progress, and a readable failure reason — without ever touching a widget.
 
@@ -28,11 +30,13 @@ had at that path.
 import collections
 import os
 import queue
+import re
 import stat
 import subprocess
 import threading
 import time
 
+from core import llamalog
 from core import priority as process_priority
 from core.utilities import probe_duration, verify_hdr_sdr_tag
 
@@ -49,6 +53,9 @@ _CREATION_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 # passes -loglevel error, so these are errors, not ffmpeg's usual chatter.
 _STDERR_TAIL = 40
 _REASON_LINES = 3
+# In Detailed log detail ffmpeg runs `-loglevel level+info`, so each line says its level:
+# `[error] ...`, or `[ctx @ 0x..] [fatal] ...` after a context prefix.
+_ERROR_TAG = re.compile(r"\s?\[(?:error|fatal)\]")
 
 # os.replace onto the final path retries this many times, this far apart,
 # before actually failing. See _replace_output for why this is needed at
@@ -154,8 +161,16 @@ class FfmpegJob:
 
     def __init__(self, args, final_path, temp_path, *, duration_secs=0,
                  input_file="", start_secs=0, verify_hdr_tag=False,
-                 priority=process_priority.DEFAULT_LEVEL):
+                 priority=process_priority.DEFAULT_LEVEL, label=None):
         self.args = list(args)
+        # What the log calls this job, and its output as a bounded ring buffer (see
+        # `core.llamalog.JobOutput`): the whole thing is kept for a failed job, the last 100 lines
+        # for a successful one. `log_path` is the file it was written to, once the job has ended.
+        self.label = label or os.path.basename(final_path)
+        self.output = llamalog.JobOutput()
+        self.log_path = None
+        self._t0 = None
+        self._recorded = False
         self._priority = priority
         self.final_path = final_path
         self.temp_path = temp_path
@@ -172,6 +187,7 @@ class FfmpegJob:
         self._proc = None
         self._events = queue.Queue()
         self._stderr = collections.deque(maxlen=_STDERR_TAIL)
+        self._errors = collections.deque(maxlen=_STDERR_TAIL)   # the level-tagged error lines only
         self._stderr_thread = None
         # _finished (the job reached an end of its own) and _stopped (stop()
         # was called) are both only flipped under this lock, so a job that
@@ -213,6 +229,8 @@ class FfmpegJob:
             self._fail_early(f"Couldn't start ffmpeg: {exc.strerror or exc}")
             return
 
+        self._t0 = time.monotonic()
+        llamalog.log_job_start("ffmpeg", self.label, self.args)
         # stderr MUST be drained continuously, or ffmpeg blocks the moment
         # its pipe buffer fills and the job hangs forever.
         self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
@@ -253,8 +271,9 @@ class FfmpegJob:
             try:
                 self._proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                pass
+                llamalog.get("ffmpeg").warning('ffmpeg for "%s" was still running 10s after being killed', self.label)
         self._discard_temp()
+        self._record("stopped", self._proc.returncode if self._proc is not None else None)
         return True
 
     def poll_events(self):
@@ -270,11 +289,14 @@ class FfmpegJob:
     #  Worker threads — never touch a widget from here
     # ------------------------------------------------------------------ #
     def _drain_stderr(self):
-        """Keeps the tail of stderr for the failure message."""
+        """Keeps the tail of stderr for the failure message, and all of it in the job's ring buffer."""
         for line in self._proc.stderr:
             line = line.strip()
             if line:
                 self._stderr.append(line)
+                self.output.add(line)
+                if _ERROR_TAG.search(line):
+                    self._errors.append(_ERROR_TAG.sub("", line, count=1))
 
     def _watch(self):
         """Reads -progress blocks off stdout, then settles the job once
@@ -316,11 +338,10 @@ class FfmpegJob:
                 _replace_output(self.temp_path, self.final_path)
             except OSError as exc:
                 self._discard_temp()
-                self._events.put((
-                    "failed",
-                    f"Couldn't save the finished file — it may be open in another "
-                    f"program or read-only. ({exc.strerror or exc})",
-                ))
+                reason = (f"Couldn't save the finished file — it may be open in another "
+                          f"program or read-only. ({exc.strerror or exc})")
+                self._record("failed", returncode, reason)
+                self._events.put(("failed", reason))
                 return
             if self._verify_hdr_tag and verify_hdr_sdr_tag(self.final_path) is False:
                 # The file exists and plays -- this isn't corrupt, so it's
@@ -332,19 +353,21 @@ class FfmpegJob:
                 # all, since every consumer trusts the label and displays it
                 # wrong with no warning. A None result (probe itself failed)
                 # is "unknown", not "wrong" -- falls through to Done.
-                self._events.put((
-                    "failed",
-                    "The file finished encoding, but its color tags still read "
-                    "HDR (smpte2084/arib-std-b67) instead of SDR (bt709) -- the "
-                    "BT.2390 tone-map may not have actually applied. The file "
-                    f"was still saved to {self.final_path} for inspection.",
-                ))
+                reason = ("The file finished encoding, but its color tags still read "
+                          "HDR (smpte2084/arib-std-b67) instead of SDR (bt709) -- the "
+                          "BT.2390 tone-map may not have actually applied. The file "
+                          f"was still saved to {self.final_path} for inspection.")
+                self._record("failed", returncode, reason)
+                self._events.put(("failed", reason))
                 return
+            self._record("done", returncode)
             self._events.put(("progress", 1.0))
             self._events.put(("done",))
         else:
             self._discard_temp()
-            self._events.put(("failed", self._reason(returncode)))
+            reason = self._reason(returncode)
+            self._record("failed", returncode, reason)
+            self._events.put(("failed", reason))
 
     # ------------------------------------------------------------------ #
     #  Helpers
@@ -362,14 +385,28 @@ class FfmpegJob:
         return remaining if remaining > 0 else None
 
     def _reason(self, returncode):
-        """The last few stderr lines, or the exit code if ffmpeg said nothing."""
-        lines = list(self._stderr)[-_REASON_LINES:]
+        """The last few error lines of stderr, or the exit code if ffmpeg said nothing. In Detailed
+        log detail stderr is full of `[info]` lines (the last of which is only "Conversion
+        failed!"), so the level-tagged errors are what the message is made of."""
+        lines = list(self._errors or self._stderr)[-_REASON_LINES:]
         return "\n".join(lines) if lines else f"ffmpeg exited with code {returncode}."
+
+    def _record(self, outcome, returncode=None, reason=""):
+        """Writes the job's end to the log, once: a summary line, and the output file its ring buffer
+        rule calls for (`log_path`)."""
+        with self._lock:
+            if self._recorded:
+                return
+            self._recorded = True
+        seconds = time.monotonic() - self._t0 if self._t0 else 0.0
+        self.log_path = llamalog.record_job("ffmpeg", self.label, self.args, outcome, self.output,
+                                            returncode=returncode, reason=reason, seconds=seconds)
 
     def _fail_early(self, reason):
         """Reports a job that never got as far as running ffmpeg."""
         with self._lock:
             self._finished = True
+        self._record("failed", reason=reason)
         self._events.put(("failed", reason))
 
     def _discard_temp(self):
@@ -377,5 +414,7 @@ class FfmpegJob:
         file — the real output path is never removed from here."""
         try:
             os.remove(self.temp_path)
-        except OSError:
+        except FileNotFoundError:
             pass
+        except OSError as exc:
+            llamalog.get("ffmpeg").warning("Couldn't delete the partial output %s: %s", self.temp_path, exc)

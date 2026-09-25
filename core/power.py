@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Settings' "When Done:" — what the machine (or the app) does once the Queue
 has finished its last job. No UI code: `perform()` only ever touches Windows.
 
@@ -7,6 +9,8 @@ session (`SYSTEM_ACTIONS`) are the ones the UI gives a cancellable countdown
 first."""
 import os
 import subprocess
+
+from core import llamalog
 
 DO_NOTHING = "Do Nothing"
 SHUTDOWN = "Shutdown"
@@ -50,5 +54,6 @@ def perform(action):
             import ctypes
             ctypes.windll.user32.LockWorkStation()
     except OSError as exc:
+        llamalog.get("app").warning("When Done action %r failed: %s", action, exc)
         return f"Couldn't {action.lower()}: {exc.strerror or exc}"
     return None

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Themed modal dialogs: blocking problems get one of these; things that just
 happened get a toast (ui/widgets/toast.py) instead.
 
@@ -9,7 +11,7 @@ import uuid
 
 from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QIcon, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QDialog, QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QFileDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from core import formats
 from core.utilities import probe_media
@@ -74,9 +76,20 @@ class MessageDialog(QDialog):
             heading.setProperty("role", "dialogTitle")
             body.addWidget(heading)
             scale.spacer(body, 6)
-            text = ScaledLabel(message)
+            # A stock QLabel, not ScaledLabel: real, selectable text (drag to select, Ctrl+A,
+            # Ctrl+C, a right-click Copy menu) needs Qt's own text control, which only ever
+            # sees what Qt itself painted — a ScaledLabel's custom-scaled painter draws
+            # somewhere else, so its hit-testing would be wrong at any scale but 1.0. Safe
+            # here specifically because a dialog rebuilds its whole stylesheet fresh on every
+            # open (`T.stylesheet()` above), already baked to the current scale, and a modal
+            # dialog can't be live-resized after that — the one case a plain QLabel doesn't
+            # need ScaledLabel's continuous-rescale machinery at all. The title stays a
+            # ScaledLabel: its role's stylesheet size is a *reference* px value only ScaledLabel
+            # reinterprets, so a native QLabel would render it unscaled (correct only at 1.0x).
+            text = QLabel(message)
             text.setWordWrap(True)
-            text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            text.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+            text.setCursor(Qt.IBeamCursor)
             body.addWidget(text)
             self.message_label = text
 

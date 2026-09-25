@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Muxing: change a file's container and/or choose which streams go into it.
 **Nothing here ever re-encodes** — every stream is copied, which is what
 separates this tab from Encoding rather than making it a weaker version.

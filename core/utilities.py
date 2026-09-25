@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 import io
 import json
 import os
@@ -5,11 +7,12 @@ import re
 import subprocess
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 from PIL import Image
 
-from core import formats
+from core import formats, llamalog
 from core.tools import tool_path
 
 # Windows-only flag that keeps ffprobe from flashing a console window over
@@ -346,7 +349,8 @@ def _probe_hdr_static_metadata(path):
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
         )
         frames = json.loads(completed.stdout or "{}").get("frames", [])
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        llamalog.get("probe").debug("HDR static metadata probe failed for %s: %s", path, exc)
         return empty
     if not frames:
         return empty
@@ -597,7 +601,8 @@ def probe_media(path):
         )
         payload = json.loads(completed.stdout or "{}")
         streams = payload.get("streams", [])
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        llamalog.get("probe").warning("ffprobe failed for %s: %s", path, exc)
         info = dict(unknown)
         info["file_size"] = file_size
         return info
@@ -717,7 +722,8 @@ def _tail_end_time(path, start, header):
                 capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
             )
             packets = json.loads(completed.stdout or "{}").get("packets") or []
-        except (OSError, ValueError, subprocess.SubprocessError):
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            llamalog.get("probe").debug("Tail-end timestamp probe failed for %s: %s", path, exc)
             return None
         if packets:
             break
@@ -777,7 +783,8 @@ def probe_duration(path):
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
         )
         container = json.loads(completed.stdout or "{}").get("format") or {}
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        llamalog.get("probe").debug("Duration probe failed for %s: %s", path, exc)
         return None
     duration = _to_float(container.get("duration"))
     if duration is None:
@@ -816,7 +823,8 @@ def verify_hdr_sdr_tag(path):
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
         )
         transfer = completed.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        llamalog.get("probe").warning("Couldn't verify the output's colour tags for %s: %s", path, exc)
         return None
     return transfer not in _HDR_TRANSFERS if transfer else None
 
@@ -838,8 +846,10 @@ def supports_fps_mode():
                 capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
             )
             _fps_mode_supported = "-fps_mode" in (completed.stdout or "")
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError) as exc:
+            llamalog.get("probe").warning("Couldn't check ffmpeg's -fps_mode support (%s); using -vsync", exc)
             _fps_mode_supported = False
+        llamalog.get("probe").info("ffmpeg supports -fps_mode: %s", _fps_mode_supported)
     return _fps_mode_supported
 
 
@@ -850,7 +860,8 @@ def _libplacebo_listed():
             [tool_path("ffmpeg"), "-hide_banner", "-filters"],
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        llamalog.get("probe").warning("Couldn't list ffmpeg's filters: %s", exc)
         return False
     return "libplacebo" in (completed.stdout or "")
 
@@ -870,11 +881,13 @@ def _libplacebo_runs():
              "-vf", libplacebo_tonemap_vf(), "-frames:v", "1", "-f", "null", "-"],
             capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        llamalog.get("probe").warning("libplacebo probe couldn't run: %s", exc)
         return False
     if completed.returncode != 0:
         lines = (completed.stderr or "").strip().splitlines()
-        print(f"libplacebo probe failed (exit {completed.returncode}): {lines[-1] if lines else 'no output'}")
+        llamalog.get("probe").warning("libplacebo probe failed (exit %s): %s", completed.returncode,
+                                      lines[-1] if lines else "no output")
     return completed.returncode == 0
 
 
@@ -901,6 +914,7 @@ def libplacebo_problem():
                 _libplacebo_problem = LIBPLACEBO_NO_VULKAN
             else:
                 _libplacebo_problem = None
+            llamalog.get("probe").info("libplacebo / Vulkan check: %s", _libplacebo_problem or "ok")
         return _libplacebo_problem
 
 
@@ -950,8 +964,8 @@ def av1_preset_range():
                 lo, hi = max(0, int(match.group(1))), int(match.group(2))
                 if hi >= lo:
                     _av1_preset_range = (lo, hi)
-        except (OSError, subprocess.SubprocessError):
-            pass
+        except (OSError, subprocess.SubprocessError) as exc:
+            llamalog.get("probe").debug("Couldn't read SVT-AV1's preset range (%s); using 0-8", exc)
     return _av1_preset_range
 
 
@@ -1017,7 +1031,8 @@ def _has_previewable_video(path):
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
         )
         streams = json.loads(completed.stdout or "{}").get("streams") or []
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        llamalog.get("probe").debug("Couldn't check %s for a real video stream: %s", path, exc)
         return False
     return bool(streams) and not (streams[0].get("disposition") or {}).get("attached_pic")
 
@@ -1048,7 +1063,8 @@ def _extract_thumbnails_ffmpeg(video_path, count):
             )
             with Image.open(io.BytesIO(completed.stdout)) as image:
                 frames.append(image.convert("RGB"))
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError) as exc:
+            llamalog.get("probe").debug("ffmpeg preview frame %d of %s failed: %s", i, video_path, exc)
             misses += 1
             if not frames and misses >= _PREVIEW_MAX_MISSES:
                 break
@@ -1109,6 +1125,35 @@ def extract_video_thumbnail(video_path):
     """Back-compat single-frame helper — the first interior sample, or None."""
     frames = extract_video_thumbnails(video_path, count=1)
     return frames[0] if frames else None
+
+
+# The HDR preview's ffmpeg processes run at below-normal priority: the render is
+# speculative background work (it starts on import, before anyone asks for it), and
+# may overlap a running queue job — which keeps whatever priority Settings gives it,
+# so it wins any contention for the CPU.
+_BELOW_NORMAL = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+# A frame that has to share the machine with an encode can take far longer than the
+# ~1.5s it takes alone, and a frame that times out is a hole in a set that has to stay
+# index-for-index aligned with the raw one.
+_HDR_FRAME_TIMEOUT = 90
+
+
+def hdr_preview_workers():
+    """How many tone-mapped preview frames render at once. Measured on a real 4K HDR10
+    file (10 frames; a single ffmpeg at a time took 18.6s at 8 logical CPUs, 20.1s at 4):
+    a third worker still helped at 8 CPUs (11.7s -> 10.0s) but hardly at 4 (13.9s ->
+    13.2s), and two beat one everywhere down to a single CPU (54s -> 42s), since each
+    process spends much of its time waiting on the GPU rather than the CPU. So 3 with 8
+    or more logical CPUs, else 2 — never 1."""
+    return 3 if (os.cpu_count() or 1) >= 8 else 2
+
+
+def _hdr_decoder_threads():
+    """ffmpeg's decoder threads per preview process: its default is one per logical CPU,
+    and with several processes at once that is a lot of decoder threads doing nothing.
+    Capped at 4 (or the CPU count if lower) the render used the same total CPU time as
+    one process at a time (40 vs 43 CPU-seconds) and about half the memory per process."""
+    return max(1, min(4, os.cpu_count() or 1))
 
 
 def extract_hdr_tonemapped_thumbnails(video_path, count=10, should_cancel=None):
@@ -1172,28 +1217,37 @@ def extract_hdr_tonemapped_thumbnails(video_path, count=10, should_cancel=None):
     )
     vf = libplacebo_tonemap_vf(peak_detect=not has_reliable_metadata)
 
-    frames = []
+    threads = _hdr_decoder_threads()
+
     with tempfile.TemporaryDirectory(prefix="llamamxd_hdr_") as tmp_dir:
-        for i, frame_index in enumerate(targets):
+        def render(i):
+            """Frame `i` as a PIL image, or None on a miss or a cancel."""
             if should_cancel is not None and should_cancel():
-                return []
+                return None
             out_path = os.path.join(tmp_dir, f"frame_{i:03d}.png")
             try:
-                subprocess.run(
+                completed = subprocess.run(
                     [tool_path("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
                      *VULKAN_DEVICE_FLAGS,
-                     "-ss", f"{frame_index / fps:.3f}", "-i", video_path,
+                     "-threads", str(threads),
+                     "-ss", f"{targets[i] / fps:.3f}", "-i", video_path,
                      "-vf", vf,
                      *fps_flags, "-frames:v", "1", out_path],
-                    capture_output=True, timeout=20, creationflags=_NO_WINDOW,
+                    capture_output=True, timeout=_HDR_FRAME_TIMEOUT,
+                    creationflags=_NO_WINDOW | _BELOW_NORMAL,
                 )
-            except (OSError, subprocess.SubprocessError):
-                continue
-            if not os.path.exists(out_path):
-                continue
-            try:
+                if completed.returncode != 0:
+                    tail = (completed.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+                    llamalog.get("probe").warning("HDR preview frame %d of %s: ffmpeg exited %s: %s", i, video_path,
+                                                  completed.returncode, tail[-1] if tail else "no output")
                 with Image.open(out_path) as img:
-                    frames.append(img.convert("RGB").copy())
-            except OSError:
-                pass
-    return frames
+                    return img.convert("RGB").copy()
+            except (OSError, subprocess.SubprocessError) as exc:
+                llamalog.get("probe").warning("HDR preview frame %d of %s failed: %s", i, video_path, exc)
+                return None
+
+        with ThreadPoolExecutor(max_workers=hdr_preview_workers()) as pool:
+            rendered = list(pool.map(render, range(len(targets))))
+    if should_cancel is not None and should_cancel():
+        return []
+    return [frame for frame in rendered if frame is not None]

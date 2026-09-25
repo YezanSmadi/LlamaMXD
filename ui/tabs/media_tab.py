@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """The shared Muxing/Encoding frame.
 
 The header, preview area, sub-tab panels, save row, action buttons, presets,
@@ -207,9 +209,11 @@ class MediaTab(QWidget):
         # There is no "Retain Video Length" checkbox: Duration 00:00:00
         # already means "to the end of the file" — greyed out like a
         # placeholder while it's still 0, for exactly that reason, and back
-        # to normal the moment it's incremented off it.
+        # to normal the moment it's incremented off it. Start Time is the same:
+        # 00:00:00 there means "from the beginning", so it reads as not set until
+        # the user spins it.
         row2, r2 = hrow(spacing=14)
-        self.start_time_spinner = TimeSpinner()
+        self.start_time_spinner = TimeSpinner(mute_when_zero=True)
         self.duration_time_spinner = TimeSpinner(mute_when_zero=True)
         for spinner in (self.start_time_spinner, self.duration_time_spinner):
             spinner.valueChanged.connect(self._on_trim_change)
@@ -345,8 +349,16 @@ class MediaTab(QWidget):
             self.app.update_global_file(path)
 
     def set_selected_file(self, path):
+        """A file was picked: the drop box turns into the loading spinner over the
+        preview area, until the frames (or the audio-only Wave Loop) arrive and
+        reveal the carousel. Picking a replacement while a preview is showing goes
+        back to the spinner too, rather than leaving the carousel blank meanwhile."""
         self.file_label.setText(f"Selected File:  {path}")
         self.drop_box.collapse()
+        self.carousel.force_collapse()
+        self.carousel.clear_preview()
+        self.carousel.forget_populated()
+        self._preview_stack.setCurrentWidget(self.drop_box)
 
     def clear_selected_file(self):
         """Undo `set_selected_file` and the save-path autofill it triggers —

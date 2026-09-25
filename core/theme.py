@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Brand palettes, contrast helpers, and the settings.json read/write.
 
 UI-toolkit-free: `ui/theme.py` builds the live PySide6 palette and stylesheet
@@ -5,7 +7,7 @@ on top of what's here."""
 import json
 import os
 
-from core import naming, power, priority, startup_tab, window_mode
+from core import keybinds, llamalog, naming, power, priority, startup_tab, window_mode
 
 # Repo root, derived from this file's own location — settings.json always
 # lands next to main.py whatever directory the app was launched from.
@@ -177,7 +179,7 @@ def load_settings():
     location, GPU acceleration, the Downloader's own separate save location,
     the output naming format, "When Done" and its reset-on-launch flag, and
     the job priority level, the window mode and its borderless-fullscreen
-    flag, and the tab to open on), filling in defaults for anything missing or if
+    flag, the tab to open on, the log detail, and the keyboard shortcuts), filling in defaults for anything missing or if
     the file doesn't exist yet (e.g. first run). Appearance mode defaults to
     "System"; default save location defaults to default_output_dir(); the
     Downloader's separate save location is off by default and empty until
@@ -200,14 +202,16 @@ def load_settings():
         "window_mode": window_mode.DEFAULT_MODE,
         "borderless_fullscreen": False,
         "startup_tab": startup_tab.DEFAULT_TAB,
+        "log_detail": llamalog.DEFAULT_LEVEL,
+        "keybinds": keybinds.defaults(),
     }
     if not os.path.exists(_SETTINGS_PATH):
         return settings
     try:
         with open(_SETTINGS_PATH, "r") as f:
             settings.update(json.load(f))
-    except (json.JSONDecodeError, OSError):
-        pass
+    except (json.JSONDecodeError, OSError) as exc:
+        llamalog.get("settings").warning("settings.json couldn't be read (%s); using the defaults", exc)
     if naming.template_error(settings["naming_template"]):
         settings["naming_template"] = naming.DEFAULT_TEMPLATE
     if settings["when_done"] not in power.ACTIONS:
@@ -218,7 +222,10 @@ def load_settings():
         settings["window_mode"] = window_mode.DEFAULT_MODE
     if settings["startup_tab"] not in startup_tab.TABS:
         settings["startup_tab"] = startup_tab.DEFAULT_TAB
+    if settings["log_detail"] not in llamalog.LEVELS:
+        settings["log_detail"] = llamalog.DEFAULT_LEVEL
     settings["borderless_fullscreen"] = settings["borderless_fullscreen"] is True
+    settings["keybinds"] = keybinds.normalize(settings["keybinds"])
     return settings
 
 

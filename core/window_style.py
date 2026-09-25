@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Win32 window styles Qt doesn't keep in step when a live window's frame or
 size limits change (Settings' Window Mode does exactly that).
 

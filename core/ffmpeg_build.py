@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
+
 """Builds an ffmpeg-python Stream from the currently-loaded job in
 `core.ffmpeg_vars`. Two separate builders, one per source tab, rather than
 one function trying to cover both -- see CLAUDE.md's Muxing/Encoding split
@@ -28,10 +31,13 @@ from core.utilities import (
 # (via compile()'s `cmd`), not at the end where ffmpeg-python puts
 # global_args(), so ffmpeg can never read them as trailing per-file options.
 #   -nostdin            ffmpeg otherwise watches stdin for keypresses
-#   -loglevel error     stderr carries only errors -> the failure message
+#   -loglevel error     stderr carries only errors -> the failure message (Settings' Detailed
+#                       log detail runs `level+info` instead: every line tagged, so the whole
+#                       output can be logged and the failure message still taken from the errors)
 #   -nostats            no carriage-return stats line on stderr
 #   -progress pipe:1    machine-readable key=value progress on stdout
-_RUNNER_FLAGS = ["-hide_banner", "-nostdin", "-loglevel", "error", "-nostats", "-progress", "pipe:1"]
+def _runner_flags(loglevel="error"):
+    return ["-hide_banner", "-nostdin", "-loglevel", loglevel, "-nostats", "-progress", "pipe:1"]
 
 # HDR->SDR: libplacebo's BT.2390 EETF curve -- see libplacebo_tonemap_vf /
 # VULKAN_DEVICE_FLAGS in core/utilities.py (moved there so
@@ -369,10 +375,11 @@ def build_command(output_path=None):
     return build_encode_command(output_path)
 
 
-def compile_command(output_path=None):
+def compile_command(output_path=None, loglevel="error"):
     """The complete argv for the currently-loaded job, with the runner's
-    global flags (`_RUNNER_FLAGS`) — what `core.ffmpeg_runner.FfmpegJob`
-    launches. The queue passes the job's temp path as `output_path`.
+    global flags (`_runner_flags`) — what `core.ffmpeg_runner.FfmpegJob`
+    launches. The queue passes the job's temp path as `output_path` and, from
+    `llamalog.ffmpeg_loglevel()`, the `loglevel`.
 
     Must call `build_command()` (not `uses_hdr_tonemap()`) first: SOURCE_TAB/
     HDR_TO_SDR/STRIP_VIDEO are only meaningful once a job's actually loaded,
@@ -383,7 +390,7 @@ def compile_command(output_path=None):
     filter device") since `-init_hw_device` hasn't run yet at that point in
     its own left-to-right option parsing (confirmed directly)."""
     graph = build_command(output_path)
-    prefix = list(_RUNNER_FLAGS)
+    prefix = _runner_flags(loglevel)
     if uses_hdr_tonemap():
         prefix += VULKAN_DEVICE_FLAGS
     return ffmpeg.compile(graph, cmd=[tool_path("ffmpeg"), *prefix])

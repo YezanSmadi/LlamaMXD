@@ -1,24 +1,30 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Composite pieces: the sub-tab switch, the drop box, the export rundown, and
 the sidebar + active-tab pipe."""
+import math
 import os
+import time
 from datetime import datetime
 
 import numpy as np
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QVariantAnimation, Signal
-from PySide6.QtGui import QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform
+from PySide6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QFileDialog, QGridLayout, QLabel, QVBoxLayout, QWidget
 
+from core import llamalog
 from ui import scale
 from ui import theme as T
+from ui import workers
 from ui.scale import px
 from ui.widgets.controls import (
-    MarqueeGroup, MarqueeLabel, ScaledLabel, button, restyle, set_font_px, ui_font,
+    MarqueeGroup, MarqueeLabel, ScaledLabel, button, restyle, ui_font,
 )
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ASSETS = os.path.join(_REPO_ROOT, "assets")
-VERSION = "v0.5.0-beta.3"
+VERSION = "v0.5.0-beta.4"
 
 MEDIA_FILTER = (
     "Media files (*.mp4 *.mkv *.mov *.webm *.avi *.m4v *.mxf *.ts *.vob "
@@ -31,6 +37,22 @@ def local_paths(mime):
     if not mime.hasUrls():
         return []
     return [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
+
+
+def force_white_fills(node):
+    """Flatten every static Bodymovin shape fill and stroke to opaque white, so a
+    rendered frame is a clean coverage mask a theme colour or gradient can tint."""
+    if isinstance(node, dict):
+        if node.get("ty") in ("fl", "st"):
+            colour = node.get("c")
+            if (isinstance(colour, dict) and isinstance(colour.get("k"), list)
+                    and colour["k"] and not isinstance(colour["k"][0], dict)):
+                colour["k"] = [1, 1, 1, 1]
+        for value in node.values():
+            force_white_fills(value)
+    elif isinstance(node, list):
+        for value in node:
+            force_white_fills(value)
 
 
 # --------------------------------------------------------------------------- #
@@ -149,6 +171,16 @@ class SubTabBar(QWidget):
         if n:
             self.set_active(n)
 
+    def nav_stops(self):
+        """The keyboard's stops: `(rect in real pixels, activate)` per tab."""
+        f = scale.factor()
+        edge, stops = 0.0, []
+        for n, w in zip(self._names, self._widths):
+            stops.append((QRectF(edge * f, 0, w * f, self._ACTIVE_H * f).toRect(),
+                          lambda n=n: self.set_active(n)))
+            edge += w + self._GAP
+        return stops
+
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -182,13 +214,221 @@ class SubTabBar(QWidget):
 
 
 # --------------------------------------------------------------------------- #
+#  LoadingSpinner
+# --------------------------------------------------------------------------- #
+# assets/LlamaDiscLoading/000.png ... — a spinning CD-R (label "PAK-RW" / "LlamaDisc" flipping
+# to a rainbow underside), exported as a 640px PNG sequence. Full-colour branded art, so it is
+# drawn as it is, except for one themed element: the pink divider stroke and rim on the label
+# side, which is recoloured to the theme's primary (see `_recolor`).
+_LOADING_DIR = os.path.join(ASSETS, "LlamaDiscLoading")
+_LOADING_FPS = 60.0
+_LOADING_FRAMES = 143
+# Colours as rendered into the PNGs (not the source art's exact hex values). Two things on the
+# label side are themed. The stroke: the divider stripe and the outer rim, pink. And the hub's
+# inner edge: the label's translucent hub overlay (#FAD39B at 50% alpha) lying over that same
+# pink, so its colour is `_OVERLAY_ALPHA * overlay + (1 - _OVERLAY_ALPHA) * pink` — which is
+# what a themed colour must be laid under, too (see `_ring_colour`).
+_STROKE_PINK = np.array([223, 97, 164], dtype=np.float32)
+_HUB_OVERLAY = np.array([250, 211, 155], dtype=np.float32)
+_OVERLAY_ALPHA = 0.5
+# What each of them is drawn against: the label's orange, the hub collar around the hole,
+# and the overlay itself. An edge pixel is a blend of a stroke colour and one of these.
+_LABEL_ORANGE = np.array([255, 186, 84], dtype=np.float32)
+_HUB_COLLAR = np.array([214, 151, 67], dtype=np.float32)
+
+
+def _ring_colour(base):
+    """The hub overlay at 50% alpha composited onto `base`: `alpha * overlay + (1 - alpha) * base`."""
+    return _OVERLAY_ALPHA * _HUB_OVERLAY + (1 - _OVERLAY_ALPHA) * base
+
+
+# (colour as rendered, colours it is blended with at its edges): stripe/rim, then hub inner edge.
+_STROKES = (
+    (_STROKE_PINK, (_LABEL_ORANGE, _HUB_COLLAR)),
+    (_ring_colour(_STROKE_PINK), (_HUB_COLLAR, _HUB_OVERLAY)),
+)
+_TOLERANCE = 16   # how far off the blend line (in 0-255 colour units) still counts
+_LOADING = {}
+
+
+def _share(rgb, colour, backgrounds):
+    """Each pixel's 0-1 share of `colour`, taking it as a blend of `colour` and whichever of
+    `backgrounds` it lies closest to: where it falls on that line, provided it is within `_TOLERANCE`
+    colour units of it (which keeps the rainbow's own pinks out)."""
+    best = np.zeros(len(rgb), dtype=np.float32)
+    for background in backgrounds:
+        line = colour - background
+        t = (rgb - background) @ line / float(line @ line)
+        off = np.linalg.norm(rgb - (background + t[..., None] * line), axis=-1)
+        best = np.maximum(best, np.clip(t, 0, 1) * np.clip(1 - off / _TOLERANCE, 0, 1))
+    return best
+
+
+def _stroke_weights(pixels):
+    """`(indices, weights, kinds)` of the themed pixels in one RGBA frame: `weights` is each
+    one's 0-1 share of its stroke colour and `kinds` which of `_STROKES` it belongs to (the
+    one it matches best). Pixels below 20% are ignored."""
+    # The art is flat colour, so a frame has far fewer distinct colours than pixels: score
+    # those once and look each pixel up (about 3x faster than scoring every pixel).
+    flat = pixels.reshape(-1, 4)
+    packed = (flat[:, 0].astype(np.int32) << 16) | (flat[:, 1].astype(np.int32) << 8) | flat[:, 2]
+    colours, inverse = np.unique(packed, return_inverse=True)
+    rgb = np.stack([colours >> 16, (colours >> 8) & 255, colours & 255], axis=-1).astype(np.float32)
+    shares = np.stack([_share(rgb, colour, backgrounds) for colour, backgrounds in _STROKES])[:, inverse]
+    shares *= flat[:, 3] > 0
+    kinds = shares.argmax(0)
+    best = shares.max(0)
+    # The stripe/rim only exists on the label side; without it (the rainbow side and the
+    # edge-on frames) whatever matched is a look-alike, so nothing is themed.
+    if ((kinds == 0) & (best > 0.6)).sum() < 100:
+        empty = np.empty(0, dtype=np.intp)
+        return empty, np.empty(0, dtype=np.float32), np.empty(0, dtype=np.intp)
+    idx = np.flatnonzero(best > 0.2)
+    return idx, np.clip((best[idx] - 0.2) / 0.8, 0, 1), kinds[idx]
+
+
+def _load_frames():
+    """Decodes the sequence (worker thread): `[(QImage, indices, weights, kinds, original rgb)]`,
+    or None if it can't be read. Only the stroke pixels are kept apart for recolouring."""
+    frames = []
+    for n in range(_LOADING_FRAMES):
+        image = QImage(os.path.join(_LOADING_DIR, f"{n:03d}.png"))
+        if image.isNull():
+            return None
+        image = image.convertToFormat(QImage.Format_RGBA8888)
+        h, w = image.height(), image.width()
+        pixels = np.frombuffer(image.constBits(), dtype=np.uint8,
+                               count=h * image.bytesPerLine()).reshape(h, image.bytesPerLine())[:, : w * 4].reshape(h, w, 4)
+        idx, weights, kinds = _stroke_weights(pixels)
+        original = pixels.reshape(-1, 4)[idx, :3].astype(np.float32)
+        frames.append((image, idx, weights, kinds, original))
+    return frames
+
+
+def _ensure_frames():
+    """Starts decoding the sequence once, on a worker; `_LOADING["frames"]` fills in when
+    done. Until then the spinner draws a plain ring, so it is never blank."""
+    if "frames" in _LOADING or _LOADING.get("loading"):
+        return
+    _LOADING["loading"] = True
+
+    def done(frames):
+        _LOADING.pop("loading", None)
+        if frames:
+            _LOADING["frames"] = frames
+        else:
+            _LOADING["frames"] = None
+            llamalog.get("ui").warning("The loading animation (assets/LlamaDiscLoading) failed to "
+                                       "load; a plain ring is drawn instead")
+
+    def work():
+        try:
+            return _load_frames()
+        except Exception:
+            llamalog.get("ui").warning("Decoding the loading animation failed", exc_info=True)
+            return None
+
+    workers.run_async(work, done)
+
+
+def _recolor(frame, rgb):
+    """A copy of one decoded frame with its themed pixels moved to `rgb` (0-255 ints): the
+    stripe and rim from the original pink to `rgb`, the hub's inner edge from `_ring_colour`
+    of the pink to `_ring_colour` of `rgb`, each pixel by its own share."""
+    image, idx, weights, kinds, original = frame
+    out = image.copy()
+    if len(idx):
+        pixels = np.frombuffer(out.bits(), dtype=np.uint8, count=out.height() * out.bytesPerLine())
+        pixels = pixels.reshape(out.height(), out.bytesPerLine())[:, : out.width() * 4].reshape(-1, 4)
+        theme = np.array(rgb, dtype=np.float32)
+        moves = np.stack([theme - _STROKES[0][0], _ring_colour(theme) - _STROKES[1][0]])
+        shifted = original + weights[:, None] * moves[kinds]
+        pixels[idx, :3] = np.clip(np.rint(shifted), 0, 255).astype(np.uint8)
+    return out
+
+
+class LoadingSpinner(QWidget):
+    """The PNG-sequence LlamaDisc spinner (see above). Plays only while it is on screen and
+    lets every mouse event through to whatever it sits on (the DropBox's double-click and
+    drops). Until the frames are decoded, or if they can't be, it draws a plain ring."""
+
+    DEFAULT_SIZE = 64  # real px — only until the host sizes it via set_side()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.resize(self.DEFAULT_SIZE, self.DEFAULT_SIZE)
+        self._t0 = time.monotonic()
+        # Single-shot, re-armed for the moment the next frame is due, like the Wave Loop:
+        # a fixed 16ms poll shows each frame for an uneven 1 or 2 ticks.
+        self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._tick)
+        T.theme.changed.connect(self.update)
+        _ensure_frames()
+
+    def showEvent(self, e):
+        self._t0 = time.monotonic()
+        self._schedule()
+
+    def hideEvent(self, e):
+        self._timer.stop()
+
+    def set_side(self, side):
+        """Resizes to a `side`x`side` square in real px — the host (DropBox) calls this
+        with however much height it has to give. A plain resize, not `setFixedSize`: this is
+        a floating overlay positioned by its host, not layout-managed."""
+        side = max(1, round(side))
+        if side != self.width() or side != self.height():
+            self.resize(side, side)
+
+    def _tick(self):
+        if self.isVisible():
+            self.update()
+            self._schedule()
+
+    def _schedule(self):
+        """Arms the timer for the instant the next frame is due (rounded up, so it can't
+        fire just before the boundary and have to wait another tick)."""
+        elapsed = time.monotonic() - self._t0
+        due = (int(elapsed * _LOADING_FPS) + 1) / _LOADING_FPS
+        self._timer.start(max(1, math.ceil((due - elapsed) * 1000)))
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        idx = int((time.monotonic() - self._t0) * _LOADING_FPS) % _LOADING_FRAMES
+        frames = _LOADING.get("frames")
+        if frames:
+            primary = T.theme.color("primary")
+            p.drawImage(self.rect(), _recolor(frames[idx], (primary.red(), primary.green(), primary.blue())))
+            return
+        # The sub-tab colour, not `primary`: they are the same except in a theme that swaps
+        # them (Terminal), where primary is black and would vanish on the dark frame.
+        colour = T.theme.color("subtab_active")
+        w, h = self.width(), self.height()
+        thick = w * 0.14
+        ring = QRectF(thick / 2, thick / 2, w - thick, h - thick)
+        faint = QColor(colour)
+        faint.setAlphaF(0.3)
+        p.setPen(QPen(faint, thick))
+        p.drawEllipse(ring)
+        pen = QPen(colour, thick)
+        pen.setCapStyle(Qt.RoundCap)
+        p.setPen(pen)
+        p.drawArc(ring, round(-idx / _LOADING_FRAMES * 360 * 16), 100 * 16)
+
+
+# --------------------------------------------------------------------------- #
 #  DropBox
 # --------------------------------------------------------------------------- #
 class DropBox(QWidget):
-    """The primary-bordered drop target: drop a file, double-click, or Browse.
+    """The secondary-bordered drop target: drop a file, double-click, or Browse.
     Drag-over lights it up. `collapse()` — once a file's been picked the
-    prompt and border go, leaving just Browse, until the preview carousel
-    takes over."""
+    prompt, border and Browse go, leaving the loading spinner until the
+    preview carousel takes over."""
 
     fileSelected = Signal(str)
 
@@ -207,16 +447,45 @@ class DropBox(QWidget):
         lay.setAlignment(Qt.AlignCenter)
         scale.spacing(lay, 14)
         self.prompt = ScaledLabel(prompt)
-        set_font_px(self.prompt, 14)
+        # A plain `.setFont()` (what `set_font_px` does) only sticks until the
+        # next `ensurePolished()`, which reapplies the class-wide `ScaledLabel
+        # { font-size: 13px }` rule and silently wins back over it — normally
+        # within the same frame, since a real widget gets polished the moment
+        # it's actually shown. But `ensurePolished()` isn't guaranteed to run
+        # again for a *hidden* widget: `set_font_px`'s own `scale.bind` still
+        # re-applies its raw `.setFont(14)` on every scale change regardless
+        # of visibility (see `MainWindow._on_scale_changed`), so a resize that
+        # happens while this box's tab is hidden behind another one can leave
+        # the 14px `.setFont()` value stuck, un-overridden, until the tab is
+        # shown again — a real, confirmed bug (Encoding's prompt measured
+        # ~7% wider than Muxing's identical text after exactly this). An
+        # *instance*-level stylesheet rule doesn't have this race: it's the
+        # most specific rule Qt's cascade can apply, so it wins over the
+        # class rule on every polish rather than only sometimes, and — being
+        # a plain reference-pixel value like the class rule itself, not a
+        # real-pixel `font_px()` one — never needs rebinding on a scale
+        # change at all.
+        self.prompt.setStyleSheet("font-size: 14px;")
         self.prompt.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.prompt)
         self.or_label = ScaledLabel("— or —")
-        set_font_px(self.or_label, 14)
+        self.or_label.setStyleSheet("font-size: 14px;")
         self.or_label.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.or_label)
         self.browse_btn = button("Browse File", width=140)
         self.browse_btn.clicked.connect(self.browse)
         lay.addWidget(self.browse_btn, 0, Qt.AlignCenter)
+        # A floating overlay, like the Wave Loop layer or the tab pipe — *not* added to
+        # `lay`. It needs to grow to fill however much of the box's own height is going,
+        # which means its size can't be allowed to feed back into that height: a
+        # layout-managed widget's `setFixedSize` becomes part of its parent's own
+        # minimumSizeHint, so once grown it would floor the box (and the whole window)
+        # from ever shrinking back below that size — confirmed directly (a shrink to a
+        # smaller host stayed pinned at the last-set spinner size). Already parented here
+        # at construction, so it's never the parentless-widget-becomes-its-own-window trap
+        # that rule is about; hidden until `collapse()`.
+        self.spinner = LoadingSpinner(self)
+        self.spinner.hide()
         T.theme.changed.connect(self.update)
 
     def _set_prompt(self, text, role=""):
@@ -225,11 +494,31 @@ class DropBox(QWidget):
         self.prompt.setProperty("role", role)
         restyle(self.prompt)
 
+    def _resize_spinner(self):
+        """Fills the box's own height with the spinner, minus a small margin, and centres
+        it — no border is drawn while collapsed (see `paintEvent`), so there's nothing else
+        in the frame to leave room for. Height, not width: this box is normally landscape,
+        and a square animation sized to the wider dimension would run off the top/bottom."""
+        margin = scale.px(8)
+        side = max(1, min(self.height(), self.width()) - margin * 2)
+        self.spinner.set_side(side)
+        self.spinner.move((self.width() - side) // 2, (self.height() - side) // 2)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._resize_spinner()
+
     def collapse(self):
+        """A file was picked and its previews are still loading: the border, prompt and
+        Browse give way to the loading spinner."""
         self._collapsed = True
         self._set_prompt(self._prompt_text)
         self.prompt.hide()
         self.or_label.hide()
+        self.browse_btn.hide()
+        self._resize_spinner()
+        self.spinner.raise_()
+        self.spinner.show()
         self.update()
 
     def show_no_preview(self):
@@ -240,6 +529,8 @@ class DropBox(QWidget):
         self._set_prompt("No Preview Available", "error")
         self.prompt.show()
         self.or_label.hide()
+        self.spinner.hide()
+        self.browse_btn.show()
         self.update()
 
     def reset(self):
@@ -250,6 +541,8 @@ class DropBox(QWidget):
         self._set_prompt(self._prompt_text)
         self.prompt.show()
         self.or_label.show()
+        self.spinner.hide()
+        self.browse_btn.show()
         self.update()
 
     def browse(self):
@@ -289,16 +582,15 @@ class DropBox(QWidget):
         path = QPainterPath()
         path.addRoundedRect(rect, 10, 10)
         if self._dragging:
-            p.fillPath(path, T.with_alpha(th.color("primary"), 0.11))
-        p.setPen(QPen(th.color("primary_hover" if self._dragging else "primary"), 2))
+            p.fillPath(path, T.with_alpha(th.color("secondary"), 0.11))
+        p.setPen(QPen(th.color("secondary_hover" if self._dragging else "secondary"), 2))
         p.drawPath(path)
 
 
 class BorderedFrame(QWidget):
     """The DropBox's rounded border without its drop behaviour — the
-    Downloader tab's preview box (primary), and Muxing's track box, which
-    passes `color_key="secondary"` for a visually distinct (blue on Lemon)
-    border rather than DropBox's own primary one."""
+    Downloader tab's preview box (primary) and Muxing's track box (which
+    passes `color_key="secondary"`, matching DropBox's own secondary border)."""
 
     def __init__(self, parent=None, color_key="primary"):
         super().__init__(parent)
@@ -435,12 +727,26 @@ class Sidebar(QWidget):
         self.buttons[name] = btn
 
     _LOGO_OVERSAMPLE = 4  # rendered above any real screen DPR, then scaled down — never up
+    _logo_renderer = None  # the parsed SVG, loaded once and reused by every Sidebar instance
 
     def _load_logo(self):
-        renderer = QSvgRenderer(os.path.join(ASSETS, "LlamaMXD-Logo.svg"))
+        """Re-render the tinted logo pixmap — but only when the thing it's
+        keyed on (the real-pixel box size, the tint colour) actually changed.
+        Connected to both `scale.changed` and `T.theme.changed`, this used to
+        re-parse the SVG from disk and re-render+re-tint it on *every* live
+        resize step, even though `px()` rounds to whole pixels and a small
+        drag step very often lands on the same box size as the last one."""
+        box = px(self.LOGO_SIZE) * self._LOGO_OVERSAMPLE
+        color = T.theme.color("sidebar_text")
+        key = (box, color.rgba())
+        if getattr(self, "_logo_key", None) == key:
+            return
+        if Sidebar._logo_renderer is None:
+            Sidebar._logo_renderer = QSvgRenderer(os.path.join(ASSETS, "LlamaMXD-Logo.svg"))
+        renderer = Sidebar._logo_renderer
         if not renderer.isValid():
             return
-        box = px(self.LOGO_SIZE) * self._LOGO_OVERSAMPLE
+        self._logo_key = key
         native = renderer.defaultSize()
         k = box / max(native.width(), native.height())
         w, h = native.width() * k, native.height() * k
@@ -460,7 +766,7 @@ class Sidebar(QWidget):
         # anti-aliased shape) and replaces only its RGB.
         tint = QPainter(img)
         tint.setCompositionMode(QPainter.CompositionMode_SourceIn)
-        tint.fillRect(img.rect(), T.theme.color("sidebar_text"))
+        tint.fillRect(img.rect(), color)
         tint.end()
 
         pix = QPixmap.fromImage(img)

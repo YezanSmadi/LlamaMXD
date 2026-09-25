@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """GPU detection and hardware-encoder selection for the Settings tab's
 Hardware Acceleration switch. **Only a dedicated (discrete) GPU counts** -- an
 integrated one is still listed in the system info, but never offered for
@@ -16,6 +18,7 @@ software, exactly as if the switch were off.
 import re
 import subprocess
 
+from core import llamalog
 from core.tools import tool_path
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -85,12 +88,14 @@ def _query_adapter_names():
             completed = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
             )
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError) as exc:
+            llamalog.get("gpu").debug("GPU name query via %s failed: %s", cmd[0], exc)
             continue
         lines = [ln.strip() for ln in (completed.stdout or "").splitlines()]
         names = [ln for ln in lines if ln and ln.lower() != "name"]
         if names:
             return names
+    llamalog.get("gpu").warning("No GPU adapter name could be read (wmic and PowerShell both came back empty)")
     return []
 
 
@@ -172,7 +177,8 @@ def _query_available_encoders():
             capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
         )
         return set(re.findall(r"\s([a-z0-9]+_(?:nvenc|qsv|amf))\s", completed.stdout or ""))
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        llamalog.get("gpu").warning("Couldn't list ffmpeg's hardware encoders: %s", exc)
         return set()
 
 

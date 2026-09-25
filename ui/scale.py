@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """The one UI scale factor. Every size in the app is authored against a
 reference window (`BASE_W` x `BASE_H`, the layout as designed) and multiplied
 by `factor()` at the point it becomes real pixels — so the whole window keeps
@@ -118,6 +120,21 @@ def _prune():
     for k in [k for k in _bound if k[0]() is None or not isValid(k[0]())]:
         del _bound[k]
     _prune_at = max(512, 2 * len(_bound))
+
+
+def bind_style(widget, text_fn, key="style-text"):
+    """`bind(widget, ...)` for a widget's own `setStyleSheet`, re-running
+    `text_fn()` on every scale change but only actually calling
+    `setStyleSheet` when the resulting text differs from what's already
+    applied — a scale change often lands on the same whole-pixel `px()`
+    values as the last one, and re-parsing/re-polishing an unchanged
+    stylesheet is pure waste, paid on every step of a live resize."""
+    def apply():
+        text = text_fn()
+        if text != getattr(widget, "_bound_style_text", None):
+            widget._bound_style_text = text
+            widget.setStyleSheet(text)
+    bind(widget, apply, key)
 
 
 def bind_after(widget, fn):

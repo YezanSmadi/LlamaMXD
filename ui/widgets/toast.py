@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Transient notifications that drop in at the current tab frame's top-right.
 
 A toast is a child widget painted with real alpha and antialiased corners,

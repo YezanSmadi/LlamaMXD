@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """The Queue: task rows, one real ffmpeg / yt-dlp job at a time, pause (a real
 OS suspend), stop, failures, the details popup and the overall progress bar.
 
@@ -21,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core import downloader, ffmpeg_vars, formats
+from core import downloader, ffmpeg_vars, formats, llamalog
 from core.ffmpeg_build import compile_command, uses_hdr_tonemap
 from core.ffmpeg_runner import FfmpegJob, partial_path
 from core.utilities import extract_video_thumbnail
@@ -226,7 +228,14 @@ class _DetailPanel(QWidget):
         self._restyle()
 
     def _restyle(self):
-        self.setStyleSheet(f"_DetailPanel {{ background: {T.theme.hex('panel')}; border-radius: {px(8)}px; }}")
+        # Connected to `scale.changed`, which fires on every live-resize step
+        # regardless of which tab is showing: skip the (fairly costly)
+        # setStyleSheet call when the text it would set hasn't actually
+        # changed, same guard `MainWindow._style` uses for the per-tab sheet.
+        css = f"_DetailPanel {{ background: {T.theme.hex('panel')}; border-radius: {px(8)}px; }}"
+        if css != getattr(self, "_last_css", None):
+            self._last_css = css
+            self.setStyleSheet(css)
 
 
 class QueueTab(QWidget):
@@ -298,11 +307,11 @@ class QueueTab(QWidget):
         header.addWidget(self.detail_title_label)
         header.addStretch(1)
         self.detail_goto_btn = button("Go to File", width=90, height=24)
-        scale.bind(self.detail_goto_btn, lambda: self.detail_goto_btn.setStyleSheet(f"min-height: {px(24)}px;"))
+        scale.bind_style(self.detail_goto_btn, lambda: f"min-height: {px(24)}px;")
         self.detail_goto_btn.clicked.connect(self._go_to_detail_file)
         header.addWidget(self.detail_goto_btn)
         close = IconButton("close", role="ghost", width=24, height=24)
-        scale.bind(close, lambda: close.setStyleSheet(f"min-height: {px(24)}px; padding: 0;"))
+        scale.bind_style(close, lambda: f"min-height: {px(24)}px; padding: 0;")
         close.clicked.connect(self.detail_frame.hide)
         header.addWidget(close)
         dl.addLayout(header)
@@ -348,6 +357,7 @@ class QueueTab(QWidget):
         task_id = self._next_id
         self._next_id += 1
         settings = settings or {}
+        llamalog.get("queue").info("Task %s added (%s, %s): %s", task_id, source_tab, status, description)
         widget = QueueRow(task_id, description, status)
         widget.clicked.connect(self._show_details)
         widget.removeRequested.connect(self.remove_task)
@@ -431,6 +441,7 @@ class QueueTab(QWidget):
         """Removing the active row kills its process first — a process must
         never outlive its row — and continues if the queue was running."""
         continue_with = None
+        llamalog.get("queue").info("Task %s removed", task_id)
         if self._active is not None:
             if self._active["task_id"] == task_id:
                 continue_with = self._active["rest"] if self._is_running else None
@@ -585,7 +596,8 @@ class QueueTab(QWidget):
         if self._active is not None:
             active = self._active
             if active["paused"]:
-                active["job"].resume()
+                if not active["job"].resume():
+                    llamalog.get("queue").warning("Task %s: the job's process could not be resumed", active["task_id"])
                 active["paused"] = False
                 self.update_status(active["task_id"], self._running_label(active["task_id"], active))
             self._set_running(True)
@@ -594,14 +606,17 @@ class QueueTab(QWidget):
         queued = [tid for tid in self._rows if self._status(tid) == "Queued"]
         if not queued:
             return
+        llamalog.get("queue").info("Queue started: %d task(s) queued", len(queued))
         self._set_running(True)
         self._process_next(queued)
 
     def pause_queue(self):
         """Freeze the active job's process in place (a real OS suspend)."""
+        llamalog.get("queue").info("Queue paused")
         self._stop_timers()
         if self._active is not None and not self._active["paused"]:
-            self._active["job"].suspend()
+            if not self._active["job"].suspend():
+                llamalog.get("queue").warning("Task %s: the job's process could not be suspended", self._active["task_id"])
             self._active["paused"] = True
             self.update_status(self._active["task_id"], "Paused")
         self._set_running(False)
@@ -609,6 +624,7 @@ class QueueTab(QWidget):
     def stop_queue(self):
         """Kill the active job (running or paused), delete its partial output,
         revert it to Queued."""
+        llamalog.get("queue").info("Queue stopped")
         if self._active is not None:
             task_id = self._active["task_id"]
             self._halt_active()
@@ -643,6 +659,7 @@ class QueueTab(QWidget):
             self._active = None
             self._set_running(False)
             self._stop_timers()
+            llamalog.get("queue").info("All queued jobs finished")
             self.app.notify("All queued jobs finished.")
             QTimer.singleShot(0, self._run_when_done)
             return
@@ -663,11 +680,11 @@ class QueueTab(QWidget):
         final_path = os.path.abspath(ffmpeg_vars.OUTPUT_PATH)
         temp_path = partial_path(final_path)
         try:
-            args = compile_command(temp_path)
+            args = compile_command(temp_path, loglevel=llamalog.ffmpeg_loglevel())
         except Exception as exc:
+            llamalog.get("queue").exception("Couldn't build the ffmpeg command for task %s", task_id)
             self._fail_task(task_id, rest, f"Couldn't build the ffmpeg command: {exc}")
             return
-        print("ffmpeg:", subprocess.list2cmdline(args))
         job = FfmpegJob(
             args, final_path, temp_path,
             duration_secs=ffmpeg_vars.DURATION_SECS,
@@ -685,11 +702,11 @@ class QueueTab(QWidget):
         settings = row["settings"]
         plan = settings.get("download")
         if not plan or not settings.get("url") or not settings.get("output_path"):
+            llamalog.get("queue").warning("Task %s has no link, format or output path; not started", task_id)
             self._fail_task(task_id, rest, "This download is missing its link or format choice.")
             return
         job = YtDlpJob(settings["url"], plan, settings["output_path"],
                        priority=self.app.priority_level)
-        print("yt-dlp:", subprocess.list2cmdline(job.args))
         self._active = {"task_id": task_id, "job": job, "rest": rest,
                         "paused": False, "fraction": 0.0, "stage": _PREPARING}
         job.start()
@@ -768,6 +785,7 @@ class QueueTab(QWidget):
             self._active = None
 
     def _finish_task(self, task_id, rest):
+        llamalog.get("queue").info("Task %s finished (Done)", task_id)
         self._active = None
         if task_id in self._rows:
             self.update_status(task_id, "Done")
@@ -776,6 +794,7 @@ class QueueTab(QWidget):
     def _fail_task(self, task_id, rest, reason):
         """Red row, the reason kept for the details popup, a notice queued,
         and the queue keeps moving."""
+        llamalog.get("queue").info("Task %s failed", task_id)
         self._active = None
         row = self._rows.get(task_id)
         if row:

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
 """Named codec/quality recipes, persisted to `presets.json` at the repo root.
 
 A preset is a **recipe, not a job**: it captures the container and every
@@ -16,6 +18,8 @@ yields an empty set rather than raising.
 
 import json
 import os
+
+from core import llamalog
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PRESETS_PATH = os.path.join(_REPO_ROOT, "presets.json")
@@ -54,7 +58,8 @@ def _read_all():
         with open(_PRESETS_PATH, "r") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        llamalog.get("settings").warning("presets.json couldn't be read (%s); treating it as empty", exc)
         return {}
 
 
@@ -64,8 +69,8 @@ def _write_all(data):
     try:
         with open(_PRESETS_PATH, "w") as f:
             json.dump(data, f, indent=2)
-    except OSError:
-        pass
+    except OSError as exc:
+        llamalog.get("settings").warning("presets.json couldn't be saved: %s", exc)
 
 
 def names(tab):
