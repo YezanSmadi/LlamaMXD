@@ -2377,11 +2377,20 @@ autosave when the tab is left and on close.
   `_request_frames` decodes the sequence on a `run_async` worker (`QImage`s cross threads, as
   everywhere) **at the size the spinner is drawn** (`_frame_side`: its width in device pixels
   rounded up to a multiple of 64, at most 640) — ~37MB at the default window size (256px) against
-  234MB at 640. A spinner asks when its size settles (`set_side` -> a 300ms single-shot) and when
-  shown, **only while its drop box is on screen** (a tab never shown has an unlaid-out 640x480 box,
-  which once started a second, 512px decode), so the frames are ready before the first import. A
-  decode that finishes after a newer size was asked for is dropped unless there is nothing to draw
-  yet. Until frames arrive, or if they cannot be loaded, it draws nothing (there is no fallback ring). Plays only while
+  234MB at 640. A spinner asks on its first size change (a one-off jump such as fullscreen starts at
+  once), again when a drag settles (`set_side` -> a 100ms single-shot) and when shown, **only while
+  its drop box is on screen** (a tab never shown has an unlaid-out 640x480 box, which once started a
+  second, 512px decode), so the frames are ready before the first import. **A new size upgrades frame
+  by frame** (`_request_frames`): frames are decoded in playing order from two past the one on
+  screen, and each replaces its old-size frame the moment it's ready (`emit_progress`), so a spinner
+  that grew is sharp at once rather than playing stretched frames until the whole set is done — the
+  decode (~110 frames/s at 640) outruns playback (60). A newer size bumps a generation that cancels
+  the frames not yet started. Each frame's scoring doesn't depend on the size, so it's kept after the
+  first decode (`_LOADING["scores"]`, 5MB with compact types) and a re-decode only resizes. Measured
+  growing a spinner from 256 to 640px: stretched frames shown 94 (1.55s) -> 2 (0.03s), the whole set
+  1.55s -> 0.9s; frames byte-identical to the previous code at 256 / 384 / 640, cold and cached; a
+  live drag up and back ends on one size with every frame present, at about the same total CPU.
+  Until a frame arrives, or if the frames cannot be loaded, it draws nothing (there is no fallback ring). Plays only while
   shown (`showEvent`/`hideEvent`, one single-shot timer re-armed for each frame's due time) and is
   transparent to the mouse.
   **Two things on the label side are themed**, both recoloured at paint time: the pink divider

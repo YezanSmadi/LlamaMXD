@@ -303,22 +303,13 @@ def _frame_side(side):
     return max(64, min(_LOADING_SOURCE, math.ceil(side / 64) * 64))
 
 
-def _load_frames(side):
-    """Decode the sequence at `side` px (worker thread): `[(QImage, indices, deltas, original)]`
-    or None. The image is premultiplied; `deltas` (n x 2) are each themed pixel's move per unit
-    of each stroke's change. Weights are scored at full size and shrunk with the image's area
-    filter: recolouring is linear, so this equals recolour-then-scale (scoring the shrunk frame
-    left a pink fringe on the thin rim)."""
-    # Frames are independent and numpy / OpenCV / Qt work outside the GIL: split them over up to
-    # half the CPUs, leaving the rest to the window being built meanwhile.
-    workers = max(1, min(3, (os.cpu_count() or 1) // 2))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        frames = list(pool.map(lambda n: _load_frame(n, side), range(_LOADING_FRAMES)))
-    return None if any(frame is None for frame in frames) else frames
-
-
-def _load_frame(n, side):
-    """Frame `n` of the sequence as `_load_frames` describes, or None if it can't be read."""
+def _load_frame(n, side, scores=None):
+    """Frame `n` decoded at `side` px (worker thread): `(QImage, indices, deltas, original)`, or
+    None if it can't be read. The image is premultiplied; `deltas` (n x 2) are each themed
+    pixel's move per unit of each stroke's change. Weights are scored at full size and shrunk
+    with the image's area filter: recolouring is linear, so this equals recolour-then-scale
+    (scoring the shrunk frame left a pink fringe on the thin rim). `scores`, a list by frame,
+    keeps each frame's scoring, which doesn't depend on the size."""
     import cv2   # only needed here, on the worker
     image = QImage(os.path.join(_LOADING_DIR, f"{n:03d}.png"))
     if image.isNull():
@@ -327,7 +318,12 @@ def _load_frame(n, side):
     h, w = image.height(), image.width()
     pixels = np.frombuffer(image.constBits(), dtype=np.uint8,
                            count=h * image.bytesPerLine()).reshape(h, image.bytesPerLine())[:, : w * 4].reshape(h, w, 4)
-    idx, weights, kinds = _stroke_weights(pixels)
+    if scores is not None and scores[n] is not None:
+        idx, weights, kinds = scores[n]
+    else:
+        idx, weights, kinds = _stroke_weights(pixels)
+        if scores is not None:
+            scores[n] = idx.astype(np.int32), weights, kinds.astype(np.uint8)   # compact: kept all session
     alpha = pixels[..., 3].astype(np.float32) / 255
     premult = pixels.astype(np.float32)
     premult[..., :3] *= alpha[..., None]
@@ -345,36 +341,48 @@ def _load_frame(n, side):
     return small, themed, deltas[themed], premult.reshape(-1, 4)[themed]
 
 
-def _request_frames(side):
-    """Decode the frames for a spinner `side` px across on a worker, unless that size is loaded
-    or loading. A spinner keeps drawing the previous size meanwhile."""
+def _request_frames(side, start=0):
+    """Decode the frames for a spinner `side` px across on worker threads, unless that size is
+    loaded or loading. They go in playing order from frame `start` (the one about to show), and
+    each replaces the old size's frame the moment it is ready, so a spinner that grew is sharp
+    within a few frames rather than soft until the whole set is done. A newer size cancels the
+    frames not yet started."""
     want = _frame_side(side)
-    _LOADING["want"] = want
-    if _LOADING.get("failed") or _LOADING.get("busy") or _LOADING.get("side") == want:
+    if _LOADING.get("failed") or _LOADING.get("want") == want:
         return
-    _LOADING["busy"] = True
+    _LOADING["want"] = want
+    gen = _LOADING["gen"] = _LOADING.get("gen", 0) + 1
+    frames = _LOADING.setdefault("frames", [None] * _LOADING_FRAMES)
+    scores = _LOADING.setdefault("scores", [None] * _LOADING_FRAMES)
 
-    def done(frames):
-        _LOADING["busy"] = False
-        if frames:
-            # Resized again meanwhile: keep this only if there is nothing to draw yet.
-            if _LOADING["want"] == want or not _LOADING.get("frames"):
-                _LOADING["frames"], _LOADING["side"] = frames, want
-            if _LOADING["want"] != want:
-                _request_frames(_LOADING["want"])
-        else:
-            _LOADING["failed"] = True
-            llamalog.get("ui").warning("The loading animation (assets/LlamaDiscLoading) failed to "
-                                       "load; the spinner stays blank")
+    def publish(item):
+        n, frame = item
+        if frame is None:
+            if not _LOADING.get("failed"):
+                _LOADING["failed"] = True
+                llamalog.get("ui").warning("The loading animation (assets/LlamaDiscLoading) failed to "
+                                           "load; the spinner stays blank")
+        elif _LOADING.get("gen") == gen:
+            frames[n] = frame
 
-    def work():
+    def one(n):
+        if _LOADING.get("gen") != gen:
+            return   # superseded by a newer size
         try:
-            return _load_frames(want)
+            frame = _load_frame(n, want, scores)
         except Exception:
             llamalog.get("ui").warning("Decoding the loading animation failed", exc_info=True)
-            return None
+            frame = None
+        workers.emit_progress(publish, (n, frame))
 
-    workers.run_async(work, done)
+    def work():
+        # Frames are independent and numpy / OpenCV / Qt work outside the GIL: split them over up
+        # to half the CPUs, leaving the rest to the window meanwhile.
+        with ThreadPoolExecutor(max_workers=max(1, min(3, (os.cpu_count() or 1) // 2))) as pool:
+            for i in range(_LOADING_FRAMES):
+                pool.submit(one, (start + i) % _LOADING_FRAMES)
+
+    workers.run_async(work, lambda _result: None)
 
 
 def _recolor(frame, rgb):
@@ -411,7 +419,7 @@ class LoadingSpinner(QWidget):
         # Decoded for the size the host settles on, not every size a drag passes.
         self._size_timer = QTimer(self)
         self._size_timer.setSingleShot(True)
-        self._size_timer.setInterval(300)
+        self._size_timer.setInterval(100)
         self._size_timer.timeout.connect(self._request_frames)
         T.theme.changed.connect(self.update)
 
@@ -419,7 +427,9 @@ class LoadingSpinner(QWidget):
         # Only for a host on screen: a never-shown tab's drop box is an unlaid-out 640x480.
         host = self.parentWidget()
         if host is None or host.isVisible():
-            _request_frames(self.width() * (self.devicePixelRatioF() or 1.0))
+            # A couple of frames ahead of the one showing: that one is on screen before its
+            # replacement is decoded.
+            _request_frames(self.width() * (self.devicePixelRatioF() or 1.0), self._frame_index() + 2)
 
     def showEvent(self, e):
         self._t0 = time.monotonic()
@@ -436,6 +446,10 @@ class LoadingSpinner(QWidget):
         side = max(1, round(side))
         if side != self.width() or side != self.height():
             self.resize(side, side)
+            # A one-off change (fullscreen) decodes at once; the timer catches where a drag ends,
+            # and a newer size cancels what an earlier one hadn't started.
+            if not self._size_timer.isActive():
+                self._request_frames()
             self._size_timer.start()
 
     def _tick(self):
@@ -449,15 +463,17 @@ class LoadingSpinner(QWidget):
         due = (int(elapsed * _LOADING_FPS) + 1) / _LOADING_FPS
         self._timer.start(max(1, math.ceil((due - elapsed) * 1000)))
 
+    def _frame_index(self):
+        return int((time.monotonic() - self._t0) * _LOADING_FPS) % _LOADING_FRAMES
+
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
-        idx = int((time.monotonic() - self._t0) * _LOADING_FPS) % _LOADING_FRAMES
-        frames = _LOADING.get("frames")
-        if frames:
+        frame = (_LOADING.get("frames") or [None] * _LOADING_FRAMES)[self._frame_index()]
+        if frame is not None:
             primary = T.theme.color("primary")
-            p.drawImage(self.rect(), _recolor(frames[idx], (primary.red(), primary.green(), primary.blue())))
+            p.drawImage(self.rect(), _recolor(frame, (primary.red(), primary.green(), primary.blue())))
 
 
 # --------------------------------------------------------------------------- #
