@@ -5,6 +5,7 @@ the sidebar + active-tab pipe."""
 import math
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import numpy as np
@@ -239,6 +240,26 @@ _TOLERANCE = 16   # how far off the blend line (in 0-255 colour units) still cou
 _LOADING = {}
 
 
+def _candidate_box():
+    """`(lo, hi)` RGB bounds holding every colour `_share` can score above 0: each blend line
+    from its background through the stroke colour to where it leaves the colour cube (a share
+    is measured off the infinite line, capped at 1), widened by the tolerance."""
+    lo, hi = np.full(3, 255.0), np.zeros(3)
+    for colour, backgrounds in _STROKES:
+        for background in backgrounds:
+            step = colour - background
+            with np.errstate(divide="ignore"):
+                exits = np.where(step > 0, (255 - background) / step,
+                                 np.where(step < 0, -background / step, np.inf))
+            end = background + (exits.min() + _TOLERANCE / np.linalg.norm(step)) * step
+            lo, hi = np.minimum(lo, np.minimum(background, end)), np.maximum(hi, np.maximum(background, end))
+    return (np.clip(np.floor(lo - _TOLERANCE), 0, 255).astype(np.uint8),
+            np.clip(np.ceil(hi + _TOLERANCE), 0, 255).astype(np.uint8))
+
+
+_BOX_LO, _BOX_HI = _candidate_box()
+
+
 def _share(rgb, colour, backgrounds):
     """Each pixel's 0-1 share of `colour`, as a blend with the nearest of `backgrounds`, if
     within `_TOLERANCE` of that line (which keeps the rainbow's own pinks out)."""
@@ -254,21 +275,26 @@ def _share(rgb, colour, backgrounds):
 def _stroke_weights(pixels):
     """`(indices, weights, kinds)` of a frame's themed pixels: each one's share of its stroke
     colour and which of `_STROKES` it is. Pixels under 20% are ignored."""
-    # Flat-colour art: score each distinct colour once and look pixels up (~3x faster).
+    # Only visible pixels inside the candidate box can score; of those, each distinct colour is
+    # scored once (flat-colour art) and looked up.
     flat = pixels.reshape(-1, 4)
-    packed = (flat[:, 0].astype(np.int32) << 16) | (flat[:, 1].astype(np.int32) << 8) | flat[:, 2]
+    inside = flat[:, 3] > 0
+    for channel in range(3):
+        inside &= (flat[:, channel] >= _BOX_LO[channel]) & (flat[:, channel] <= _BOX_HI[channel])
+    candidates = np.flatnonzero(inside)
+    sub = flat[candidates]
+    packed = (sub[:, 0].astype(np.int32) << 16) | (sub[:, 1].astype(np.int32) << 8) | sub[:, 2]
     colours, inverse = np.unique(packed, return_inverse=True)
     rgb = np.stack([colours >> 16, (colours >> 8) & 255, colours & 255], axis=-1).astype(np.float32)
-    shares = np.stack([_share(rgb, colour, backgrounds) for colour, backgrounds in _STROKES])[:, inverse]
-    shares *= flat[:, 3] > 0
-    kinds = shares.argmax(0)
-    best = shares.max(0)
+    shares = np.stack([_share(rgb, colour, backgrounds) for colour, backgrounds in _STROKES])
+    kinds = shares.argmax(0)[inverse]
+    best = shares.max(0)[inverse]
     # Without the stripe (the rainbow side, edge-on frames) any match is a look-alike.
     if ((kinds == 0) & (best > 0.6)).sum() < 100:
         empty = np.empty(0, dtype=np.intp)
         return empty, np.empty(0, dtype=np.float32), np.empty(0, dtype=np.intp)
-    idx = np.flatnonzero(best > 0.2)
-    return idx, np.clip((best[idx] - 0.2) / 0.8, 0, 1), kinds[idx]
+    keep = np.flatnonzero(best > 0.2)
+    return candidates[keep], np.clip((best[keep] - 0.2) / 0.8, 0, 1), kinds[keep]
 
 
 def _frame_side(side):
@@ -283,33 +309,40 @@ def _load_frames(side):
     of each stroke's change. Weights are scored at full size and shrunk with the image's area
     filter: recolouring is linear, so this equals recolour-then-scale (scoring the shrunk frame
     left a pink fringe on the thin rim)."""
+    # Frames are independent and numpy / OpenCV / Qt work outside the GIL: split them over up to
+    # half the CPUs, leaving the rest to the window being built meanwhile.
+    workers = max(1, min(3, (os.cpu_count() or 1) // 2))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        frames = list(pool.map(lambda n: _load_frame(n, side), range(_LOADING_FRAMES)))
+    return None if any(frame is None for frame in frames) else frames
+
+
+def _load_frame(n, side):
+    """Frame `n` of the sequence as `_load_frames` describes, or None if it can't be read."""
     import cv2   # only needed here, on the worker
-    frames = []
-    for n in range(_LOADING_FRAMES):
-        image = QImage(os.path.join(_LOADING_DIR, f"{n:03d}.png"))
-        if image.isNull():
-            return None
-        image = image.convertToFormat(QImage.Format_RGBA8888)
-        h, w = image.height(), image.width()
-        pixels = np.frombuffer(image.constBits(), dtype=np.uint8,
-                               count=h * image.bytesPerLine()).reshape(h, image.bytesPerLine())[:, : w * 4].reshape(h, w, 4)
-        idx, weights, kinds = _stroke_weights(pixels)
-        alpha = pixels[..., 3].astype(np.float32) / 255
-        premult = pixels.astype(np.float32)
-        premult[..., :3] *= alpha[..., None]
-        deltas = np.zeros((h * w, 2), dtype=np.float32)
-        deltas[idx, kinds] = weights * alpha.ravel()[idx]
-        deltas = deltas.reshape(h, w, 2)
-        if side < w:
-            premult = cv2.resize(premult, (side, side), interpolation=cv2.INTER_AREA)
-            deltas = cv2.resize(deltas, (side, side), interpolation=cv2.INTER_AREA)
-        out = np.ascontiguousarray(np.clip(np.rint(premult), 0, 255).astype(np.uint8))
-        small = QImage(out.data, out.shape[1], out.shape[0], out.shape[1] * 4,
-                       QImage.Format_RGBA8888_Premultiplied).copy()
-        deltas = deltas.reshape(-1, 2)
-        themed = np.flatnonzero(deltas.max(1) > 1e-3)
-        frames.append((small, themed, deltas[themed], premult.reshape(-1, 4)[themed]))
-    return frames
+    image = QImage(os.path.join(_LOADING_DIR, f"{n:03d}.png"))
+    if image.isNull():
+        return None
+    image = image.convertToFormat(QImage.Format_RGBA8888)
+    h, w = image.height(), image.width()
+    pixels = np.frombuffer(image.constBits(), dtype=np.uint8,
+                           count=h * image.bytesPerLine()).reshape(h, image.bytesPerLine())[:, : w * 4].reshape(h, w, 4)
+    idx, weights, kinds = _stroke_weights(pixels)
+    alpha = pixels[..., 3].astype(np.float32) / 255
+    premult = pixels.astype(np.float32)
+    premult[..., :3] *= alpha[..., None]
+    deltas = np.zeros((h * w, 2), dtype=np.float32)
+    deltas[idx, kinds] = weights * alpha.ravel()[idx]
+    deltas = deltas.reshape(h, w, 2)
+    if side < w:
+        premult = cv2.resize(premult, (side, side), interpolation=cv2.INTER_AREA)
+        deltas = cv2.resize(deltas, (side, side), interpolation=cv2.INTER_AREA)
+    out = np.ascontiguousarray(np.clip(np.rint(premult), 0, 255).astype(np.uint8))
+    small = QImage(out.data, out.shape[1], out.shape[0], out.shape[1] * 4,
+                   QImage.Format_RGBA8888_Premultiplied).copy()
+    deltas = deltas.reshape(-1, 2)
+    themed = np.flatnonzero(deltas.max(1) > 1e-3)
+    return small, themed, deltas[themed], premult.reshape(-1, 4)[themed]
 
 
 def _request_frames(side):
