@@ -3,11 +3,9 @@
 """The main window and the app's hub: shared state, the file-selection broadcast, background
 work, tab routing, keybinds, toasts and the close prompt. Every tab is built once and stacked."""
 import os
-import threading
-import time
 
 from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPainterPath
+from PySide6.QtGui import QIcon, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QAbstractButton,
     QApplication,
@@ -21,14 +19,13 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import isValid
 
-from core import downloader, formats, gpu, llamalog, power, priority, window_mode, window_style
+from core import downloader, gpu, llamalog, power, window_mode, window_style
 from core.theme import load_settings
 from core.capabilities import libplacebo_problem
-from core.previews import extract_hdr_tonemapped_thumbnails, extract_video_thumbnails
-from core.probe import probe_media
 from ui import scale
 from ui import theme as T
 from ui.keymap import KeyMap
+from ui.media_session import MediaSession
 from ui.keynav import KeyNav
 from ui.tabs.downloader import DownloaderTab
 from ui.tabs.encoding import EncodingTab
@@ -42,51 +39,11 @@ from ui.widgets.frameless import ResizeGrips, WindowControls
 from ui.widgets.panels import ASSETS, Sidebar, TabIndicator
 from ui.scale import px
 from ui.widgets.toast import ToastManager
-from ui.workers import emit_progress, pil_to_qimage, run_async
+from ui.workers import pil_to_qimage, run_async
 
 TAB_NAMES = ("Muxing", "Encoding", "Downloader", "Queue", "Settings")
 
 _QWIDGETSIZE_MAX = 16777215   # Qt's "no maximum size"
-
-_MEDIA_INFO_KEYS = ("container", "video", "audio", "video_profile", "video_level", "hdr",
-                    "width", "height", "duration", "file_size", "has_video", "has_audio",
-                    "title", "chapters", "bit_rate", "creation_time")
-
-
-def _probe_summary(info):
-    """One line describing a probe result, for the log."""
-    parts = [info.get("container") or "?"]
-    if info.get("video"):
-        size = f"{info.get('width')}x{info.get('height')}" if info.get("width") else "?"
-        parts.append(f"video {info['video']} {size}{' HDR' if info.get('hdr') else ''}")
-    elif info.get("has_video") is False:
-        parts.append("no video")
-    if info.get("audio"):
-        count = len(info.get("audio_streams") or [])
-        parts.append(f"audio {info['audio']}" + (f" (+{count - 1} more)" if count > 1 else ""))
-    elif info.get("has_audio") is False:
-        parts.append("no audio")
-    if info.get("duration"):
-        parts.append(f"{info['duration']:.1f}s")
-    if info.get("file_size"):
-        parts.append(f"{info['file_size'] / 1024 ** 2:.1f} MB")
-    return ", ".join(parts)
-
-
-def _preview_max_size():
-    """The largest a preview frame is ever drawn, in device pixels: the biggest screen. Frames
-    are stored no bigger (a 4K frame kept whole is 33MB)."""
-    sizes = [(round(s.geometry().width() * s.devicePixelRatio()), round(s.geometry().height() * s.devicePixelRatio()))
-             for s in QGuiApplication.screens()]
-    return max(sizes, key=lambda size: size[0] * size[1]) if sizes else None
-
-
-def _empty_media_info():
-    """"Unknown" for every probe field — None never reads as absent."""
-    info = dict.fromkeys(_MEDIA_INFO_KEYS)
-    info["audio_streams"] = []
-    return info
-
 
 class _MainLayout(QHBoxLayout):
     """The window's layout, opted out of height-for-width: word-wrapped labels otherwise made
@@ -221,7 +178,6 @@ class MainWindow(QWidget):
             self.setWindowIcon(QIcon(icon))
 
         settings = load_settings()
-        self.current_file_path = ""
         self.default_save_location = settings["default_save_location"]
         # `gpu_preference` is the saved choice; `gpu_enabled` is what jobs use (forced off
         # without a dedicated GPU, without overwriting the choice).
@@ -255,25 +211,11 @@ class MainWindow(QWidget):
                 llamalog.get("settings").warning("Couldn't create the default save folder %s: %s",
                                                  self.default_save_location, exc)
 
-        # Preview frames (QImages) for the selected file, decoded once off the GUI thread.
-        self.thumb_frames = []
-        self.thumb_frames_path = None
-        self._thumb_token = 0
-        self.media_info = _empty_media_info()
-        self._media_info_path = None
-        self._preview_index = 0
-        # HDR→SDR tone-mapped preview frames, cached per file.
-        self.hdr_frames = None
-        self.hdr_frames_path = None
-        self._hdr_inflight_path = None
-        self._hdr_token = 0
-        self._hdr_cancel_event = None
-        self._hdr_cancelled_token = 0     # the render a file change interrupted: its late, empty result is dropped
+        self.media = MediaSession(self)
         # Downloader: the last successful fetch, and a token that drops a superseded one.
         self.ytdlp_cache = None
         self._ytdlp_token = 0
         self.deno_missing = False
-        self.media_tabs = []
         self.startup_tab = settings["startup_tab"]
         self.current_tab = self.startup_tab
 
@@ -374,11 +316,11 @@ class MainWindow(QWidget):
 
     def preview_expanded(self):
         """Is a media tab's preview blown up over the window?"""
-        return any(getattr(tab.carousel, "_expanded", False) for tab in self.media_tabs)
+        return any(getattr(tab.carousel, "_expanded", False) for tab in self.media.tabs)
 
     def collapse_previews(self):
         """Shrink any expanded preview back. True if there was one."""
-        expanded = [tab for tab in self.media_tabs if getattr(tab.carousel, "_expanded", False)]
+        expanded = [tab for tab in self.media.tabs if getattr(tab.carousel, "_expanded", False)]
         for tab in expanded:
             tab.carousel.force_collapse()
         return bool(expanded)
@@ -571,7 +513,7 @@ class MainWindow(QWidget):
         super().resizeEvent(e)
         self._grips.place()
         # The expanded preview covers the whole window, so follows its size.
-        for tab in self.media_tabs:
+        for tab in self.media.tabs:
             overlay = getattr(tab, "_expand_overlay", None)
             if overlay is not None and overlay.isVisible():
                 overlay.setGeometry(self.rect())
@@ -657,7 +599,7 @@ class MainWindow(QWidget):
         """Restore the stacking order, bottom to top: the tab pipe, an expanded preview, the
         keyboard selection ring, the toasts, the resize grips. The tab pipe raises itself on
         every re-layout and would draw across an expanded preview."""
-        for tab in self.media_tabs:
+        for tab in self.media.tabs:
             overlay = getattr(tab, "_expand_overlay", None)
             if overlay is not None and overlay.isVisible():
                 overlay.raise_()
@@ -673,8 +615,8 @@ class MainWindow(QWidget):
         """A new default save location from Settings. Save fields still holding the bare
         default (no file imported / nothing fetched yet) follow it."""
         self.default_save_location = path
-        if not self.current_file_path:
-            for tab in self.media_tabs:
+        if not self.media.current_file_path:
+            for tab in self.media.tabs:
                 set_line_text(tab.save_entry, path)
                 tab._auto_output = path
         downloader_tab = self.tabs.get("Downloader")
@@ -693,7 +635,7 @@ class MainWindow(QWidget):
         if template == self.naming_template:
             return
         self.naming_template = template
-        for tab in (*self.media_tabs, self.tabs.get("Downloader")):
+        for tab in (*self.media.tabs, self.tabs.get("Downloader")):
             if tab is not None:
                 tab.refresh_auto_output()
 
@@ -739,228 +681,6 @@ class MainWindow(QWidget):
         downloader_tab = self.tabs.get("Downloader")
         if downloader_tab is not None and self.downloader_separate_save:
             downloader_tab.refresh_default_location()
-
-    # ------------------------------------------------------------------ #
-    #  File selection broadcast
-    # ------------------------------------------------------------------ #
-    def register_media_tab(self, tab):
-        self.media_tabs.append(tab)
-
-    def update_global_file(self, file_path):
-        """The only place the selected file changes."""
-        clean_path = (file_path or "").strip("{}").strip()
-        if not clean_path:
-            return
-        if clean_path != self.current_file_path:
-            self._preview_index = 0
-            if clean_path != self._media_info_path:
-                self.media_info = _empty_media_info()
-            # A new file: drop the outgoing preview now rather than when the new frames land.
-            for tab in self.media_tabs:
-                tab.carousel.clear_preview()
-            # Interrupt the old file's HDR render and turn its HDR->SDR switch off.
-            self._cancel_hdr_render()
-            # Only one tone-mapped set is cached; don't hold the old one (~300MB at 4K) meanwhile.
-            self.hdr_frames = None
-            self.hdr_frames_path = None
-            for tab in self.media_tabs:
-                reset_hdr = getattr(tab, "reset_hdr_preview", None)
-                if callable(reset_hdr):
-                    reset_hdr()
-        self.current_file_path = clean_path
-        llamalog.get("app").info("File selected: %s", clean_path)
-        for tab in self.media_tabs:
-            tab.set_selected_file(clean_path)
-            tab._autofill_output_path()
-        self._load_thumbnails(clean_path)
-
-    def _load_thumbnails(self, path):
-        """Cache hit: broadcast now. Miss: probe, then decode ten frames, on a worker; the probe
-        lands first so defaults settle early."""
-        self._thumb_token += 1
-        token = self._thumb_token
-        self._thumb_t0 = time.monotonic()
-        cached_info = path == self._media_info_path
-        if cached_info:
-            self._broadcast_media_info()
-            # An audio file's Wave Loop comes from the probe: OpenCV's decode never returns on one.
-            if self._is_audio_only(path):
-                self._broadcast_audio_only(True)
-        if path == self.thumb_frames_path and self.thumb_frames:
-            self._broadcast_thumbnails(self.thumb_frames)
-            self._prerender_hdr(path)
-            if cached_info:
-                return
-
-        max_size = _preview_max_size()
-
-        def work():
-            if not cached_info:
-                info = probe_media(path)
-                emit_progress(lambda i: self._deliver_media_info(token, path, i), info)
-            return [pil_to_qimage(f) for f in extract_video_thumbnails(path, count=10, max_size=max_size)]
-
-        run_async(work, lambda frames: self._deliver_thumbnails(token, path, frames or []))
-
-    def _deliver_media_info(self, token, path, info):
-        if token != self._thumb_token or info is None:
-            return
-        # No video and no audio at all is ffmpeg's demuxer failing (corrupt, or an unsupported
-        # variant like some MXF), not an audio-only file: reject it before it reaches a tab.
-        if info.get("has_video") in (None, False) and info.get("has_audio") in (None, False):
-            self._reject_file(path)
-            return
-        self.media_info = info
-        self._media_info_path = path
-        llamalog.get("probe").info("Probed %s: %s", os.path.basename(path), _probe_summary(info))
-        self._broadcast_media_info()
-        if self._is_audio_only(path):
-            self._broadcast_audio_only(True)
-
-    def _reject_file(self, path):
-        """Undo the selection entirely, back to the pristine drop box. Bumping the token makes
-        the in-flight decode for this path a no-op when it lands."""
-        llamalog.get("app").warning("Rejected %s: no video or audio stream could be identified "
-                                    "(unreadable, or a format this ffmpeg can't parse)", path)
-        self._thumb_token += 1
-        self.current_file_path = ""
-        self.media_info = _empty_media_info()
-        self._media_info_path = None
-        self.thumb_frames = []
-        self.thumb_frames_path = None
-        self._preview_index = 0
-        self._cancel_hdr_render()
-        for tab in self.media_tabs:
-            tab.clear_selected_file()
-            reset_hdr = getattr(tab, "reset_hdr_preview", None)
-            if callable(reset_hdr):
-                reset_hdr()
-        show_message(
-            self, "Couldn't Read This File",
-            f"“{os.path.basename(path)}”'s video and audio couldn't be identified. "
-            "It may be corrupted, or use a format this app's bundled ffmpeg can't "
-            "fully parse.",
-        )
-
-    def _is_audio_only(self, path):
-        info = self.media_info
-        if info.get("video"):
-            return False
-        if info.get("audio"):
-            return True
-        return os.path.splitext(path)[1].lower() in formats.AUDIO_EXTENSIONS
-
-    def _broadcast_audio_only(self, flag):
-        for tab in self.media_tabs:
-            tab.carousel.set_audio_only(flag)
-
-    def _broadcast_media_info(self):
-        for tab in self.media_tabs:
-            tab.on_media_info(self.media_info)
-            tab.carousel.set_media_info(self.media_info)
-            # The probe may carry a title / chapter count the naming format uses.
-            tab.refresh_auto_output()
-
-    def _deliver_thumbnails(self, token, path, frames):
-        if token != self._thumb_token:
-            return
-        took = time.monotonic() - getattr(self, "_thumb_t0", time.monotonic())
-        if not frames:
-            if self._is_audio_only(path):
-                llamalog.get("app").info("%s is audio-only: no preview frames (Wave Loop)", os.path.basename(path))
-                self._broadcast_audio_only(True)
-                return
-            llamalog.get("app").warning("No preview frames could be decoded for %s after %.1fs "
-                                        "(the file stays selected)", path, took)
-            # A video that decoded to no frames stays selected and usable; the drop box says so.
-            for tab in self.media_tabs:
-                tab.show_no_preview()
-            show_message(
-                self, "No Preview",
-                "No preview images could be generated.\n\n"
-                "The file is still usable but the preview images could not be decoded properly.",
-            )
-            return
-        self.thumb_frames = frames
-        self.thumb_frames_path = path
-        llamalog.get("app").info("Previews ready for %s: %d frames in %.1fs",
-                                 os.path.basename(path), len(frames), took)
-        self._broadcast_thumbnails(frames)
-        self._prerender_hdr(path)
-
-    def _broadcast_thumbnails(self, frames):
-        for tab in self.media_tabs:
-            tab.carousel.set_audio_only(False)
-            tab.on_thumbnails(frames)
-            tab.carousel.sync_index(self._preview_index)
-
-    def sync_preview_index(self, index):
-        """A carousel was scrubbed — mirror it onto the other tab's."""
-        if index == self._preview_index:
-            return
-        self._preview_index = index
-        for tab in self.media_tabs:
-            tab.carousel.sync_index(index)
-
-    # ------------------------------------------------------------------ #
-    #  HDR→SDR preview renders
-    # ------------------------------------------------------------------ #
-    def _prerender_hdr(self, path):
-        """Start an HDR file's tone-mapped previews once its raw ones are up, in the background,
-        so HDR->SDR is instant when switched on. A switch pressed earlier waits for this run."""
-        if path == self.current_file_path and path == self._media_info_path \
-                and self.media_info.get("hdr") is True:
-            self.start_hdr_render(path)
-
-    def start_hdr_render(self, path):
-        """One tone-mapped render per file; a no-op when cached or already running for it."""
-        if not path or path == self.hdr_frames_path or path == self._hdr_inflight_path:
-            return
-        self._hdr_inflight_path = path
-        self._hdr_t0 = time.monotonic()
-        llamalog.get("app").info("HDR preview render started for %s", os.path.basename(path))
-        self._hdr_token += 1
-        token = self._hdr_token
-        cancel_event = threading.Event()
-        self._hdr_cancel_event = cancel_event
-
-        max_size = _preview_max_size()
-
-        def work():
-            frames = extract_hdr_tonemapped_thumbnails(path, count=10, should_cancel=cancel_event.is_set,
-                                                       max_size=max_size)
-            return [pil_to_qimage(f) for f in frames]
-
-        run_async(work, lambda frames: self._deliver_hdr(token, path, frames or []))
-
-    def _cancel_hdr_render(self):
-        """Interrupt an HDR preview render still in flight (its file is no longer shown)."""
-        if self._hdr_cancel_event is not None:
-            self._hdr_cancel_event.set()
-        if self._hdr_inflight_path:
-            llamalog.get("app").info("HDR preview render cancelled (%s)", os.path.basename(self._hdr_inflight_path))
-            self._hdr_cancelled_token = self._hdr_token
-        self._hdr_inflight_path = None
-
-    def _deliver_hdr(self, token, path, frames):
-        if path == self._hdr_inflight_path:
-            self._hdr_inflight_path = None
-        if token != self._hdr_token or token == self._hdr_cancelled_token:
-            # Superseded or interrupted: not a failure, and it must not replace the cached frames.
-            return
-        took = time.monotonic() - getattr(self, "_hdr_t0", time.monotonic())
-        if frames:
-            llamalog.get("app").info("HDR preview ready for %s: %d frames in %.1fs",
-                                     os.path.basename(path), len(frames), took)
-        else:
-            llamalog.get("app").warning("HDR preview render for %s produced no frames (%.1fs; cancelled, "
-                                        "libplacebo unavailable, or a decode failure)", os.path.basename(path), took)
-        self.hdr_frames = frames or None
-        self.hdr_frames_path = path if frames else None
-        for tab in self.media_tabs:
-            ready = getattr(tab, "on_hdr_frames_ready", None)
-            if callable(ready):
-                ready(path, self.hdr_frames)
 
     # ------------------------------------------------------------------ #
     #  Downloader

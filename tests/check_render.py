@@ -74,8 +74,8 @@ def page(label):
 def run():
     ok = report("SVG assets through every recolouring path", check_golden("render_icons", icons()))
     path = fixture("sdr.mp4")
-    window.update_global_file(path)
-    while not (window.thumb_frames_path == path and window.thumb_frames):
+    window.media.select_file(path)
+    while not (window.media.thumb_frames_path == path and window.media.thumb_frames):
         settle(0.1)
     settle(0.8)
     window.setFocus()                       # no caret blinking in a text field
@@ -101,8 +101,8 @@ def run():
     shots["info-badge tooltip@1.0"] = _hash(carousel._tooltip.grab().toImage())
     carousel._hide_tooltip()
     audio = fixture("audio.m4a")
-    window.update_global_file(audio)
-    while window._media_info_path != audio:
+    window.media.select_file(audio)
+    while window.media.info_path != audio:
         settle(0.1)
     settle(0.6)
     for tab in ("Muxing", "Encoding"):

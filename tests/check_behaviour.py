@@ -28,9 +28,9 @@ def pick(menu, value):
 
 
 def load(path):
-    window.update_global_file(path)
+    window.media.select_file(path)
     end = time.monotonic() + 30
-    while time.monotonic() < end and not (window.thumb_frames_path == path and window._media_info_path == path):
+    while time.monotonic() < end and not (window.media.thumb_frames_path == path and window.media.info_path == path):
         settle(0.1)
     settle(0.3)
 

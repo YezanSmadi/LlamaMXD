@@ -116,9 +116,9 @@ def run():
         shots[f"{tab}/Overview (no file)@1.0"] = geometry()
 
     path = fixture("sdr.mp4")
-    window.update_global_file(path)
+    window.media.select_file(path)
     deadline = time.monotonic() + 30
-    while not (window.thumb_frames_path == path and window.thumb_frames) and time.monotonic() < deadline:
+    while not (window.media.thumb_frames_path == path and window.media.thumb_frames) and time.monotonic() < deadline:
         settle(0.1)
     settle(0.8)
     window.tabs["Queue"].add_task("Fixture Clip", {"input_file": path, "output_path": os.path.join(WORK, "o.mp4")})

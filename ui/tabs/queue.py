@@ -536,8 +536,8 @@ class QueueTab(QWidget):
     def _source_info(self, settings):
         """The probe of this task's input, when it is still the selected file
         (add_task always runs right after the tab gathered the settings)."""
-        info = self.app.media_info
-        if info and settings.get("input_file") and settings.get("input_file") == self.app.current_file_path:
+        info = self.app.media.info
+        if info and settings.get("input_file") and settings.get("input_file") == self.app.media.current_file_path:
             return info
         return {}
 
@@ -641,8 +641,8 @@ class QueueTab(QWidget):
             return
         if not input_file:
             return
-        if self.app.thumb_frames and self.app.thumb_frames_path == input_file:
-            deliver(self.app.thumb_frames[0])
+        if self.app.media.thumb_frames and self.app.media.thumb_frames_path == input_file:
+            deliver(self.app.media.thumb_frames[0])
             return
         run_async(lambda: pil_to_qimage(extract_video_thumbnail(input_file)), deliver)
 

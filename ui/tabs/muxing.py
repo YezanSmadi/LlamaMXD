@@ -327,11 +327,11 @@ class MuxingTab(MediaTab):
           5. the Overview rundown"""
         stripping_video = self.strip_video_check.isChecked()
         stripping_audio = self.strip_audio_check.isChecked()
-        info = self.app.media_info
+        info = self.app.media.info
         video_absent = info.get("has_video") is False
         audio_absent = info.get("has_audio") is False
 
-        current_path = self.app.current_file_path
+        current_path = self.app.media.current_file_path
         reset = current_path != self._tracks_file
         if info is not self._tracks_info:
             self._reseed_tracks(info)
@@ -394,8 +394,8 @@ class MuxingTab(MediaTab):
 
     def _refresh_summary(self):
         """The rundown, including the keyframe caveat copy-only trimming has."""
-        info = self.app.media_info
-        no_file = not self.app.current_file_path
+        info = self.app.media.info
+        no_file = not self.app.media.current_file_path
 
         def stream(kind, check, box):
             if no_file:
@@ -462,7 +462,7 @@ class MuxingTab(MediaTab):
 
     def _validate_specific(self, settings):
         """A box with rows but nothing checked blocks the job; an empty box doesn't."""
-        info = self.app.media_info
+        info = self.app.media.info
         if (not settings["strip_video"] and info.get("has_video") is not False
                 and self.video_box.item_count() and not settings["video_tracks"]):
             show_message(

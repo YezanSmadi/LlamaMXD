@@ -115,6 +115,9 @@ own settings.json / presets.json, and fixture clips are generated there by the b
   `probe_duration` / preview frames on the fixtures (SDR, multi-audio, HDR10, audio-only, VP9).
 - `check_ui` — the real `MainWindow` offscreen: every visible widget's rect on 13 pages (plus the
   no-file state) at 1.0 / 1.5 / 2.0x, the squeeze scan, and the Muxing / Encoding preview invariant.
+- `check_media` — the selected-file pipeline (`MediaSession`): load, a cache-hit reselect (no
+  second probe), the HDR pre-render landing and being dropped / cancelled on a file change, the
+  Wave Loop for audio, an unreadable file rejected, "No Preview", and the shared scrub index.
 - `check_jobs` — real Mux / Encode jobs through `FfmpegJob`, their outputs probed (streams, languages,
   length, each stream's start time); stop() mid-run; a failing job's reason.
 
@@ -149,8 +152,10 @@ core/ffmpeg_runner.py     runs one ffmpeg job off the GUI thread (progress, susp
 core/tools.py             resolves ffmpeg/ffprobe/yt-dlp/deno to absolute paths (bundled, then PATH)
 core/downloader.py        Downloader logic: fetch (-J), format model + option lists, resolve, argv
 core/ytdlp_runner.py      runs one download off the GUI thread (job object, stages, time progress)
-ui/app.py                 MainWindow — the hub: shared state, file-selection broadcast, background
-                          work, tab routing, keybinds, toasts, close prompt
+ui/app.py                 MainWindow — the hub: shared state, background work, tab routing,
+                          keybinds, toasts, close prompt
+ui/media_session.py       MediaSession (`app.media`): the selected file, its probe, preview frames,
+                          HDR render and scrub index, broadcast to the media tabs
 ui/theme.py               ThemeManager (live theme + System/Light/Dark) + the generated stylesheet
 ui/scale.py               the one UI scale factor: px()/fpx(), bound setters, design-space painting
 ui/workers.py             run_async: daemon thread → result delivered on the GUI thread; pil_to_qimage
@@ -316,22 +321,22 @@ frozen.
 
 `MainWindow` owns the shared state every tab reads through `self.app`:
 
-- `current_file_path` — the single globally-selected input file.
+- `media` — the `MediaSession` (`ui/media_session.py`): the selected file and everything
+  derived from it — `current_file_path`, `info` (the ffprobe result, below; `info_path` is
+  the file it came from), `thumb_frames` / `thumb_frames_path` (its ten preview QImages),
+  `hdr_frames` / `hdr_frames_path` (the tone-mapped set, if rendered), `tabs` (Muxing and
+  Encoding, registered by `MediaTab.__init__` through `register_tab` as the targets of the
+  broadcast). Only `MediaSession` writes any of it; tabs read `self.app.media.<name>`.
 - `default_save_location`, `gpu_enabled` — from `settings.json`; the save
   folder is created at startup (best-effort).
 - `downloader_separate_save`, `downloader_save_location` — also from
   `settings.json`; the Downloader's own optional save folder, off by
   default. `downloader_default_location()` is what `DownloaderTab` actually
   autofills into — see "Tabs → Settings" below.
-- `media_info` — the ffprobe result for the selected file (below).
-- `thumb_frames` / `thumb_frames_path` — its ten preview frames (QImages).
-- `hdr_frames` / `hdr_frames_path` — the tone-mapped preview set, if rendered.
 - `ytdlp_cache` (`{"url", "info", "thumb"}`), `deno_missing`.
 - `tabs` — name → tab (`Muxing`, `Encoding`, `Downloader`, `Queue`,
   `Settings`), all built once at startup and stacked in a `QStackedWidget`.
   `Queue` is constructed first since the others hand jobs to it.
-- `media_tabs` — Muxing and Encoding, registered by `MediaTab.__init__`
-  (`register_media_tab`) as the targets of the file-selection broadcast.
 
 **Window**: starts at 35% of the screen's width at the reference aspect
 ratio (896:540 — `scale.window_size`), centred; a 2560x1440 screen gives
@@ -454,8 +459,8 @@ would otherwise prompt a second time.
 
 Any DropBox (drop, double-click or Browse), the carousel (drop or a
 double-click reselect), or the file label's double-click calls
-`app.update_global_file(path)` — the *only* place the selected file changes.
-It resets the shared scrub index and `media_info` when the path actually
+`app.media.select_file(path)` (`ui/media_session.py`) — the *only* place the selected file changes.
+It resets the shared scrub index and `info` when the path actually
 changed — also calling `carousel.clear_preview()` on every media tab at that
 point, so the *outgoing* file's frames are dropped immediately rather than
 sitting on screen until the newly-picked file's own frames finish decoding
@@ -527,7 +532,7 @@ container variant this build's demuxer doesn't parse — some vendors' MXF
 headers, confirmed) rather than a legitimate audio-only or video-only
 input (which always has the *other* kind `True`), and routes it to
 `_reject_file` before it ever reaches a tab: the selection is undone
-entirely — `current_file_path`, `media_info`, both thumbnail caches, and
+entirely — `current_file_path`, `info`, both thumbnail caches, and
 every media tab's carousel/DropBox (`MediaTab.clear_selected_file`,
 `DropBox.reset`) go back to their pristine pre-import state, any in-flight
 HDR render for it is cancelled, and a "Couldn't Read This File" dialog
@@ -640,7 +645,7 @@ would spin forever. (Each audio import leaks one such daemon thread.)
 
 **HDR→SDR preview renders** (`start_hdr_render`, `_deliver_hdr`): one
 tone-mapped render per file (`extract_hdr_tonemapped_thumbnails`), cached on
-the app and token-guarded; a no-op when already cached or already running for
+`app.media` and token-guarded; a no-op when already cached or already running for
 that path. Delivered to any tab with `on_hdr_frames_ready` (which only re-applies the
 frames when the HDR→SDR switch is on — the render now lands while the raw previews are
 being scrubbed, and re-applying them would reset the carousel).
@@ -655,7 +660,7 @@ rest of the render already in flight. It runs **alongside a running queue job** 
 file (Beauty and the Beast HDR, 210s): raw previews 4.5s, then the tone-mapped set 8-10s
 after them (it was 14.6s, sequential, before). **A render in
 flight is interrupted the instant the file changes**, not left to finish for
-a file nobody's looking at any more: `update_global_file` calls
+a file nobody's looking at any more: `select_file` calls
 `_cancel_hdr_render` (a `threading.Event` passed into
 `extract_hdr_tonemapped_thumbnails` as `should_cancel`, checked between
 per-frame ffmpeg calls) and every media tab's `reset_hdr_preview` (turns its
@@ -1458,7 +1463,7 @@ so switching the primary file later doesn't clear it.
 "source": "primary" | "external", "file", "index", "stream", "name"}` (`index` is
 0-based among that file's own streams of the kind — what `-map` addresses;
 `stream` is the probe's description of it, kept so a label can be re-rendered
-whenever the number changes). `_reseed_tracks` builds it from `media_info` —
+whenever the number changes). `_reseed_tracks` builds it from `app.media.info` —
 the source's streams first, any external entries kept after — whenever a **new
 probe result** arrives (`info is not self._tracks_info`: the object changes per file,
 not per broadcast), and clears the undo history with it, since its snapshots describe
@@ -1563,7 +1568,7 @@ same `_on_control_change`/`changed` wiring every other control uses) never
 disturbs another row — and puts the rows in the order of the list it was given
 (a row is moved only when it isn't already in place). It only tears every row down
 and rebuilds from scratch
-(`reset=True`) when `app.current_file_path` itself changed since the last
+(`reset=True`) when `app.media.current_file_path` itself changed since the last
 sync — a new file's stream indices don't mean what the old file's meant, so
 a same-named `src:0` row from a *different* file must never be mistaken for
 a carried-over pick. A brand new row (first appearance, whether from a reset
@@ -1738,7 +1743,7 @@ disable.
 `_apply_preview_frames` shows the app's tone-mapped set instead whenever the
 switch is on and a render for this file is cached — keeping the scrub index
 across the swap. Turning it on for an unrendered file starts
-`app.start_hdr_render`.
+`app.media.start_hdr_render`.
 
 #### `_sync_controls` — the single constraint pass
 
@@ -1919,7 +1924,7 @@ status column. Clicking a row opens its details; the ✕ removes it.
 `QueueTab._row_meta` works the last three out at add time from the settings *as they will leave the file*
 (length = the trim applied to the probed duration, so 1h minus 15s from the start reads 00:59:45; resolution =
 the Encoding downscale pick if it is below the source, else the source height; audio = Encoding's first stream
-codec / Muxing's first track's), from `app.media_info` (which is still the task's file when `add_task` runs) or,
+codec / Muxing's first track's), from `app.media.info` (which is still the task's file when `add_task` runs) or,
 for a download, `ytdlp_cache` + the settings; `—` where there is none. Column widths are measured from the widest
 value each can hold (`_measure_columns`), so only the title can be cut: it scrolls (the queue's shared
 `MarqueeGroup`) past 25 characters or when it overflows its box. Callers now pass just the title as `description`.
@@ -2310,7 +2315,7 @@ autosave when the tab is left and on close.
   on drag-over; `collapse()` — once a file is chosen — drops the border, prompt *and* Browse
   and shows the **`LoadingSpinner`** (below) in their place, until the carousel takes over,
   `reset()` is the reverse — back to its pristine pre-import state, used
-  when a picked file turns out to be unreadable (`app._reject_file`, see
+  when a picked file turns out to be unreadable (`app.media._reject_file`, see
   "File selection is a broadcast" above) rather than leaving the box
   stranded mid-import. `show_no_preview()` is the third state: the border
   and Browse with "No Preview Available" in place of the prompt, for a file that
@@ -2868,7 +2873,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     `ThumbnailCarousel._mastering_text` uses) came out measurably *dimmer and
     lower-contrast*, the opposite of an improvement, when the peak alone was
     trusted the same way. `EncodingTab._gather_settings` snapshots
-    `mastering_max_nits`/`max_cll` from `app.media_info` into the job's
+    `mastering_max_nits`/`max_cll` from `app.media.info` into the job's
     settings dict at queue time — a fact about the input, not a user choice —
     and `ffmpeg_vars.derive()` carries them through as `MASTERING_MAX_NITS`/
     `MAX_CLL` for `build_encode_command` to read.
@@ -2934,12 +2939,12 @@ picks the toast. **Only one ffmpeg runs at a time.**
     the 3 ffmpeg processes hold ~2.7GB private between them (~0.9GB each on a 10-bit 3600x2160 HEVC
     source; 0.73GB measured earlier on Beauty and the Beast) and the app's own peak commit reached
     ~2GB (the worker's transient PIL images beside the QImages), for the ~10s the render takes.
-    **Frames are now stored no bigger than they can be drawn**: `_preview_max_size` (`ui/app.py`) is the
+    **Frames are now stored no bigger than they can be drawn**: `_preview_max_size` (`ui/media_session.py`) is the
     biggest screen in device pixels, and `extract_video_thumbnails` / `extract_hdr_tonemapped_thumbnails`
     take it as `max_size`, shrinking each frame as it is decoded (`previews._shrink`, `cv2.INTER_AREA`
     — 3.7ms per 4K frame against Pillow LANCZOS's 57ms); `pil_to_qimage` stores an image without alpha
     as `Format_RGB32` (Qt's native format; see below). A 4K frame on a 1440p screen is 14MB.
-    **The previous file's tone-mapped set is dropped when the file changes** (`update_global_file`); it
+    **The previous file's tone-mapped set is dropped when the file changes** (`select_file`); it
     used to stay until the next render (316MB held behind an SDR clip) and was never reused anyway.
     Measured on a real display, working set (before -> after): idle with the spinner ready 376 ->
     173MB, a 1080p file 464 -> 241, 4K 703 -> 288, 4K HDR with both sets 1022 -> 398, back to 1080p 785
@@ -2954,7 +2959,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     HDR→SDR is on**, not just the raw HDR frames with a switch flipped
     elsewhere. The render and its cache (`start_hdr_render`,
     `hdr_frames`/`hdr_frames_path`, token-guarded like the thumbnails) live
-    on `MainWindow`, one render per file. `EncodingTab._apply_preview_frames`
+    on `MediaSession` (`app.media`), one render per file. `EncodingTab._apply_preview_frames`
     picks the cached tone-mapped set over the raw one whenever the switch is
     on, it's ready, and it matches the currently-shown file; flipping the
     switch off (or switching files) swaps back to the raw set instantly
@@ -3156,7 +3161,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     this can't fire spuriously.
 
   Row thumbnails reuse the app's already-decoded frames
-  (`app.thumb_frames`) or decode on a worker, never on the GUI thread.
+  (`app.media.thumb_frames`) or decode on a worker, never on the GUI thread.
 
 **Encoding can no longer produce a silent byte-for-byte copy.** `Select`
 (the Encoder/Audio Codec placeholder — see "Option compatibility" above)

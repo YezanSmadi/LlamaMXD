@@ -279,8 +279,8 @@ class EncodingTab(MediaTab):
     def _on_hdr_toggle(self, *_):
         self._sync_controls()
         self._apply_preview_frames()
-        if self.hdr_switch.isChecked() and self.app.hdr_frames_path != self._preview_path:
-            self.app.start_hdr_render(self._preview_path)
+        if self.hdr_switch.isChecked() and self.app.media.hdr_frames_path != self._preview_path:
+            self.app.media.start_hdr_render(self._preview_path)
 
     def reset_hdr_preview(self):
         """A new file is coming: HDR→SDR goes back off, without swapping frames (the carousel
@@ -292,11 +292,11 @@ class EncodingTab(MediaTab):
 
     def on_thumbnails(self, frames):
         """The app's raw frames, which HDR→SDR can replace with the tone-mapped set."""
-        self._preview_path = self.app.current_file_path
+        self._preview_path = self.app.media.current_file_path
         self._raw_frames = frames
         self._apply_preview_frames()
-        if self.hdr_switch.isChecked() and self.app.hdr_frames_path != self._preview_path:
-            self.app.start_hdr_render(self._preview_path)
+        if self.hdr_switch.isChecked() and self.app.media.hdr_frames_path != self._preview_path:
+            self.app.media.start_hdr_render(self._preview_path)
 
     def on_hdr_frames_ready(self, path, _frames):
         """The render finished. Only re-applied with the switch on: re-applying resets the
@@ -309,10 +309,10 @@ class EncodingTab(MediaTab):
         position carries over."""
         show_hdr = (
             self.hdr_switch.isChecked()
-            and self.app.hdr_frames is not None
-            and self.app.hdr_frames_path == self._preview_path
+            and self.app.media.hdr_frames is not None
+            and self.app.media.hdr_frames_path == self._preview_path
         )
-        frames = self.app.hdr_frames if show_hdr else self._raw_frames
+        frames = self.app.media.hdr_frames if show_hdr else self._raw_frames
         if not frames:
             return
         index = self.carousel.current_index()
@@ -334,7 +334,7 @@ class EncodingTab(MediaTab):
         self._update_format_tip()
         stripping_video = self.strip_video_check.isChecked()
         stripping_audio = self.strip_audio_check.isChecked()
-        info = self.app.media_info
+        info = self.app.media.info
         video_absent = info.get("has_video") is False
         audio_absent = info.get("has_audio") is False
 
@@ -443,7 +443,7 @@ class EncodingTab(MediaTab):
             (self.audio_samplerate_menu, self.audio_samplerate_label),
         ))
         # The no-file side only: each enabled state was recomputed above.
-        if not self.app.current_file_path:
+        if not self.app.media.current_file_path:
             for widget in (self.crf_slider, self.crf_label, self.crf_low_label, self.crf_high_label,
                            self.strip_video_check, self.strip_audio_check,
                            self.choose_streams_btn, self.passthru_check, self.passthru_label):
@@ -633,9 +633,9 @@ class EncodingTab(MediaTab):
         """Seed the source's audio once per file (`_default_audio_settings`), all included;
         streams added from other files stay. Guarded by path, so a re-delivered probe can't
         discard edits."""
-        if self.app.current_file_path == self._audio_streams_source:
+        if self.app.media.current_file_path == self._audio_streams_source:
             return
-        self._audio_streams_source = self.app.current_file_path
+        self._audio_streams_source = self.app.media.current_file_path
         primary = [{"id": f"src:{stream['index']}", "source": "primary", "file": None,
                     "index": stream["index"], "stream": stream, "name": None}
                    for stream in info.get("audio_streams") or []]
@@ -656,8 +656,8 @@ class EncodingTab(MediaTab):
     #  Rundown
     # ------------------------------------------------------------------ #
     def _refresh_summary(self):
-        info = self.app.media_info
-        no_file = not self.app.current_file_path
+        info = self.app.media.info
+        no_file = not self.app.media.current_file_path
 
         if no_file:
             video = ("— no streams selected —", "stop")
@@ -774,13 +774,13 @@ class EncodingTab(MediaTab):
             "fps": self.fps_menu.value(),
             # Facts about the input at queue time, so a queued job follows the source it was
             # queued against.
-            "source_height": self.app.media_info.get("height"),
-            "source_fps": self.app.media_info.get("fps"),
+            "source_height": self.app.media.info.get("height"),
+            "source_fps": self.app.media.info.get("fps"),
             "gpu_enabled": bool(self.app.gpu_enabled),
             "hdr_to_sdr": self.hdr_switch.isChecked(),
             # Together these decide the tone-map's peak_detect.
-            "mastering_max_nits": self.app.media_info.get("mastering_max_nits"),
-            "max_cll": self.app.media_info.get("max_cll"),
+            "mastering_max_nits": self.app.media.info.get("mastering_max_nits"),
+            "max_cll": self.app.media.info.get("max_cll"),
             "strip_video": self.strip_video_check.isChecked(),
             "strip_audio": self.strip_audio_check.isChecked(),
             # In output order; `source` / `file` say which input a stream is read from.
@@ -848,11 +848,11 @@ class EncodingTab(MediaTab):
             self._ready = was_ready
         self._sync_controls()
         self._apply_preview_frames()
-        if self.hdr_switch.isChecked() and self.app.hdr_frames_path != self._preview_path:
-            self.app.start_hdr_render(self._preview_path)
+        if self.hdr_switch.isChecked() and self.app.media.hdr_frames_path != self._preview_path:
+            self.app.media.start_hdr_render(self._preview_path)
 
     def _validate_specific(self, settings):
-        info = self.app.media_info
+        info = self.app.media.info
         if (not settings["strip_video"] and info.get("has_video") is not False
                 and settings["encoder"] == formats.SELECT):
             show_message(

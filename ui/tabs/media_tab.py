@@ -105,12 +105,12 @@ class MediaTab(QWidget):
         preview = QWidget()
         self._preview_stack = QStackedLayout(preview)
         self.drop_box = DropBox(start_dir=self._output_directory)
-        self.drop_box.fileSelected.connect(app.update_global_file)
+        self.drop_box.fileSelected.connect(app.media.select_file)
         self.carousel = ThumbnailCarousel(host=self)
         self.carousel.reselect.connect(self.select_input_file)
         self.carousel.populated.connect(self._reveal_preview)
-        self.carousel.indexChanged.connect(app.sync_preview_index)
-        self.carousel.fileDropped.connect(app.update_global_file)
+        self.carousel.indexChanged.connect(app.media.sync_preview_index)
+        self.carousel.fileDropped.connect(app.media.select_file)
         self.carousel.expandToggled.connect(self._on_expand_toggled)
         self._expand_overlay = None
         self._preview_stack.addWidget(self.drop_box)
@@ -150,7 +150,7 @@ class MediaTab(QWidget):
         al.addWidget(self.go_btn, 1)
         root.addWidget(actions)
 
-        app.register_media_tab(self)
+        app.media.register_tab(self)
         self._sync_controls()
         self._ready = True
 
@@ -276,7 +276,7 @@ class MediaTab(QWidget):
         buttons and actions disable. Call last in `_sync_controls`. Controls nothing else
         re-enables (Output Format, Preset, the rest of Overview, the actions) are set both
         ways; `extra` dropdowns are recomputed each pass, so only the no-file side is forced."""
-        has_file = bool(self.app.current_file_path)
+        has_file = bool(self.app.media.current_file_path)
         set_enabled(self.format_menu, self.format_label, has_file)
         set_enabled(self.preset_menu, self.preset_label, has_file)
         # The rest of Overview means nothing without a file.
@@ -307,7 +307,7 @@ class MediaTab(QWidget):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Video File", self._output_directory(), MEDIA_FILTER)
         if path:
-            self.app.update_global_file(path)
+            self.app.media.select_file(path)
 
     def set_selected_file(self, path):
         """A file was picked: the drop box shows the loading spinner until frames (or the
@@ -371,14 +371,14 @@ class MediaTab(QWidget):
     def _default_stem(self):
         """The file name (no extension) from the naming format: live tokens filled in,
         queue-time ones left literal. The input's own name if the format comes out empty."""
-        input_file = self.app.current_file_path
-        values = naming.media_live_values(input_file, self.app.media_info)
+        input_file = self.app.media.current_file_path
+        values = naming.media_live_values(input_file, self.app.media.info)
         return naming.render_live(self.app.naming_template, values, fallback=values["source"])
 
     def _autofill_output_path(self):
         """'<directory>/<naming format><format>': the file name follows the new input, only the
         directory persists."""
-        input_file = self.app.current_file_path
+        input_file = self.app.media.current_file_path
         if not input_file:
             return
         stem = self._default_stem()
@@ -399,7 +399,7 @@ class MediaTab(QWidget):
     def refresh_auto_output(self):
         """Re-derive the suggested name (a title / chapter count arrived, or the format changed)
         only while the field still holds the autofill, compared without the extension."""
-        if not self.app.current_file_path or not self._auto_output:
+        if not self.app.media.current_file_path or not self._auto_output:
             return
         typed = os.path.splitext(self.save_entry.text().strip())[0]
         if typed == os.path.splitext(self._auto_output)[0]:
@@ -411,12 +411,12 @@ class MediaTab(QWidget):
         path = settings.get("output_path") or ""
         if "{" in os.path.basename(path):
             values = naming.media_queue_values(
-                settings.get("input_file"), self.app.media_info, settings)
+                settings.get("input_file"), self.app.media.info, settings)
             settings["output_path"] = naming.resolve_path(path, values)
 
     def select_save_location(self):
         """Pick a full output FILE path."""
-        input_file = self.app.current_file_path
+        input_file = self.app.media.current_file_path
         fmt = self.format_menu.value()
         if input_file:
             initial_dir = os.path.dirname(input_file)
@@ -488,7 +488,7 @@ class MediaTab(QWidget):
     def _apply_common(self, settings):
         """The keys both tabs share, written in (inside a muted `_ready`)."""
         if settings.get("input_file"):
-            self.app.update_global_file(settings["input_file"])
+            self.app.media.select_file(settings["input_file"])
         if "output_path" in settings:
             set_line_text(self.save_entry, settings["output_path"])
             self._auto_output = self.save_entry.text().strip()
@@ -505,7 +505,7 @@ class MediaTab(QWidget):
 
     def _gather_common(self):
         return {
-            "input_file": self.app.current_file_path,
+            "input_file": self.app.media.current_file_path,
             "output_path": self.save_entry.text(),
             "output_format": self.format_menu.value(),
             "start_secs": self.start_time_spinner.seconds(),

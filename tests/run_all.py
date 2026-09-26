@@ -13,7 +13,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CHECKS = ["commands", "core", "ui", "render", "behaviour", "jobs", "queue"]
+CHECKS = ["commands", "core", "ui", "render", "behaviour", "media", "jobs", "queue"]
 
 
 def main():
