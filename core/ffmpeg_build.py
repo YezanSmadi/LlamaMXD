@@ -21,7 +21,6 @@ def _runner_flags(loglevel="error"):
     return ["-hide_banner", "-nostdin", "-loglevel", loglevel, "-nostats", "-progress", "pipe:1"]
 
 
-
 def _trim_kwargs():
     """-ss as an input kwarg and -t as an output kwarg (never an output-side -to), each only
     when set."""

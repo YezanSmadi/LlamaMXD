@@ -1,27 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""The one UI scale factor. Every size in the app is authored against a
-reference window (`BASE_W` x `BASE_H`, the layout as designed) and multiplied
-by `factor()` at the point it becomes real pixels — so the whole window keeps
-its proportions at any window size, and tuning a number means tuning it in
-reference pixels.
+"""The one UI scale factor. Every size is authored in reference pixels (the `BASE_W` x
+`BASE_H` window) and multiplied by `factor()` where it becomes real pixels.
 
-Three rules keep it exact:
-  * Layout, fixed sizes, margins, spacing and stylesheet lengths go through
-    `px()` (int) — via `fixed` / `margins` / `spacing` / `bind` when they're
-    set once, so a scale change re-applies them.
-  * Custom-painted widgets are authored in *design space*: `begin(p)` scales
-    the painter, `ref_size(widget)` gives the widget's size in reference
-    pixels, `ref_pos(pos)` maps a mouse position back — so paint code and hit
-    tests never mention the factor.
-  * A widget's size hint / fixed size is the design-space size times the
-    factor (`fixed`).
-
-Qt snaps a widget font (a stylesheet's `font-size`, a `QFont`) to a whole pixel
-size (`font_px`), so text that goes through one steps between sizes as the
-window is dragged. Text is therefore painted through the scaled painter
-(`ScaledLabel` / `ScaledButton` / `ScaledLineEdit`, and every custom widget), which scales
-continuously; only the combo popup rows still use `font_px`."""
+  * Layout, fixed sizes, margins and spacing go through `px()`, via the bound helpers (`fixed`,
+    `margins`, `spacing`, `bind`) when set once, so a scale change re-applies them.
+  * Custom painting is in design space: `begin(p)` scales the painter; `ref_size`, `ref_rect`
+    and `ref_pos` convert sizes and mouse positions.
+  * Text goes through the scaled painter too (`ScaledLabel` etc.): Qt snaps widget fonts to
+    whole pixels, so they'd step during a drag."""
 import itertools
 import weakref
 
@@ -100,13 +87,9 @@ def font_px(n):
 
 
 def bind(widget, fn, key=None):
-    """Run `fn()` now and again on every scale change while `widget` lives —
-    for anything set once that depends on a size (fixed sizes, margins, a
-    width measured from a font). A `key` names what `fn` sets, so binding the
-    same thing again on the same widget *replaces* the earlier setter rather
-    than stacking a second one that would re-apply the old value on a rescale
-    (a layout given a spacing by a helper, then a different one by its
-    owner)."""
+    """Run `fn()` now and on every scale change while `widget` lives. Binding the same `key` on
+    the same widget replaces the earlier setter instead of stacking one that would re-apply an
+    old value."""
     fn()
     _bound[(weakref.ref(widget), next(_uid) if key is None else key)] = fn
     if len(_bound) > _prune_at:
@@ -114,8 +97,7 @@ def bind(widget, fn, key=None):
 
 
 def _prune():
-    """Drop the setters of widgets that no longer exist (removed rows, closed
-    dialogs) and set the next sweep to twice the survivors."""
+    """Drop setters of dead widgets; the next sweep is at twice the survivors."""
     global _prune_at
     for k in [k for k in _bound if k[0]() is None or not isValid(k[0]())]:
         del _bound[k]
@@ -123,12 +105,8 @@ def _prune():
 
 
 def bind_style(widget, text_fn, key="style-text"):
-    """`bind(widget, ...)` for a widget's own `setStyleSheet`, re-running
-    `text_fn()` on every scale change but only actually calling
-    `setStyleSheet` when the resulting text differs from what's already
-    applied — a scale change often lands on the same whole-pixel `px()`
-    values as the last one, and re-parsing/re-polishing an unchanged
-    stylesheet is pure waste, paid on every step of a live resize."""
+    """`bind` for a widget's own stylesheet, calling setStyleSheet only when the text changed
+    (a rescale often lands on the same whole-pixel values)."""
     def apply():
         text = text_fn()
         if text != getattr(widget, "_bound_style_text", None):
@@ -138,10 +116,8 @@ def bind_style(widget, text_fn, key="style-text"):
 
 
 def bind_after(widget, fn):
-    """Run `fn()` now and again after every scale change *once the stylesheet
-    has been re-applied* — for sizes measured off other widgets' size hints
-    (which follow the stylesheet's own scaled lengths), so they're read
-    against the new look, not the old one."""
+    """Run `fn()` now and after every scale change once the stylesheet is re-applied: for
+    sizes measured off other widgets' hints."""
     fn()
     _after.append((weakref.ref(widget), fn))
 

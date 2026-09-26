@@ -1,22 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Output file naming: the template Settings stores (`{source}-{title}` by
-default) and the tokens it can hold. Pure data + string handling, no UI code.
+"""Output file naming: the Settings template (`{source}-{title}` by default) and its tokens.
 
-Tokens split by *when* they can be known:
-
-* **Live** — `{source}` `{title}` `{chapters}` are facts about the picked
-  input (or fetched video), so a tab fills them into the Save field the moment
-  it has them, and refills as the probe lands or the template changes.
-* **Queue-time** — `{date}` `{time}` `{creation-time}` `{quality}` `{bitrate}`
-  depend on the clock or on settings still being changed, so the Save field
-  shows them as literal text and they're filled in when a job is actually
-  queued (`resolve_path`), against the job's final settings.
-
-A token that resolves to nothing (a file with no title tag, no chapters, ...)
-takes its neighbouring separator with it, so `{source}-{title}` on an untitled
-file is `clip`, not `clip-`.
-"""
+Live tokens (`{source}` `{title}` `{chapters}`) fill into the Save field as soon as known.
+Queue-time ones (`{date}` `{time}` `{creation-time}` `{quality}` `{bitrate}`) show as literal
+text and are filled when a job is queued (`resolve_path`). A token with no value takes its
+neighbouring separator with it (`clip`, not `clip-`)."""
 import os
 import re
 from datetime import datetime
@@ -61,9 +50,8 @@ def template_error(template):
 
 
 def render(template, values, tokens):
-    """Fills every `{token}` of `template` named in `tokens` from `values`
-    (`{name: text}`), leaving all other braces literal. An empty result
-    removes the token together with the separator run beside it."""
+    """Fill each `{token}` of `template` named in `tokens` from `values`, leaving other braces
+    literal; an empty value removes the token and the separator beside it."""
     result = ""
     strip_next = False
     pos = 0
@@ -132,8 +120,7 @@ def _stamp(moment, with_time):
 
 
 def _file_creation(path):
-    """When the file was made on disk — the fallback for `{creation-time}`
-    when the media carries no creation_time tag of its own."""
+    """When the file was made on disk (`{creation-time}`'s fallback without a media tag)."""
     try:
         return datetime.fromtimestamp(os.path.getctime(path))
     except (OSError, ValueError, TypeError):
@@ -195,9 +182,8 @@ def media_queue_values(path, info, settings, now=None):
 
 
 def download_queue_values(info, settings, now=None):
-    """Every token for a download about to be queued: `{creation-time}` is
-    the video's upload date, `{quality}` the Resolution pick, `{bitrate}` the
-    chosen streams' average (their combined size over the video's length)."""
+    """Every token for a download about to be queued: `{creation-time}` is the upload date,
+    `{quality}` the Resolution pick, `{bitrate}` the chosen streams' size over the length."""
     info = info or {}
     now = now or datetime.now()
     values = download_live_values(info)

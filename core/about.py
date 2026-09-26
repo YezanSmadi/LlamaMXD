@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
 
-# Legal text, licenses, and program version.
+"""Legal text, licenses and project links for Settings' About page."""
 
 import os
 import sys
@@ -10,11 +10,9 @@ REPO_URL = "https://github.com/YezanSmadi/LlamaMXD"
 ISSUES_URL = REPO_URL + "/issues"
 LICENSE_NAME = "GPL-3.0-or-later"
 COPYRIGHT = "Copyright © 2026 Yezan Smadi"
-# Pak the Llama is the mascot (represented in the logo)
 MASCOT_NAME = "Pak the Llama"
-# The logo art itself is copyrighted separately from the GPL notice below: the GPL licenses the
-# program's source code, not its visual identity, so LlamaMXD-Logo.svg is kept out of that grant
-# (see licenses/README.txt).
+# The logo is copyrighted apart from the GPL, which covers the source code, not the visual
+# identity (see licenses/README.txt).
 LOGO_COPYRIGHT_NOTICE = (f"Logo and brand assets {COPYRIGHT}, all rights reserved. Brand assets may not "
                          "be copied, modified, or used in third-party projects or unofficial builds without "
                          "permission."
@@ -36,8 +34,8 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _find(name):
-    #Path of `name` beside a frozen app's exe (where the installer puts it), else in the repo root;
-    #None if it isn't in either.
+    """Path of `name` beside a frozen app's exe (where the installer puts it), else in the repo
+    root; None if in neither."""
     roots = []
     if getattr(sys, "frozen", False):
         roots.append(os.path.dirname(os.path.abspath(sys.executable)))
@@ -50,11 +48,11 @@ def _find(name):
 
 
 def license_path():
-        # The project's full license text or None if it isn't there.
+        """The project's full license text (LICENSE.txt), or None."""
         return _find("LICENSE.txt") 
 
 
 def licenses_dir():
-    # The folder holding the third-party license texts (`licenses/`), or None if it isn't there.
+    """The folder of third-party license texts (`licenses/`), or None."""
     path = _find("licenses")
     return path if path and os.path.isdir(path) else None

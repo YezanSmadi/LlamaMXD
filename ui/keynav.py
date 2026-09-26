@@ -1,14 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Keyboard navigation of the current tab: the "Select Next Option" / "Press Selected Option"
-shortcuts, and the arrow / Enter keys inside an open dropdown.
-
-Every clickable in the app is `Qt.NoFocus` (so a focused button can't swallow the Space keybind,
-and there are no focus rings), so this doesn't use Qt's focus chain. It keeps its own "selected
-option" and draws a ring around it (`_Ring`, an overlay on the window); text fields are the one
-exception — they take real focus, since typing needs it. The order is reading order (rows top to
-bottom, left to right within a row), recomputed on every press, so it always matches what is on
-screen."""
+"""Keyboard navigation of the current tab: "Select Next Option" / "Press Selected Option", and
+the keys inside an open dropdown. Clickables are `Qt.NoFocus`, so this keeps its own selection
+and draws a ring round it (text fields take real focus, for typing). Stops are in reading
+order, recollected on every press."""
 from PySide6.QtCore import QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import QAbstractButton, QApplication, QLineEdit, QScrollArea, QWidget
@@ -69,8 +64,7 @@ class KeyNav:
         self.window = window
         self.ring = _Ring(window)
         self._stop = None
-        # The target can move (scrolling, a relayout, a resize) or go away (a tab switch, a
-        # rebuilt list), so the ring follows it by polling — cheap, and only while shown.
+        # The target can move or vanish, so the ring follows it by polling while shown.
         self._timer = QTimer(window)
         self._timer.setInterval(60)
         self._timer.timeout.connect(self._sync)
@@ -96,8 +90,7 @@ class KeyNav:
                     continue        # a time field's ▲ / ▼ (mouse only): you type into the field instead
                 row = w.parent()
                 if isinstance(row, _TrackRow):
-                    # A track row's own checkbox is transparent to the mouse; the row is what
-                    # a click lands on, so it is what gets the ring.
+                    # The row, not its mouse-transparent checkbox, gets the ring.
                     stops.append(_Stop(w, 0, row.rect(), w.click, target=row))
                 else:
                     stops.append(_Stop(w, 0, w.rect(), w.click))
@@ -199,9 +192,9 @@ class KeyNav:
     #  An open dropdown
     # ------------------------------------------------------------------ #
     def dropdown_key(self, dropdown, event):
-        """A key press while `dropdown`'s list is open. Its own shortcuts move through the list
-        and pick from it; Qt's built-in handling of the same keys is swallowed, so switching a
-        shortcut off (or moving it) really does turn it off. True if the press is consumed."""
+        """A key while `dropdown`'s list is open: its shortcuts move and pick; Qt's own
+        handling of those keys is swallowed, so a disabled or moved shortcut really is off.
+        True if consumed."""
         keys = self.window.keymap
         if keys.matches("dropdown_prev", event):
             dropdown.move_highlight(-1)

@@ -1,15 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Win32 window styles Qt doesn't keep in step when a live window's frame or
-size limits change (Settings' Window Mode does exactly that).
-
-Measured against the real native window: after Fixed -> Windowed the maximize
-button stayed disabled, and after Borderless -> Fixed it stayed enabled on a
-window whose size limits were pinned — so a click just moved the window to the
-top-left corner at the same size. Likewise the dark title bar: Qt sets DWM's
-dark-frame flag when it creates a native window that already has a frame, so a
-window launched Borderless and then given a frame by Settings came up with the
-flag off and a white title bar over a dark app, and stayed that way."""
+"""Win32 window styles Qt leaves stale when a live window's frame or size limits change (Window
+Mode): the maximize button's enabled state, and DWM's dark title bar, which Qt sets only for a
+window created with a frame."""
 import os
 
 _WS_MAXIMIZEBOX = 0x00010000
@@ -49,10 +42,8 @@ def set_dark_titlebar(hwnd, dark):
         if _dwm.DwmSetWindowAttribute(hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value)) == 0:
             break
     _user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, _SWP_REFRESH)
-    # Neither SWP_FRAMECHANGED nor RedrawWindow makes Windows 10 repaint the
-    # caption with the new flag (measured on the real title bar: still white);
-    # bouncing the frame's active state does. The window's real state is put
-    # back, so one in the background doesn't suddenly look focused.
+    # Windows 10 repaints the caption only when the frame's active state is bounced (not on
+    # SWP_FRAMECHANGED or RedrawWindow); the real active state is put back.
     active = _user32.GetForegroundWindow() == hwnd.value
     _user32.SendMessageW(hwnd, _WM_NCACTIVATE, 0 if active else 1, 0)
     _user32.SendMessageW(hwnd, _WM_NCACTIVATE, 1 if active else 0, 0)

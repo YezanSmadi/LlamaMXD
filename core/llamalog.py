@@ -1,31 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""LlamaLog — the app's logging. Nothing in here imports Qt (`ui/qt_log.py` routes Qt's
-own messages in).
+"""LlamaLog, the app's logging (no Qt here; `ui/qt_log.py` routes Qt's messages in).
 
-**Where it goes.** `%LOCALAPPDATA%\\LlamaMXD\\logs\\llamamxd.log`, a rotating file (about 1MB,
-5 backups): writable wherever the app is installed, and it survives an update. If that
-folder can't be made it falls back to a temp folder, and if that fails too the app just runs
-without a log — logging never raises into the caller.
-
-**Levels.** Settings' "Normal" logs INFO and up, "Detailed" adds DEBUG (`set_detail`, live).
-Areas are `llamamxd.<area>` loggers (`get("queue")`); each line reads
-`2026-09-21 13:49:02.123 INFO    queue | message`, plus the thread's name when it isn't the
-main one.
-
-**What it catches.** `setup()` installs `sys.excepthook`, `threading.excepthook` and
-`sys.unraisablehook`, and turns on `faulthandler` into `crash.log` for a native crash (the
-libplacebo and OpenCV failures this app has already met). A `crash.log` left by the previous
-session is reported and set aside at the next start.
-
-**Privacy.** File paths are logged in full. URLs lose their query string, fragment and any
-`user:pass@` — every line is scrubbed on its way out (`scrub`), including yt-dlp's verbose
-output, which repeats the link.
-
-**Job output.** `JobOutput` is a bounded in-memory ring buffer per job (the runners feed it
-their process's output). `record_job` runs when a job ends: a failed or stopped job's buffer
-is written whole to `logs\\jobs\\`, a successful one's last 100 lines are, and the main log
-gets one summary line either way. Old job files are pruned."""
+A rotating `%LOCALAPPDATA%\\LlamaMXD\\logs\\llamamxd.log` (temp folder fallback; with neither,
+no log, and logging never raises). Normal logs INFO and up, Detailed adds DEBUG. `setup()`
+installs the exception hooks and faulthandler (`crash.log`, reported at the next start). URLs
+lose their query, fragment and credentials on every line (`scrub`). Each job keeps its output in
+a `JobOutput` ring buffer, written to `logs\\jobs\\` when it ends (`record_job`)."""
 import collections
 import datetime
 import faulthandler
@@ -119,9 +100,8 @@ def clean_url(url):
         return url.split("?", 1)[0].split("#", 1)[0]
 
 
-# Query strings and fragments seen on links so far. yt-dlp repeats a link's tail without its
-# scheme (`[generic] watch?v=abc&token=...: Unable to download webpage`), which no URL pattern
-# catches — so once a link has been seen, its query text is removed wherever else it turns up.
+# Query text of links seen so far: yt-dlp repeats a link's tail without its scheme, which no URL
+# pattern catches, so it is removed wherever it turns up.
 _hidden = collections.deque(maxlen=64)
 _MIN_HIDDEN = 6
 
@@ -196,9 +176,8 @@ def set_detail(name):
 
 
 def ffmpeg_loglevel():
-    """The `-loglevel` a queued ffmpeg job runs with: errors only normally; in Detailed every
-    line is level-tagged (`[error]`, `[info]`) so the job's whole output can be kept while the
-    failure message still comes from the error lines."""
+    """ffmpeg's `-loglevel`: errors only, or in Detailed `level+info` (every line tagged, so the
+    failure message can still come from the error lines)."""
     return "level+info" if is_detailed() else "error"
 
 
@@ -404,11 +383,9 @@ def log_job_start(area, label, argv):
 
 
 def record_job(area, label, argv, outcome, output, *, returncode=None, reason="", seconds=0.0):
-    """A job ended (`outcome` is "done", "failed" or "stopped"): the summary goes to the main log
-    and, per the ring buffer rule, the output goes to `logs\\jobs\\`. A failed or stopped job's
-    whole buffer is written (it always gets a file); a successful one's last
-    `JOB_SUCCESS_LINES` lines, and no file at all when it said nothing. Returns the job file's
-    path, or None."""
+    """A job ended ("done", "failed" or "stopped"): a summary line in the main log and its
+    output in `logs\\jobs\\` (a failed / stopped job's whole buffer, always a file; a successful
+    one's last `JOB_SUCCESS_LINES`, none if it said nothing). Returns the file's path or None."""
     lines, dropped = output.snapshot()
     keep = lines if outcome != "done" else lines[-JOB_SUCCESS_LINES:]
     older = dropped + (len(lines) - len(keep))

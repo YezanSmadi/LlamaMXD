@@ -321,7 +321,6 @@ def bitrate_arg_for(display):
     return f"{kbps}k" if kbps is not None else None
 
 
-
 # ffprobe codec_name -> display name. Unmapped codecs stay None ("constrains nothing").
 FFPROBE_VIDEO = {
     "h264": "H.264", "hevc": "H.265", "mpeg4": "MPEG-4",

@@ -3311,8 +3311,12 @@ without an app release; a frozen app has no `python -m yt_dlp` anyway.
   count in layout, fixed-size or paint code (see "UI scale" above): bound
   helpers for what's set once, design-space painting for what's painted,
   `px()` / `font_px()` in the stylesheet.
-- Every non-trivial method gets a one-line docstring; comments explain *why*
-  (especially verified ffmpeg / yt-dlp / Windows behaviour).
+- **Comments and docstrings.** A `"""docstring"""` says *what* a module, class or function does:
+  one line by default, three at most (a module's a short paragraph). A `#` comment sits on the
+  line it explains and says *why* a non-obvious line is there (a verified ffmpeg / yt-dlp /
+  Windows / Qt quirk), in three lines at most. Never `#` lines in place of a docstring. No
+  history, "confirmed"/"verified" narratives, measurements or "by request" in code: those belong
+  in commit messages and this file. Section banners are the three-line `# ---- #` form.
 - There are no `__init__.py` files; the subfolders work as implicit namespace
   packages. Imports are absolute from the repo root
   (`from ui.widgets.panels import DropBox`).

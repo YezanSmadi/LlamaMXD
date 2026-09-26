@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""The Queue tab's own controls: the cycling sort button, the circular search
-toggle, the search bar that unrolls beside it, and the host that slides the
-details panel up from the bottom."""
+"""The Queue tab's own controls: the sort dropdown, When Done button, search toggle and bar,
+and the host that slides the details panel up."""
 import math
 
 from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
@@ -20,9 +19,8 @@ _SEARCH_MS = 240
 
 
 def _paint_icon(p, name, color, rect, fraction):
-    """Draws `assets/<name>` tinted `color`, centred in `rect` and fitted by its
-    own aspect ratio (the sort icons are not square) at `fraction` of the
-    rect's shorter side."""
+    """Draw `assets/<name>` tinted `color`, centred in `rect` at `fraction` of its shorter side,
+    keeping the art's aspect ratio."""
     renderer = _icon_svg(name, color.name())
     if name == "search.svg":
         # The artwork sits in the top 72 of a 72x156 canvas; crop to it so it fills its circle.
@@ -88,12 +86,9 @@ class SortDropdown(Dropdown):
 
 
 class WhenDoneButton(Dropdown):
-    """A small square button, filled like Start Queue, with a down triangle that
-    opens the "When Done" options (what happens once the queue empties). A
-    `Dropdown` underneath, so the list unrolls, is themed and takes the arrow
-    keys like every other; the face is different, the list is wider than the
-    button and always opens to its left (right edges lined up), up or down, with the
-    current When Done choice highlighted."""
+    """A small square button, filled like Start Queue, with a down triangle: a `Dropdown` of the
+    When Done options whose list is wider than the button, opens to its left, and highlights the
+    current choice."""
 
     def __init__(self, values, size=28, list_width=130):
         super().__init__(values, width=size)
@@ -189,17 +184,10 @@ class _ClearButton(QPushButton):
 
 
 class SearchBar(QWidget):
-    """The search row above the bottom buttons. It floats over the tab (placed by
-    the tab, not in its layout), so nothing sits behind it but the box itself —
-    a long queue runs on underneath it instead of being cut off by a band. The box only ever grows and
-    shrinks horizontally, from the middle of the panel out to both sides and
-    back into it — no vertical motion. While closed the row is hidden and
-    takes no room at all (a details panel can reach lower); while open, or
-    closing, it holds its full height. The ✕ sits inside the box at its right
-    end and only clears the text; `open_bar` / `close_bar` (the search button)
-    show and hide it. `queryChanged(text)` reports every edit ("" on close);
-    `heightChanged(px)` the row's height whenever it appears or goes.
-    """
+    """The search row above the bottom buttons, floating over the list (placed by the tab), so
+    a long queue runs on beneath it. The box grows and shrinks horizontally from the middle;
+    closed, the row is hidden and takes no room. The ✕ inside only clears the text.
+    `queryChanged(text)` reports every edit ("" on close); `heightChanged(px)` the row's height."""
 
     queryChanged = Signal(str)
     heightChanged = Signal(int)
@@ -299,14 +287,9 @@ class SearchBar(QWidget):
 
 
 class SlideHost(QWidget):
-    """Holds a panel that slides up over the bottom of the list. The host floats
-    (it is placed by the tab, not laid out), so nothing sits behind the panel but
-    the panel itself: the list keeps its full height and runs on beneath it.
-
-    While sliding the panel is glued to the host's bottom edge, so it rises into
-    view rather than being wiped downward. The search row can take `inset` px off
-    the bottom of the open panel: the panel gets shorter (its list with it) while
-    its top edge stays where it would be fully open."""
+    """Holds a panel that slides up over the bottom of the list, floating (placed by the tab),
+    so the list keeps its full height beneath it. The panel rises glued to the host's bottom.
+    The search row's `inset` shortens the open panel from the bottom; its top edge stays put."""
 
     def __init__(self, panel):
         super().__init__()

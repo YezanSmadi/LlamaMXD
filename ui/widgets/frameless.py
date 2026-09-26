@@ -1,15 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""The borderless window's own chrome. A frameless window has no OS title bar
-or border, so this module supplies what the OS would have: `ResizeGrips`
-(eight invisible strips hugging the outline that hand the drag to the OS with
-`startSystemResize` — the native resize, snapping and cursors included, not a
-hand-rolled one) and `WindowControls` (close / maximise / minimise, drawn from
-the assets the app ships).
-
-The grips are real pixels on purpose: they stand in for OS window chrome, which
-doesn't scale with the app. The controls are part of the app's own sidebar, so
-they scale with it."""
+"""The borderless window's chrome: `ResizeGrips` (eight invisible strips that start the OS's
+native resize) and `WindowControls` (close / maximise / minimise). The grips are real pixels,
+like OS chrome; the controls belong to the sidebar and scale with it."""
 import os
 import re
 
@@ -28,11 +21,8 @@ _renderers = {}
 
 
 def _tinted_svg(name, color):
-    """A cached `QSvgRenderer` for `assets/<name>` with every painted fill
-    swapped for `color` (a hex string). The three window icons ship in three
-    different colours (black, near-black, navy), so the recolour has to reach
-    whatever each one uses; a string swap keeps them vector, hence perfectly
-    smooth at any scale, which a rendered-then-tinted bitmap wouldn't be."""
+    """A cached `QSvgRenderer` for `assets/<name>` with every painted fill set to `color` (the
+    three icons ship in different colours). Stays vector, smooth at any scale."""
     key = (name, color)
     if key not in _renderers:
         with open(os.path.join(_ASSETS, name), "r", encoding="utf-8") as fh:
@@ -42,17 +32,9 @@ def _tinted_svg(name, color):
 
 
 class WindowControls(QWidget):
-    """Close, maximise and minimise, in that order, as the bare icons — no
-    button shapes behind them. They take the sidebar's readable-on-primary
-    colour (black or white, whichever contrasts with the theme's primary) and
-    each lights up under the pointer — Close in STOP_RED, Maximise and
-    Minimise in the theme's secondary colour (the icon itself is recoloured;
-    nothing is drawn behind it).
-
-    A child of the sidebar, placed by absolute geometry in the strip above the
-    title (the sidebar's top margin), so it takes no part in the sidebar's
-    layout and cannot move the title. Shown only in Borderless mode — every
-    other mode has the OS's own buttons."""
+    """Close, maximise and minimise as bare icons in the sidebar's text colour; the icon under
+    the pointer turns STOP_RED (close) or secondary. Placed by geometry in the strip above the
+    sidebar title, so it can't move the layout. Borderless mode only."""
 
     closeRequested = Signal()
     maximizeRequested = Signal()
@@ -62,9 +44,7 @@ class WindowControls(QWidget):
     LEFT = 6         # reference px from the sidebar's left edge
     SLOT_W = 24      # each icon's click area
     HEIGHT = 24      # the sidebar's top margin
-    # Drawn sizes, per icon. The artwork fills different shares of its 24-unit
-    # box — the close X spans 60% of it, the maximise square 83% — so the same
-    # size made Close look small; 20 puts its X at about the square's weight.
+    # Drawn sizes: the close X fills 60% of its box and the square 83%, so Close is drawn larger.
     ICON_SIZES = (20, 16, 16)
 
     def __init__(self, parent):
@@ -80,8 +60,7 @@ class WindowControls(QWidget):
         T.theme.changed.connect(self.update)
 
     def set_maximize_enabled(self, enabled):
-        """Maximise does nothing while the window is fullscreen (that is a
-        Settings choice, not something to undo from here), so it is dimmed."""
+        """Maximise is dimmed and inert while fullscreen (a Settings choice)."""
         self._maximize_enabled = bool(enabled)
         self.update()
 
@@ -90,20 +69,14 @@ class WindowControls(QWidget):
         i = int(x // self.SLOT_W)
         return i if 0 <= i < len(self._ICONS) else -1
 
-    # Where each icon's artwork sits inside its 24-unit box — (left, right, top,
-    # bottom) — for the icons made of straight edges; None for the close X, whose
-    # diagonals are anti-aliased whatever is done.
+    # Each icon's ink within its 24-unit box (left, right, top, bottom), for the straight-edged
+    # ones; None for the close X.
     _INK = (None, (2, 22, 2, 22), (2.5, 21.5, 10.5, 13.5))
 
     def _icon_rect(self, i, cx, cy, size):
-        """The icon's rect in real pixels, snapped so a straight-edged icon's
-        strokes land on whole *device* pixels. The maximise square is only 2 of
-        24 units thick (1.33px at the default size) and its position fell on a
-        fractional pixel, so each line straddled two pixels at ~67% coverage
-        — visibly lighter than the same icon at 1.1x and up, where a solid
-        pixel row happens to fit inside it. The size moves by under a pixel to
-        make the ink's width whole; the ink's leading edges are then rounded
-        onto the grid."""
+        """The icon's rect in real pixels, snapped so a straight-edged icon's strokes land on
+        whole device pixels: the maximise square's 1.33px lines straddled two pixels and looked
+        faint at the default size."""
         ink = self._INK[i]
         if ink is None:
             return QRectF(cx - size / 2, cy - size / 2, size, size)

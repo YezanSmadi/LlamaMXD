@@ -1,20 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Named codec/quality recipes, persisted to `presets.json` at the repo root.
-
-A preset is a **recipe, not a job**: it captures the container and every
-codec/quality choice, and deliberately captures *nothing* that belongs to a
-particular file. Trim, input/output paths, and (on Muxing) track selection
-are per-job and reset every time, so loading "YouTube 1080p" never silently
-re-trims your clip or points it at last week's output path.
-
-Presets are scoped per source tab -- an Encoding preset can't be loaded into
-Muxing, since the two tabs no longer share a settings shape at all.
-
-`presets.json` is gitignored, same as `settings.json`: local preferences,
-not shared repo state. Every read is best-effort; a missing or corrupt file
-yields an empty set rather than raising.
-"""
+"""Named codec/quality recipes per tab, in the gitignored `presets.json`. A preset is a recipe,
+not a job: the container and codec/quality choices, never the trim, paths or track picks, so
+loading one can't re-trim a clip or repoint its output. Reads are best-effort."""
 
 import json
 import os
@@ -24,13 +12,10 @@ from core import llamalog
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PRESETS_PATH = os.path.join(_REPO_ROOT, "presets.json")
 
-# The menu entry that means "no preset applied". Kept out of the saved data;
-# the dropdown just prepends it.
+# The menu entry meaning "no preset applied" (never saved).
 NONE_LABEL = "— none —"
 
-# Exactly which settings keys each tab's presets carry. Everything absent
-# from these lists (input_file, output_path, start_secs, duration_secs, and
-# Muxing's per-file track picks) is job state, not recipe state.
+# The settings keys each tab's presets carry; anything else is job state.
 PRESET_KEYS = {
     "Encoding": [
         "output_format", "av_sync",
@@ -41,13 +26,7 @@ PRESET_KEYS = {
         "output_format", "av_sync", "strip_video", "strip_audio",
     ],
 }
-# `audio_streams` (Encoding's multi-stream track picks + per-stream codec
-# settings) is deliberately excluded, same precedent as Muxing's
-# video_tracks/audio_tracks: which of a *particular file's* streams to
-# include, and how many it even has, is job state, not a recipe -- a preset
-# loaded onto a different file shouldn't try to reproduce track indices that
-# may not even exist on it. A preset load leaves whatever the current file's
-# own probe already set up alone.
+# No `audio_streams`: which of a particular file's streams to include is job state.
 
 
 def _read_all():
@@ -64,8 +43,7 @@ def _read_all():
 
 
 def _write_all(data):
-    """Persists the whole store. Best-effort — a failed write must never take
-    the app down mid-interaction."""
+    """Persist the whole store, best-effort."""
     try:
         with open(_PRESETS_PATH, "w") as f:
             json.dump(data, f, indent=2)
@@ -89,9 +67,7 @@ def get(tab, name):
 
 
 def extract(tab, settings):
-    """Strips a full settings dict down to just the recipe keys for `tab`.
-    Keys the tab doesn't currently expose are skipped, so this stays valid
-    as controls come and go."""
+    """A settings dict cut down to `tab`'s recipe keys (keys it lacks are skipped)."""
     keys = PRESET_KEYS.get(tab, [])
     return {key: settings[key] for key in keys if key in settings}
 
