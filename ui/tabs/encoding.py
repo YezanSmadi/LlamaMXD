@@ -279,8 +279,15 @@ class EncodingTab(MediaTab):
     def _on_hdr_toggle(self, *_):
         self._sync_controls()
         self._apply_preview_frames()
-        if self.hdr_switch.isChecked() and self.app.media.hdr_frames_path != self._preview_path:
+        self._follow_hdr_switch()
+
+    def _follow_hdr_switch(self):
+        """On: the whole tone-mapped set, the frame on screen first. Off: back to the background
+        pace (the view and the next two)."""
+        if self.hdr_switch.isChecked():
             self.app.media.start_hdr_render(self._preview_path)
+        else:
+            self.app.media.hdr_idle()
 
     def reset_hdr_preview(self):
         """A new file is coming: the old raw frames go, and HDR→SDR goes back off without
@@ -296,24 +303,23 @@ class EncodingTab(MediaTab):
         self._preview_path = self.app.media.current_file_path
         self._raw_frames = frames
         self._apply_preview_frames()
-        if self.hdr_switch.isChecked() and self.app.media.hdr_frames_path != self._preview_path:
+        if self.hdr_switch.isChecked():
             self.app.media.start_hdr_render(self._preview_path)
 
-    def on_hdr_frames_ready(self, path, _frames):
-        """The render finished. Only re-applied with the switch on: re-applying resets the
-        carousel under the user."""
+    def on_hdr_frames_ready(self, path, _index):
+        """A tone-mapped frame landed. Shown at once with the switch on; off, it waits (swapping
+        frames would disturb the carousel for nothing)."""
         if path == self._preview_path and self.hdr_switch.isChecked():
             self._apply_preview_frames()
 
     def _apply_preview_frames(self):
-        """The tone-mapped set when on, ready and for this file, else the raw set; the scrub
-        position carries over."""
-        show_hdr = (
-            self.hdr_switch.isChecked()
-            and self.app.media.hdr_frames is not None
-            and self.app.media.hdr_frames_path == self._preview_path
-        )
-        frames = self.app.media.hdr_frames if show_hdr else self._raw_frames
+        """With the switch on, each frame's tone-mapped version where it's rendered (the raw one
+        until then), else the raw set; the scrub position carries over."""
+        frames = self._raw_frames
+        hdr = self.app.media.hdr_frames
+        if (self.hdr_switch.isChecked() and hdr and self.app.media.hdr_frames_path == self._preview_path
+                and len(hdr) == len(frames)):
+            frames = [tone_mapped or raw for tone_mapped, raw in zip(hdr, frames)]
         if not frames:
             return
         index = self.carousel.current_index()
@@ -852,8 +858,7 @@ class EncodingTab(MediaTab):
             self._ready = was_ready
         self._sync_controls()
         self._apply_preview_frames()
-        if self.hdr_switch.isChecked() and self.app.media.hdr_frames_path != self._preview_path:
-            self.app.media.start_hdr_render(self._preview_path)
+        self._follow_hdr_switch()
 
     def _validate_specific(self, settings):
         info = self.app.media.info

@@ -7,7 +7,8 @@
    "index": 0,
    "populated": true,
    "selected": "Selected File:  <fixtures>\\sdr.mp4",
-   "shown": "ThumbnailCarousel"
+   "shown": "ThumbnailCarousel",
+   "tone_mapped_shown": 0
   },
   "Muxing": {
    "audio_only": false,
@@ -22,7 +23,7 @@
   "file": "sdr.mp4",
   "frames": 10,
   "frames_path": "sdr.mp4",
-  "hdr_frames": 0,
+  "hdr_frames": [],
   "hdr_frames_path": null,
   "hdr_rendering": null,
   "info": {
@@ -47,7 +48,8 @@
    "index": 3,
    "populated": true,
    "selected": "Selected File:  <fixtures>\\sdr.mp4",
-   "shown": "ThumbnailCarousel"
+   "shown": "ThumbnailCarousel",
+   "tone_mapped_shown": 0
   },
   "Muxing": {
    "audio_only": false,
@@ -62,7 +64,7 @@
   "file": "sdr.mp4",
   "frames": 10,
   "frames_path": "sdr.mp4",
-  "hdr_frames": 0,
+  "hdr_frames": [],
   "hdr_frames_path": null,
   "hdr_rendering": null,
   "info": {
@@ -85,7 +87,8 @@
    "index": 3,
    "populated": true,
    "selected": "Selected File:  <fixtures>\\sdr.mp4",
-   "shown": "ThumbnailCarousel"
+   "shown": "ThumbnailCarousel",
+   "tone_mapped_shown": 0
   },
   "Muxing": {
    "audio_only": false,
@@ -100,7 +103,7 @@
   "file": "sdr.mp4",
   "frames": 10,
   "frames_path": "sdr.mp4",
-  "hdr_frames": 0,
+  "hdr_frames": [],
   "hdr_frames_path": null,
   "hdr_rendering": null,
   "info": {
@@ -123,7 +126,8 @@
    "index": 0,
    "populated": true,
    "selected": "Selected File:  <fixtures>\\hdr.mkv",
-   "shown": "ThumbnailCarousel"
+   "shown": "ThumbnailCarousel",
+   "tone_mapped_shown": 0
   },
   "Muxing": {
    "audio_only": false,
@@ -138,7 +142,11 @@
   "file": "hdr.mkv",
   "frames": 10,
   "frames_path": "hdr.mkv",
-  "hdr_frames": 10,
+  "hdr_frames": [
+   0,
+   1,
+   2
+  ],
   "hdr_frames_path": "hdr.mkv",
   "hdr_rendering": null,
   "info": {
@@ -153,7 +161,153 @@
   "probes": [
    "hdr.mkv"
   ],
-  "step": "load hdr.mkv (tone-mapped set renders on its own)"
+  "step": "load hdr.mkv (the view and the next two tone-map in the background, then it stops)"
+ },
+ {
+  "Encoding": {
+   "audio_only": false,
+   "drop_text": "Drag & Drop File Here",
+   "frames": 10,
+   "index": 6,
+   "populated": true,
+   "selected": "Selected File:  <fixtures>\\hdr.mkv",
+   "shown": "ThumbnailCarousel",
+   "tone_mapped_shown": 0
+  },
+  "Muxing": {
+   "audio_only": false,
+   "drop_text": "Drag & Drop File Here",
+   "frames": 10,
+   "index": 6,
+   "populated": true,
+   "selected": "Selected File:  <fixtures>\\hdr.mkv",
+   "shown": "ThumbnailCarousel"
+  },
+  "dialogs": [],
+  "file": "hdr.mkv",
+  "frames": 10,
+  "frames_path": "hdr.mkv",
+  "hdr_frames": [
+   0,
+   1,
+   2,
+   6,
+   7,
+   8
+  ],
+  "hdr_frames_path": "hdr.mkv",
+  "hdr_rendering": null,
+  "info": {
+   "audio": null,
+   "container": ".mkv",
+   "has_audio": false,
+   "has_video": true,
+   "hdr": true,
+   "video": "H.265"
+  },
+  "info_path": "hdr.mkv",
+  "probes": [],
+  "step": "scrub to frame 6 (6-8 tone-map too)"
+ },
+ {
+  "Encoding": {
+   "audio_only": false,
+   "drop_text": "Drag & Drop File Here",
+   "frames": 10,
+   "index": 6,
+   "populated": true,
+   "selected": "Selected File:  <fixtures>\\hdr.mkv",
+   "shown": "ThumbnailCarousel",
+   "tone_mapped_shown": 10
+  },
+  "Muxing": {
+   "audio_only": false,
+   "drop_text": "Drag & Drop File Here",
+   "frames": 10,
+   "index": 6,
+   "populated": true,
+   "selected": "Selected File:  <fixtures>\\hdr.mkv",
+   "shown": "ThumbnailCarousel"
+  },
+  "dialogs": [],
+  "file": "hdr.mkv",
+  "frames": 10,
+  "frames_path": "hdr.mkv",
+  "hdr_frames": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9
+  ],
+  "hdr_frames_path": "hdr.mkv",
+  "hdr_rendering": null,
+  "info": {
+   "audio": null,
+   "container": ".mkv",
+   "has_audio": false,
+   "has_video": true,
+   "hdr": true,
+   "video": "H.265"
+  },
+  "info_path": "hdr.mkv",
+  "probes": [],
+  "step": "HDR->SDR on (the rest, and the carousel shows them)"
+ },
+ {
+  "Encoding": {
+   "audio_only": false,
+   "drop_text": "Drag & Drop File Here",
+   "frames": 10,
+   "index": 6,
+   "populated": true,
+   "selected": "Selected File:  <fixtures>\\hdr.mkv",
+   "shown": "ThumbnailCarousel",
+   "tone_mapped_shown": 0
+  },
+  "Muxing": {
+   "audio_only": false,
+   "drop_text": "Drag & Drop File Here",
+   "frames": 10,
+   "index": 6,
+   "populated": true,
+   "selected": "Selected File:  <fixtures>\\hdr.mkv",
+   "shown": "ThumbnailCarousel"
+  },
+  "dialogs": [],
+  "file": "hdr.mkv",
+  "frames": 10,
+  "frames_path": "hdr.mkv",
+  "hdr_frames": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9
+  ],
+  "hdr_frames_path": "hdr.mkv",
+  "hdr_rendering": null,
+  "info": {
+   "audio": null,
+   "container": ".mkv",
+   "has_audio": false,
+   "has_video": true,
+   "hdr": true,
+   "video": "H.265"
+  },
+  "info_path": "hdr.mkv",
+  "probes": [],
+  "step": "HDR->SDR off"
  },
  {
   "Encoding": {
@@ -163,7 +317,8 @@
    "index": 0,
    "populated": true,
    "selected": "Selected File:  <fixtures>\\sdr.mp4",
-   "shown": "ThumbnailCarousel"
+   "shown": "ThumbnailCarousel",
+   "tone_mapped_shown": 0
   },
   "Muxing": {
    "audio_only": false,
@@ -178,7 +333,7 @@
   "file": "sdr.mp4",
   "frames": 10,
   "frames_path": "sdr.mp4",
-  "hdr_frames": 0,
+  "hdr_frames": [],
   "hdr_frames_path": null,
   "hdr_rendering": null,
   "info": {
@@ -203,7 +358,8 @@
    "index": 0,
    "populated": true,
    "selected": "Selected File:  <fixtures>\\sdr.mp4",
-   "shown": "ThumbnailCarousel"
+   "shown": "ThumbnailCarousel",
+   "tone_mapped_shown": 0
   },
   "Muxing": {
    "audio_only": false,
@@ -218,7 +374,7 @@
   "file": "sdr.mp4",
   "frames": 10,
   "frames_path": "sdr.mp4",
-  "hdr_frames": 0,
+  "hdr_frames": [],
   "hdr_frames_path": null,
   "hdr_rendering": null,
   "info": {
@@ -244,7 +400,8 @@
    "index": 0,
    "populated": true,
    "selected": "Selected File:  <fixtures>\\audio.m4a",
-   "shown": "ThumbnailCarousel"
+   "shown": "ThumbnailCarousel",
+   "tone_mapped_shown": 0
   },
   "Muxing": {
    "audio_only": true,
@@ -259,7 +416,7 @@
   "file": "audio.m4a",
   "frames": 0,
   "frames_path": null,
-  "hdr_frames": 0,
+  "hdr_frames": [],
   "hdr_frames_path": null,
   "hdr_rendering": null,
   "info": {
@@ -284,7 +441,8 @@
    "index": 0,
    "populated": false,
    "selected": "",
-   "shown": "DropBox"
+   "shown": "DropBox",
+   "tone_mapped_shown": 0
   },
   "Muxing": {
    "audio_only": false,
@@ -301,7 +459,7 @@
   "file": "",
   "frames": 0,
   "frames_path": null,
-  "hdr_frames": 0,
+  "hdr_frames": [],
   "hdr_frames_path": null,
   "hdr_rendering": null,
   "info": {
@@ -326,7 +484,8 @@
    "index": 0,
    "populated": false,
    "selected": "Selected File:  <fixtures>\\late.mkv",
-   "shown": "DropBox"
+   "shown": "DropBox",
+   "tone_mapped_shown": 0
   },
   "Muxing": {
    "audio_only": false,
@@ -343,7 +502,7 @@
   "file": "late.mkv",
   "frames": 0,
   "frames_path": null,
-  "hdr_frames": 0,
+  "hdr_frames": [],
   "hdr_frames_path": null,
   "hdr_rendering": null,
   "info": {
@@ -368,7 +527,8 @@
    "index": 0,
    "populated": true,
    "selected": "Selected File:  <fixtures>\\multi.mkv",
-   "shown": "ThumbnailCarousel"
+   "shown": "ThumbnailCarousel",
+   "tone_mapped_shown": 0
   },
   "Muxing": {
    "audio_only": false,
@@ -383,7 +543,7 @@
   "file": "multi.mkv",
   "frames": 10,
   "frames_path": "multi.mkv",
-  "hdr_frames": 0,
+  "hdr_frames": [],
   "hdr_frames_path": null,
   "hdr_rendering": null,
   "info": {

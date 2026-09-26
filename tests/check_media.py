@@ -55,6 +55,23 @@ def rel(path):
     return os.path.basename(path) if path else path
 
 
+def hdr_done():
+    """Which tone-mapped frames are rendered (a list with None for the rest, per frame)."""
+    return [i for i, f in enumerate(pipe("hdr_frames") or []) if f is not None]
+
+
+def hdr_rendering():
+    render = media._hdr if media else None
+    return render["path"] if render and (render["queue"] or render["busy"]) else None
+
+
+def switch(on):
+    """Encoding's HDR->SDR switch, as a click leaves it."""
+    enc = window.tabs["Encoding"]
+    enc.hdr_switch.setChecked(on)
+    enc._on_hdr_toggle()
+
+
 def state():
     info = pipe("media_info")
     out = {
@@ -62,8 +79,8 @@ def state():
         "info_path": rel(pipe("_media_info_path")),
         "info": {k: info.get(k) for k in ("container", "video", "audio", "hdr", "has_video", "has_audio")},
         "frames": len(pipe("thumb_frames") or []), "frames_path": rel(pipe("thumb_frames_path")),
-        "hdr_frames": len(pipe("hdr_frames") or []), "hdr_frames_path": rel(pipe("hdr_frames_path")),
-        "hdr_rendering": rel(pipe("_hdr_inflight_path")),
+        "hdr_frames": hdr_done(), "hdr_frames_path": rel(pipe("hdr_frames_path")),
+        "hdr_rendering": rel(hdr_rendering()),
         "dialogs": list(dialogs), "probes": list(probes),
     }
     for tab in tabs():
@@ -73,6 +90,9 @@ def state():
                         "populated": c._populated, "drop_text": tab.drop_box.prompt.text(),
                         "selected": tab.file_label.text().replace(os.path.dirname(fixture("sdr.mp4")), "<fixtures>")
                         .replace(WORK, "<work>")}
+    hdr = pipe("hdr_frames") or []
+    out["Encoding"]["tone_mapped_shown"] = sum(
+        1 for i, f in enumerate(window.tabs["Encoding"].carousel._frames or []) if i < len(hdr) and f is hdr[i])
     del dialogs[:]
     del probes[:]
     return out
@@ -90,15 +110,21 @@ def run():
     step("load sdr.mp4", lambda: (select(sdr), wait(lambda: pipe("thumb_frames_path") == sdr)))
     step("scrub to frame 3", lambda: (tabs()[1].carousel.indexChanged.emit(3), settle(0.2)))
     step("re-select sdr.mp4 (cache hit, no probe)", lambda: (select(sdr), settle(0.5)))
-    step("load hdr.mkv (tone-mapped set renders on its own)",
-         lambda: (select(hdr), wait(lambda: pipe("hdr_frames_path") == hdr, 120)))
+    step("load hdr.mkv (the view and the next two tone-map in the background, then it stops)",
+         lambda: (select(hdr), wait(lambda: len(hdr_done()) >= 3, 120), settle(3)))
+    step("scrub to frame 6 (6-8 tone-map too)",
+         lambda: (tabs()[1].carousel.indexChanged.emit(6), wait(lambda: {6, 7, 8} <= set(hdr_done()), 60), settle(2)))
+    step("HDR->SDR on (the rest, and the carousel shows them)",
+         lambda: (switch(True), wait(lambda: len(hdr_done()) == 10, 120), settle(0.5)))
+    step("HDR->SDR off", lambda: (switch(False), settle(0.3)))
     step("back to sdr.mp4 (the HDR set is dropped)", lambda: (select(sdr), settle(0.5)))
 
     def cancel_midway():
         select(hdr)
-        wait(lambda: pipe("_hdr_inflight_path") == hdr, 30)
+        switch(True)
+        wait(lambda: 1 <= len(hdr_done()) < 10, 60)
         select(sdr)
-        settle(4)             # long enough for the cancelled render to land and be dropped
+        settle(4)             # long enough for frames already rendering to land and be dropped
     step("hdr.mkv, then sdr.mp4 before its render finishes (cancelled)", cancel_midway)
     step("load audio.m4a (Wave Loop, no frames)",
          lambda: (select(audio), wait(lambda: pipe("_media_info_path") == audio), settle(0.5)))

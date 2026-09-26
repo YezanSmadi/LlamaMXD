@@ -4,14 +4,13 @@
 the tone-mapped HDR set and the shared scrub position, broadcast to the media tabs (Muxing,
 Encoding). `select_file` is the only place the selected file changes."""
 import os
-import threading
 import time
 
 from PySide6.QtGui import QGuiApplication
 
 from core import formats, llamalog
 from core.capabilities import libplacebo_checked, libplacebo_problem
-from core.previews import extract_hdr_tonemapped_thumbnails, extract_preview_frames
+from core.previews import extract_preview_frames, hdr_seeks, hdr_tonemap_filter, hdr_tonemap_frame, preview_workers
 from core.probe import probe_media
 from ui.widgets.dialogs import show_message
 from ui.workers import emit_progress, pil_to_qimage, run_async
@@ -72,14 +71,11 @@ class MediaSession:
         self.info = _empty_media_info()
         self.info_path = None             # the file `info` was probed from
         self._preview_index = 0
-        # HDR→SDR tone-mapped preview frames, cached for one file.
+        # HDR→SDR tone-mapped preview frames for one file: a list with None for frames not rendered yet.
         self.hdr_frames = None
         self.hdr_frames_path = None
-        self._hdr_inflight_path = None
+        self._hdr = None                  # the render in progress: see _hdr_begin
         self._hdr_token = 0
-        self._hdr_t0 = time.monotonic()
-        self._hdr_cancel_event = None
-        self._hdr_cancelled_token = 0     # the render a file change interrupted: its late, empty result is dropped
 
     def register_tab(self, tab):
         self.tabs.append(tab)
@@ -251,69 +247,132 @@ class MediaSession:
             tab.carousel.sync_index(self._preview_index)
 
     def sync_preview_index(self, index):
-        """A carousel was scrubbed — mirror it onto the other tab's."""
+        """A carousel was scrubbed — mirror it onto the other tab's, and have the tone-mapped
+        frames there ready too (an HDR file)."""
         if index == self._preview_index:
             return
         self._preview_index = index
         for tab in self.tabs:
             tab.carousel.sync_index(index)
+        if self._hdr is not None:
+            self._hdr_want(_around(index))
 
     # ------------------------------------------------------------------ #
     #  HDR→SDR preview renders
     # ------------------------------------------------------------------ #
+    # One ffmpeg per tone-mapped frame, and a frame not ready takes ~1s to appear. So an HDR file's
+    # frame on screen (and the next two) is rendered in the background one at a time, and the rest
+    # only once HDR->SDR is on — the view first, several at once: the switch shows a tone-mapped
+    # frame at once, without the whole set's CPU / GPU burst on every import.
+
     def _prerender_hdr(self, path):
-        """Start an HDR file's tone-mapped previews once its raw ones are up, in the background,
-        so HDR->SDR is instant when switched on. A switch pressed earlier waits for this run."""
+        """An HDR file's raw previews are up: tone-map the frame on screen and the next two."""
         if path == self.current_file_path and path == self.info_path and self.info.get("hdr") is True:
-            self.start_hdr_render(path)
+            self._hdr_begin(path)
+            self._hdr_want(_around(self._preview_index))
 
     def start_hdr_render(self, path):
-        """One tone-mapped render per file; a no-op when cached or already running for it."""
-        if not path or path == self.hdr_frames_path or path == self._hdr_inflight_path:
+        """HDR->SDR is on: render every frame not yet done, nearest the one on screen first,
+        `preview_workers()` at a time."""
+        if not path or path != self.current_file_path:
             return
-        self._hdr_inflight_path = path
-        self._hdr_t0 = time.monotonic()
-        llamalog.get("app").info("HDR preview render started for %s", os.path.basename(path))
+        self._hdr_begin(path)
+        self._hdr["workers"] = preview_workers()
+        count = len(self._hdr["seeks"] or self._thumb_seeks) or 10
+        order = sorted(range(count), key=lambda i: (abs(i - self._preview_index), i < self._preview_index))
+        self._hdr_want(order)
+
+    def hdr_idle(self):
+        """HDR->SDR is off: back to one at a time, and only the frames around the view."""
+        if self._hdr is not None:
+            self._hdr["workers"] = 1
+            self._hdr["queue"] = [i for i in self._hdr["queue"] if i in _around(self._preview_index)]
+
+    def _hdr_begin(self, path):
+        """Start the render for `path` (once): its filter and seeks are worked out on a worker."""
+        if self._hdr is not None and self._hdr["path"] == path:
+            return
         self._hdr_token += 1
         token = self._hdr_token
-        cancel_event = threading.Event()
-        self._hdr_cancel_event = cancel_event
+        seeks = list(self._thumb_seeks) if path == self.thumb_frames_path else []
+        self._hdr = {"token": token, "path": path, "vf": None, "seeks": seeks, "queue": [], "busy": set(),
+                     "workers": 1, "t0": time.monotonic()}
+        llamalog.get("app").info("HDR preview render started for %s", os.path.basename(path))
 
-        max_size = _preview_max_size()
-        seeks = self._thumb_seeks if path == self.thumb_frames_path else None
+        def prepare():
+            return hdr_tonemap_filter(path), seeks or hdr_seeks(path)
 
-        def work():
-            frames = extract_hdr_tonemapped_thumbnails(path, count=10, should_cancel=cancel_event.is_set,
-                                                       max_size=max_size, seeks=seeks)
-            return [pil_to_qimage(f) for f in frames]
+        run_async(prepare, lambda result: self._hdr_prepared(token, *(result or (None, []))))
 
-        run_async(work, lambda frames: self._deliver_hdr(token, path, frames or []))
+    def _hdr_prepared(self, token, vf, seeks):
+        render = self._hdr
+        if render is None or render["token"] != token:
+            return
+        if vf is None or not seeks:
+            llamalog.get("app").warning("HDR preview unavailable for %s (libplacebo unavailable, or the frames "
+                                        "couldn't be located)", os.path.basename(render["path"]))
+            self._hdr = None
+            return
+        render["vf"], render["seeks"] = vf, seeks
+        self.hdr_frames = [None] * len(seeks)
+        self.hdr_frames_path = render["path"]
+        self._hdr_pump()
+
+    def _hdr_want(self, indices):
+        """Put `indices` at the front of the queue (in that order), then start what fits."""
+        render = self._hdr
+        if render is None:
+            return
+        wanted = [i for i in indices if i not in render["busy"]]
+        render["queue"] = wanted + [i for i in render["queue"] if i not in wanted]
+        self._hdr_pump()
+
+    def _hdr_pump(self):
+        render = self._hdr
+        if render is None or render["vf"] is None:
+            return
+        frames, max_size = self.hdr_frames, _preview_max_size()
+        while render["queue"] and len(render["busy"]) < render["workers"]:
+            i = render["queue"].pop(0)
+            if i >= len(frames) or frames[i] is not None or i in render["busy"]:
+                continue
+            render["busy"].add(i)
+            path, seek, vf, token = render["path"], render["seeks"][i], render["vf"], render["token"]
+            # Bound now: the loop moves on before the worker runs.
+            run_async(lambda path=path, seek=seek, vf=vf, i=i:
+                      _qimage_or_none(hdr_tonemap_frame(path, seek, vf, max_size, label=str(i))),
+                      lambda image, i=i: self._hdr_frame_done(token, i, image))
+
+    def _hdr_frame_done(self, token, i, image):
+        render = self._hdr
+        if render is None or render["token"] != token:
+            return   # the file changed meanwhile
+        render["busy"].discard(i)
+        if image is not None:
+            self.hdr_frames[i] = image
+            for tab in self.tabs:
+                ready = getattr(tab, "on_hdr_frames_ready", None)
+                if callable(ready):
+                    ready(render["path"], i)
+            if all(frame is not None for frame in self.hdr_frames):
+                llamalog.get("app").info("HDR preview ready for %s: %d frames in %.1fs", os.path.basename(render["path"]),
+                                         len(self.hdr_frames), time.monotonic() - render["t0"])
+        self._hdr_pump()
 
     def _cancel_hdr_render(self):
-        """Interrupt an HDR preview render still in flight (its file is no longer shown)."""
-        if self._hdr_cancel_event is not None:
-            self._hdr_cancel_event.set()
-        if self._hdr_inflight_path:
-            llamalog.get("app").info("HDR preview render cancelled (%s)", os.path.basename(self._hdr_inflight_path))
-            self._hdr_cancelled_token = self._hdr_token
-        self._hdr_inflight_path = None
+        """Stop an HDR preview render (its file is no longer shown); a frame already rendering
+        finishes and is dropped."""
+        render = self._hdr
+        if render is not None and (render["queue"] or render["busy"]):
+            llamalog.get("app").info("HDR preview render cancelled (%s)", os.path.basename(render["path"]))
+        self._hdr = None
 
-    def _deliver_hdr(self, token, path, frames):
-        if path == self._hdr_inflight_path:
-            self._hdr_inflight_path = None
-        if token != self._hdr_token or token == self._hdr_cancelled_token:
-            # Superseded or interrupted: not a failure, and it must not replace the cached frames.
-            return
-        took = time.monotonic() - self._hdr_t0
-        if frames:
-            llamalog.get("app").info("HDR preview ready for %s: %d frames in %.1fs",
-                                     os.path.basename(path), len(frames), took)
-        else:
-            llamalog.get("app").warning("HDR preview render for %s produced no frames (%.1fs; cancelled, "
-                                        "libplacebo unavailable, or a decode failure)", os.path.basename(path), took)
-        self.hdr_frames = frames or None
-        self.hdr_frames_path = path if frames else None
-        for tab in self.tabs:
-            ready = getattr(tab, "on_hdr_frames_ready", None)
-            if callable(ready):
-                ready(path, self.hdr_frames)
+
+def _around(index, count=3):
+    """The frame at `index` and the next `count - 1` (a queue skips any past the last)."""
+    return list(range(index, index + count))
+
+
+def _qimage_or_none(image):
+    """A PIL image as a QImage for the GUI thread, or None."""
+    return pil_to_qimage(image) if image is not None else None

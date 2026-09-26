@@ -118,11 +118,13 @@ own settings.json / presets.json, and fixture clips are generated there by the b
 
 - `check_leaks` — each user action repeated after a warm-up (importing video and audio, dialogs,
   toasts, queue rows and their details, theme / tab switches, expanding the preview, a dropdown's
-  popup, a Downloader fetch): live QObjects, widgets, top-level windows, threads, theme-signal
+  popup, a Downloader fetch, an HDR import with HDR->SDR on, a real Mux job through the queue): live QObjects, widgets, top-level windows, threads, theme-signal
   connections and scale bindings must not grow. Deferred deletes are flushed and dead bindings swept
   first (the harness pumps events outside a real event loop, where deleteLater never runs). Memory
   isn't compared; measured by hand it plateaus (imports: +39MB at 20 rounds, +40MB at 60 — the
-  spinner's frames filling in; resizes +5.5MB either way).
+  spinner's frames filling in; resizes +5.5MB either way; 25 HDR round-trips 152 -> ~195MB by round 10, then
+  flat; 25 real jobs flat at 202MB). The job action waits out the batch's "All queued jobs finished." toast,
+  which is otherwise alive at the count (a constant +4 objects, the same at 6 and 18 rounds). ~110s.
 
 UI checks end through `harness.finish()` (`TerminateProcess` once their results are printed): Qt's
 native teardown crashes at exit now and then (3 of 10 runs on one check, before and after any
@@ -130,8 +132,9 @@ change here), and even `os._exit` runs the DLLs' unload code where it happens.
 - `check_ui` — the real `MainWindow` offscreen: every visible widget's rect on 13 pages (plus the
   no-file state) at 1.0 / 1.5 / 2.0x, the squeeze scan, and the Muxing / Encoding preview invariant.
 - `check_media` — the selected-file pipeline (`MediaSession`): load, a cache-hit reselect (no
-  second probe), the HDR pre-render landing and being dropped / cancelled on a file change, the
-  Wave Loop for audio, an unreadable file rejected, "No Preview", and the shared scrub index.
+  second probe), the HDR preview (an import tone-maps frames 0-2 and stops, scrubbing to 6 adds 6-8, the
+  switch completes the set and the carousel shows it, off shows the raw set, a file change drops or
+  cancels it), the Wave Loop for audio, an unreadable file rejected, "No Preview", and the scrub index.
 - `check_runners` — the runners' lifecycle offline: a real `YtDlpJob` (its job object included)
   runs `tests/fake_ytdlp.py`, a stand-in speaking yt-dlp's marker lines — a merge, pause / resume,
   priority, Stop killing the tree (a child process too) and removing the work folder, a failure,
@@ -687,32 +690,26 @@ The Wave Loop still comes from the probe, not from the frame delivery. **Never h
 OpenCV: its `cap.read()` never returns there** (m4a, mp3 and flac all hung, 5/5 runs), which stranded
 a worker thread per audio import until previews checked `previewable` first.
 
-**HDR→SDR preview renders** (`start_hdr_render`, `_deliver_hdr`): one
-tone-mapped render per file (`extract_hdr_tonemapped_thumbnails`), cached on
-`app.media` and token-guarded; a no-op when already cached or already running for
-that path. Delivered to any tab with `on_hdr_frames_ready` (which only re-applies the
-frames when the HDR→SDR switch is on — the render now lands while the raw previews are
-being scrubbed, and re-applying them would reset the carousel).
-
-**The render starts on import, not on the switch.** `_prerender_hdr(path)` runs right after
-the raw previews are broadcast (`_deliver_thumbnails`, and the cached-frames branch of
-`_load_thumbnails`) and starts `start_hdr_render` when the probe says `hdr` is `True` — so
-only an HDR file pays for it, the raw previews are never delayed, and the switch is
-instant once the set is ready (0.4ms measured). A switch pressed earlier just waits for the
-rest of the render already in flight. It runs **alongside a running queue job** by design
-(the user can multitask); it is not held while one is active. Measured on a real 4K HDR10
-file (Beauty and the Beast HDR, 210s): raw previews 4.5s, then the tone-mapped set 8-10s
-after them (it was 14.6s, sequential, before). **A render in
-flight is interrupted the instant the file changes**, not left to finish for
-a file nobody's looking at any more: `select_file` calls
-`_cancel_hdr_render` (a `threading.Event` passed into
-`extract_hdr_tonemapped_thumbnails` as `should_cancel`, checked between
-per-frame ffmpeg calls) and every media tab's `reset_hdr_preview` (turns its
-HDR→SDR switch back off without the raw/tone-mapped frame swap flashing,
-since the carousel's about to be cleared for the new file anyway) — the
-outgoing file's render never silently finishes into a cache entry nobody
-asked for any more, and the new file never inherits a switch state or a
-preview that was never actually about it.
+**HDR→SDR preview renders are frame by frame, and mostly wait for the switch** (`MediaSession`,
+"HDR→SDR preview renders"). One tone-mapped frame is one ffmpeg + libplacebo run (`previews.hdr_tonemap_frame`,
+~0.7-1.3s a 4K frame, most of it Vulkan / libplacebo start-up), so a frame that isn't ready when the switch
+flips is a visible wait, and rendering all ten on every HDR import was a burst (~23-26s of CPU plus GPU per
+import, three at a time). So:
+- **An HDR import tone-maps only the frame on screen and the next two**, one at a time, in the background
+  (`_prerender_hdr`, `_around`), after the raw previews; **scrubbing** adds the new frame and the next two
+  (`sync_preview_index`). With the switch off nothing else renders (`hdr_idle`).
+- **The switch** (`start_hdr_render`) renders every frame not yet done, nearest the one on screen first,
+  `preview_workers()` at a time; each lands in `hdr_frames` (a list, None for frames not rendered) and is
+  handed to the tabs at once (`on_hdr_frames_ready(path, index)`), so the carousel swaps it in while the rest
+  render. `_hdr_begin` works out the filter (`hdr_tonemap_filter`: libplacebo check + static metadata) and
+  the seeks (the raw set's, else `hdr_seeks`) on a worker, once per file; `_hdr_pump` keeps the queue moving.
+- Measured on real 4K HDR files: the frame on screen is tone-mapped **the instant the switch flips** (at frame
+  0 after an import, and at frame 6 after scrubbing there), the whole set follows in 4-7s; an import's CPU
+  (raw previews + HDR render) went from 25.5s to 8.4s (HEVC) and 23.0s to 7.2s (AV1). Only a switch flipped
+  straight after an import, before its first frame is done, waits (1.8-2.5s).
+- It runs **alongside a running queue job** by design (the user can multitask), at below-normal priority.
+  **A file change cancels it** (`_cancel_hdr_render` drops the render; a frame already rendering finishes and
+  is discarded by its token), and every media tab's `reset_hdr_preview` turns the switch back off.
 
 **Downloader fetches** (`fetch_ytdlp_info`): `downloader.fetch_info` +
 `download_thumbnail` on a worker, token-guarded so a superseded fetch is
@@ -1783,11 +1780,10 @@ makes the stream a copy, so Bitrate / Channels / Sample Rate mirror the
 source's real values as display overrides (`_apply_passthru_values`) and
 disable.
 
-**HDR→SDR preview** (Encoding only): `on_thumbnails` records the raw frames and
-`_apply_preview_frames` shows the app's tone-mapped set instead whenever the
-switch is on and a render for this file is cached — keeping the scrub index
-across the swap. Turning it on for an unrendered file starts
-`app.media.start_hdr_render`.
+**HDR→SDR preview** (Encoding only): `on_thumbnails` records the raw frames and, with the switch on,
+`_apply_preview_frames` shows each frame's tone-mapped version where it's rendered and the raw one until
+then, keeping the scrub index; `on_hdr_frames_ready` re-applies as frames land. The switch drives the
+render (`_follow_hdr_switch`: `start_hdr_render` on, `hdr_idle` off).
 
 #### `_sync_controls` — the single constraint pass
 
@@ -3037,13 +3033,11 @@ picks the toast. **Only one ffmpeg runs at a time.**
 
     **Encoding's preview carousel actually shows this tonemapped set once
     HDR→SDR is on**, not just the raw HDR frames with a switch flipped
-    elsewhere. The render and its cache (`start_hdr_render`,
-    `hdr_frames`/`hdr_frames_path`, token-guarded like the thumbnails) live
-    on `MediaSession` (`app.media`), one render per file. `EncodingTab._apply_preview_frames`
-    picks the cached tone-mapped set over the raw one whenever the switch is
-    on, it's ready, and it matches the currently-shown file; flipping the
-    switch off (or switching files) swaps back to the raw set instantly
-    without waiting on a fresh render. This preview path is Encoding-only —
+    elsewhere. The render and its frames (`hdr_frames`/`hdr_frames_path`) live on
+    `MediaSession` (`app.media`), frame by frame (see "HDR→SDR preview renders are frame by
+    frame"). `EncodingTab._apply_preview_frames` shows each tone-mapped frame that's rendered
+    while the switch is on; flipping it off (or switching files) swaps back to the raw set
+    instantly. This preview path is Encoding-only —
     Muxing has no HDR control at all.
 
     **Being *listed* as compiled in is not enough to trust libplacebo,

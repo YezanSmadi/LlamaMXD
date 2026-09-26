@@ -225,62 +225,81 @@ def _decoder_threads():
     return max(1, min(4, os.cpu_count() or 1))
 
 
-def extract_hdr_tonemapped_thumbnails(video_path, count=10, should_cancel=None, max_size=None, seeks=None):
-    """Like `extract_preview_frames`, but each frame goes through the encode's own libplacebo
-    tone-map (a plain decode of an HDR source is a washed-out picture of the raw data). One short
-    ffmpeg per frame, several in parallel, repeating the raw set's `seeks` so the two align.
-
-    Returns [] on any failure or when `should_cancel()` turns true (never a partial set, which
-    would fall out of step with the raw one). Callers check `supports_libplacebo()` themselves
-    to tell "no HDR" from "unavailable". Keep off the GUI thread."""
+def hdr_tonemap_filter(video_path):
+    """The encode's own libplacebo tone-map for this file (peak detection follows its static HDR
+    metadata; see `libplacebo_tonemap_vf`), or None when HDR->SDR can't run here. One metadata
+    probe; keep off the GUI thread."""
     if not supports_libplacebo():
-        return []
-    if not seeks:
-        total, fps = _probe_frame_geometry(video_path)
-        if total <= 0 or fps <= 0:
-            return []
-        seeks = [(target / fps, True) for target in _interior_sample_frames(total, count)]
-    fps_flags = ["-fps_mode", "passthrough"] if supports_fps_mode() else ["-vsync", "0"]
-    # One metadata probe for the file; see libplacebo_tonemap_vf for why peak_detect follows it.
+        return None
     static_metadata = _probe_hdr_static_metadata(video_path)
     has_reliable_metadata = (
         static_metadata["mastering_max_nits"] is not None and bool(static_metadata["max_cll"])
     )
-    vf = libplacebo_tonemap_vf(peak_detect=not has_reliable_metadata)
+    return libplacebo_tonemap_vf(peak_detect=not has_reliable_metadata)
 
-    threads = _decoder_threads()
 
-    with tempfile.TemporaryDirectory(prefix="llamamxd_hdr_") as tmp_dir:
-        def render(i):
-            """Frame `i` as a PIL image, or None on a miss or a cancel."""
-            if should_cancel is not None and should_cancel():
-                return None
-            out_path = os.path.join(tmp_dir, f"frame_{i:03d}.png")
-            try:
-                completed = subprocess.run(
-                    [tool_path("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
-                     *VULKAN_DEVICE_FLAGS,
-                     "-threads", str(threads),
-                     # Formatted as _grab_frame does, so a keyframe seek lands on the same frame.
-                     *([] if seeks[i][1] else ["-noaccurate_seek"]), "-ss", f"{seeks[i][0]:.3f}",
-                     "-i", video_path,
-                     "-vf", vf,
-                     *fps_flags, "-frames:v", "1", out_path],
-                    capture_output=True, timeout=_HDR_FRAME_TIMEOUT,
-                    creationflags=NO_WINDOW | _BELOW_NORMAL,
-                )
-                if completed.returncode != 0:
-                    tail = (completed.stderr or b"").decode("utf-8", "replace").strip().splitlines()
-                    llamalog.get("probe").warning("HDR preview frame %d of %s: ffmpeg exited %s: %s", i, video_path,
-                                                  completed.returncode, tail[-1] if tail else "no output")
-                with Image.open(out_path) as img:
-                    return _fit_pil(img, max_size)
-            except (OSError, subprocess.SubprocessError) as exc:
-                llamalog.get("probe").warning("HDR preview frame %d of %s failed: %s", i, video_path, exc)
-                return None
+def hdr_seeks(video_path, count=10):
+    """`count` seeks at OpenCV's interior frame indices, for a tone-mapped set with no raw set to
+    follow; [] when the geometry can't be read."""
+    total, fps = _probe_frame_geometry(video_path)
+    if total <= 0 or fps <= 0:
+        return []
+    return [(target / fps, True) for target in _interior_sample_frames(total, count)]
 
-        with ThreadPoolExecutor(max_workers=preview_workers()) as pool:
-            rendered = list(pool.map(render, range(len(seeks))))
+
+def hdr_tonemap_frame(video_path, seek, vf, max_size=None, label=""):
+    """One tone-mapped frame at `seek` — `(seconds, exact)`, repeated as the raw preview made it, so
+    a keyframe seek lands on the same frame — through `vf`, as a PIL image, or None on a miss.
+    Below-normal priority: it is background work that may share the machine with a queue job."""
+    at, exact = seek
+    handle, out_path = tempfile.mkstemp(prefix="llamamxd_hdr_", suffix=".png")
+    os.close(handle)
+    fps_flags = ["-fps_mode", "passthrough"] if supports_fps_mode() else ["-vsync", "0"]
+    try:
+        completed = subprocess.run(
+            [tool_path("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
+             *VULKAN_DEVICE_FLAGS,
+             "-threads", str(_decoder_threads()),
+             # Formatted as _grab_frame does, so a keyframe seek lands on the same frame.
+             *([] if exact else ["-noaccurate_seek"]), "-ss", f"{at:.3f}",
+             "-i", video_path,
+             "-vf", vf,
+             *fps_flags, "-frames:v", "1", out_path],
+            capture_output=True, timeout=_HDR_FRAME_TIMEOUT,
+            creationflags=NO_WINDOW | _BELOW_NORMAL,
+        )
+        if completed.returncode != 0:
+            tail = (completed.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+            llamalog.get("probe").warning("HDR preview frame %s of %s: ffmpeg exited %s: %s", label, video_path,
+                                          completed.returncode, tail[-1] if tail else "no output")
+        with Image.open(out_path) as img:
+            return _fit_pil(img, max_size)
+    except (OSError, subprocess.SubprocessError) as exc:
+        llamalog.get("probe").warning("HDR preview frame %s of %s failed: %s", label, video_path, exc)
+        return None
+    finally:
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
+
+
+def extract_hdr_tonemapped_thumbnails(video_path, count=10, should_cancel=None, max_size=None, seeks=None):
+    """The whole tone-mapped set at once (`hdr_tonemap_frame` for each seek, several in parallel),
+    at the raw set's `seeks` so the two align, else at OpenCV's frame indices. Returns [] on any
+    failure or when `should_cancel()` turns true (never a partial set). Keep off the GUI thread."""
+    vf = hdr_tonemap_filter(video_path)
+    seeks = seeks or hdr_seeks(video_path, count)
+    if vf is None or not seeks:
+        return []
+
+    def render(i):
+        if should_cancel is not None and should_cancel():
+            return None
+        return hdr_tonemap_frame(video_path, seeks[i], vf, max_size, label=str(i))
+
+    with ThreadPoolExecutor(max_workers=preview_workers()) as pool:
+        rendered = list(pool.map(render, range(len(seeks))))
     if should_cancel is not None and should_cancel():
         return []
     return [frame for frame in rendered if frame is not None]
