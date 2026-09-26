@@ -1,14 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""The Queue: task rows, one real ffmpeg / yt-dlp job at a time, pause (a real
-OS suspend), stop, failures, the details popup and the overall progress bar.
-
-A row is one widget with one paintEvent: draw the row, then clip to the
-fill width and draw it again in `primary` — so the fill edge cuts a glyph
-cleanly, both halves coming from the same renderer at the same coordinates.
-
-Progress arrives in coarse jumps (ffmpeg reports ~2 Hz); the painted fill
-eases toward the latest value every frame so it glides rather than steps."""
+"""The Queue: task rows, one real ffmpeg / yt-dlp job at a time, pause (an OS suspend), stop,
+failures, the details panel and the overall progress bar. A running row paints itself twice,
+the second pass clipped to the fill width in `primary`, and the fill eases toward the reported
+fraction every frame."""
 import math
 import os
 import subprocess
@@ -371,10 +366,7 @@ class _DetailPanel(QWidget):
         self._restyle()
 
     def _restyle(self):
-        # Connected to `scale.changed`, which fires on every live-resize step
-        # regardless of which tab is showing: skip the (fairly costly)
-        # setStyleSheet call when the text it would set hasn't actually
-        # changed, same guard `MainWindow._style` uses for the per-tab sheet.
+        # Runs on every live-resize step: skip setStyleSheet when the text is unchanged.
         css = f"_DetailPanel {{ background: {T.theme.hex('panel')}; border-radius: {px(8)}px; }}"
         if css != getattr(self, "_last_css", None):
             self._last_css = css
@@ -416,16 +408,8 @@ class QueueTab(QWidget):
         self.list_layout.addStretch(1)
         self.scroll.setWidget(host)
 
-        # The empty-state message lives in its own stack page, not inside
-        # `list_layout` alongside real rows — a stretch on both sides of it
-        # there would centre it nicely while the list is genuinely empty,
-        # but that same stretch stays live once rows exist too (a plain
-        # QLayout item, unaffected by any one widget's own `.hide()`),
-        # pushing the whole populated list down/off-centre instead of
-        # letting it anchor to the top and scroll normally. A `QStackedLayout`
-        # sidesteps that: only one page is ever shown, chosen explicitly by
-        # `_show_task_list`/`_show_empty_state` below, so the centring
-        # stretches here can never leak into the row list's own layout.
+        # The empty-state message is its own stack page: centring stretches in `list_layout`
+        # would stay live once rows arrive and push the list off the top.
         self.empty_label = ScaledLabel("No tasks queued yet.")
         self.empty_label.setProperty("role", "empty")
         self.empty_label.setAlignment(Qt.AlignCenter)
@@ -442,8 +426,7 @@ class QueueTab(QWidget):
         self._list_stack.setCurrentWidget(self._empty_page)
         root.addWidget(list_area, 1)
 
-        # Details popup — hidden until a row is clicked; fixed height so a
-        # long Encode field list scrolls instead of growing the box.
+        # Details panel: hidden until a row is clicked; a long field list scrolls.
         self.detail_panel = _DetailPanel()
         dl = QVBoxLayout(self.detail_panel)
         scale.margins(dl, 10, 8, 6, 8)
@@ -707,9 +690,7 @@ class QueueTab(QWidget):
         return False
 
     def on_leave(self):
-        """Switching away: a completed 100% bar resets so it doesn't linger,
-        and the details popup (if open) closes — coming back to Queue always
-        starts with it hidden rather than showing a stale task's details."""
+        """Switching away: a completed 100% bar resets and the details panel closes."""
         if self.progress_bar.value >= 1.0:
             self.progress_bar.set_value(0)
         self.detail_frame.hide()
@@ -788,9 +769,8 @@ class QueueTab(QWidget):
         self._retip_when_done()
 
     def _apply_sort(self):
-        """Puts the rows — and the order the queue will run them in — into the
-        chosen order: by title (A to Z / Z to A) or by time added (Recent: newest
-        first, Latest: oldest first). Stable, so equal titles keep their added order."""
+        """Put the rows, and their run order, in the chosen order: title A-Z / Z-A, or time
+        added (Recent newest first, Latest oldest first). Stable."""
         by_time = sorted(self._rows, key=lambda tid: (self._rows[tid]["added"], tid))
         if self._sort == "Recent":
             order = by_time[::-1]
@@ -887,13 +867,7 @@ class QueueTab(QWidget):
                 continue
             if (strip_video and key in _VIDEO_DETAIL_KEYS) or (strip_audio and key in _AUDIO_DETAIL_KEYS):
                 continue
-            # "quality" means two unrelated things depending on who queued
-            # the task: Encoding's CRF/qscale value vs. the Downloader's own
-            # resolution pick (DownloaderTab's dropdown is itself labeled
-            # "Resolution:" — see its own module docstring). Same settings
-            # key, so this is the one place that has to tell them apart
-            # rather than the field list itself, which has no per-task-kind
-            # branching otherwise.
+            # "quality" is Encoding's CRF / qscale but the Downloader's Resolution pick.
             if key == "quality" and is_download:
                 label = "Resolution"
             value = settings[key]
@@ -918,10 +892,7 @@ class QueueTab(QWidget):
                         bits.append(entry[k])
                 rows.append(("Audio Stream" if len(streams) == 1 else f"Audio Stream {i + 1}",
                              " · ".join(bits), False))
-        # video_tracks/audio_tracks (Muxing only -- see MuxingTab._track_args)
-        # each carry every *checked* track for that kind, so a Mux task shows
-        # one row per included track rather than a single "Video Track: ..."
-        # value the way the old single-track dropdown did.
+        # A Mux task lists one row per checked track.
         for kind, key, strip in (("Video", "video_tracks", strip_video), ("Audio", "audio_tracks", strip_audio)):
             if key not in settings or strip:
                 continue
@@ -1057,9 +1028,7 @@ class QueueTab(QWidget):
         if row["source_tab"] == _YTDLP:
             self._start_download(task_id, row, rest)
             return
-        # The job's values become the ffmpeg_vars globals and its argv is
-        # compiled from them here on the GUI thread — workers only ever see a
-        # plain list, never the shared module state.
+        # Loaded and compiled here on the GUI thread: workers only ever see a plain argv.
         ffmpeg_vars.load(row["settings"], row["source_tab"])
         final_path = os.path.abspath(ffmpeg_vars.OUTPUT_PATH)
         temp_path = partial_path(final_path)
@@ -1103,9 +1072,8 @@ class QueueTab(QWidget):
             self._active["job"].set_priority(self.app.priority_level)
 
     def _run_when_done(self):
-        """Settings' "When Done" — held back while a failure notice is still
-        up (its modal would otherwise stack under the countdown) and dropped if
-        the user queued more work in the meantime."""
+        """Settings' "When Done": held back while a failure notice is up, and dropped if more
+        work was queued meanwhile."""
         if self._error_dialog_open or self._error_queue:
             QTimer.singleShot(500, self._run_when_done)
             return
@@ -1121,10 +1089,8 @@ class QueueTab(QWidget):
         self._frame_timer.stop()
 
     def _poll(self):
-        """Drain the active job's events; settle it when it ends. The final
-        ("progress", 1.0) usually lands in the same batch as "done", so the
-        fraction is applied — and the fill snapped full — before the status
-        flips, and the full bar is actually seen."""
+        """Drain the active job's events and settle it when it ends. Progress is applied and
+        the fill snapped full before the status flips, so the full bar is seen."""
         active = self._active
         if active is None:
             self._stop_timers()
@@ -1192,8 +1158,8 @@ class QueueTab(QWidget):
         self._process_next(rest)
 
     def _show_errors(self):
-        """Failure notices one at a time — never from inside the poll, since a
-        modal spins a nested loop and the poll keeps firing under it."""
+        """Failure notices one at a time, never from inside the poll (a modal's nested loop
+        keeps the poll firing)."""
         if self._error_dialog_open:
             return
         self._error_dialog_open = True
