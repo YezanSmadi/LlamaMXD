@@ -16,7 +16,7 @@ from core.probe import probe_media
 from ui import scale
 from ui.scale import px
 from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow, set_line_text
-from ui.widgets.controls import NO_OPTION, CheckBox, IconButton, button, button_width_for
+from ui.widgets.controls import CheckBox, IconButton, button, button_width_for
 from ui.widgets.dialogs import pick_external_streams, show_message
 from ui.widgets.tooltip import tip
 from ui.widgets.tracklist import TrackListBox
@@ -376,22 +376,20 @@ class MuxingTab(MediaTab):
         self._apply_import_gate()
 
     def _retarget_container(self, allowed):
-        before = self.format_menu.value()
-        self.format_menu.set_values(allowed)
+        lost = self.format_menu.retarget(allowed)
         after = self.format_menu.value()
         self._update_format_tip()
-        # Not from the no-file placeholder: that wasn't a real pick.
-        if before != after and before != NO_OPTION:
+        if lost:
             # Keep the save path's extension in step with the snap.
             stem, extension = os.path.splitext(self.save_entry.text().strip())
             if extension:
                 set_line_text(self.save_entry, stem + after)
-        if self._ready and before != after and before != NO_OPTION:
-            self.app.notify(
-                f"Container switched to {after} — {before} can't hold this file's streams "
-                "without re-encoding.",
-                go_to_queue=False,
-            )
+            if self._ready:
+                self.app.notify(
+                    f"Container switched to {after} — {lost} can't hold this file's streams "
+                    "without re-encoding.",
+                    go_to_queue=False,
+                )
 
     def _refresh_summary(self):
         """The rundown, including the keyframe caveat copy-only trimming has."""

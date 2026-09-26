@@ -459,37 +459,28 @@ class EncodingTab(MediaTab):
 
     def _retarget(self, menu, values, what=None):
         """Point a derived dropdown at a fresh list, toasting a forced snap."""
-        before = menu.value()
-        menu.set_values(values or [NO_OPTION])
-        after = menu.value()
-        if what and self._ready and before != after and before != NO_OPTION:
+        lost = menu.retarget(values or [NO_OPTION])
+        if what and self._ready and lost:
             self.app.notify(
-                f"{what} switched to {after} — {self.format_menu.value()} can't carry {before}.",
+                f"{what} switched to {menu.value()} — {self.format_menu.value()} can't carry {lost}.",
                 go_to_queue=False,
             )
-        return after
+        return menu.value()
 
     def _retarget_resolution(self, source_height):
         """Cap the Resolution list to the file's height, with its own toast wording."""
-        before = self.resolution_menu.value()
-        self.resolution_menu.set_values(formats.resolutions_for(source_height))
-        after = self.resolution_menu.value()
-        # Not from the no-file placeholder: that wasn't a real pick.
-        if self._ready and before != after and before != NO_OPTION:
+        if self.resolution_menu.retarget(formats.resolutions_for(source_height)) and self._ready:
             self.app.notify(
-                f"Resolution reset to {after} — this file is only {source_height}p tall.",
+                f"Resolution reset to {self.resolution_menu.value()} — this file is only {source_height}p tall.",
                 go_to_queue=False,
             )
 
     def _retarget_fps(self, source_fps):
         """Cap the FPS list to the file's frame rate, with its own toast wording."""
-        before = self.fps_menu.value()
-        self.fps_menu.set_values(formats.fps_values_for(source_fps))
-        after = self.fps_menu.value()
-        if self._ready and before != after and before != NO_OPTION:
+        if self.fps_menu.retarget(formats.fps_values_for(source_fps)) and self._ready:
             rate = f"{source_fps:.2f}" if source_fps else "?"
             self.app.notify(
-                f"FPS reset to {after} — this file is only {rate}fps.",
+                f"FPS reset to {self.fps_menu.value()} — this file is only {rate}fps.",
                 go_to_queue=False,
             )
 

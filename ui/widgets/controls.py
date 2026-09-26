@@ -664,6 +664,17 @@ class Dropdown(QComboBox):
         self._override = None
         self.set(current if current in values else values[0])
 
+    def retarget(self, values, default=None):
+        """`set_values`, then (with `default`) a pick no longer in `values` goes to `default` if
+        offered, else the first. Returns the real pick that was replaced, for the caller's toast,
+        or None (kept, or it was only the no-file `—`)."""
+        before = self.value()
+        self.set_values(values)
+        if default is not None and before not in values:
+            self.set(default if default in values else values[0])
+        after = self.value()
+        return before if before != after and before != NO_OPTION else None
+
     def close(self):
         if self._open:
             self.hidePopup()

@@ -421,13 +421,9 @@ class DownloaderTab(QWidget):
         self.format_label.setText("Audio Format:" if mode == downloader.MODE_AUDIO else "Video Format:")
 
     def _retarget(self, menu, values, default, what=None):
-        before = menu.value()
-        menu.set_values(values or [NO_OPTION])
-        if values and before not in values:
-            menu.set(default if default in values else values[0])
-        after = menu.value()
-        if what and before != after and before != NO_OPTION and values:
-            self.app.notify(f"{what} switched to {after} — {before} isn't available for this pick.",
+        lost = menu.retarget(values or [NO_OPTION], default if values else None)
+        if what and lost and values:
+            self.app.notify(f"{what} switched to {menu.value()} — {lost} isn't available for this pick.",
                             go_to_queue=False)
 
     @staticmethod
