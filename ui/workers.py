@@ -57,9 +57,11 @@ def pil_to_qimage(image):
     if image is None:
         return None
     if image.mode not in ("RGBA", "LA", "PA", "P") and "transparency" not in image.info:
-        # No alpha: 3 bytes a pixel, not 4 (a set of ten 4K preview frames is 75MB less).
+        # No alpha: RGB32, Qt's native format. It scales ~10x faster than RGB888 or RGBA8888
+        # (the carousel rescales on every resize step) and becomes a QPixmap without conversion.
         rgb = image.convert("RGB")
-        return QImage(rgb.tobytes(), rgb.width, rgb.height, rgb.width * 3, QImage.Format_RGB888).copy()
+        return QImage(rgb.tobytes("raw", "BGRX"), rgb.width, rgb.height, rgb.width * 4,
+                      QImage.Format_RGB32).copy()
     rgba = image.convert("RGBA")
     data = rgba.tobytes("raw", "RGBA")
     return QImage(data, rgba.width, rgba.height, rgba.width * 4, QImage.Format_RGBA8888).copy()

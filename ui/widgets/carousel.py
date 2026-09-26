@@ -49,6 +49,7 @@ _HOVER_GROW = 1.2
 _HOVER_MS = 120
 _TIP_GRACE_MS = 50      # how long the info tip outlasts the pointer leaving the badge
 _SLIDE_MS = 115
+_SCALED_CACHE = 4       # scaled frames kept: the slide pair plus a step back and forth
 
 # Wave Loop: rendered by rlottie, dots flattened to white, tinted primary -> secondary, the dot
 # band cropped and scaled to fill.
@@ -550,14 +551,17 @@ class ThumbnailCarousel(QWidget):
     def _pixmap(self, index, rect):
         dpr = self.devicePixelRatioF() or 1.0
         key = (index, int(rect.width()), int(rect.height()), dpr)
-        pix = self._scaled.get(key)
+        pix = self._scaled.pop(key, None)
         if pix is None:
             image = self._frames[index].scaled(
                 round(rect.width() * dpr), round(rect.height() * dpr),
                 Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
             pix = QPixmap.fromImage(image)
             pix.setDevicePixelRatio(dpr)
-            self._scaled[key] = pix
+        self._scaled[key] = pix             # most recently used last
+        # Only the last few: an expanded frame is ~13MB, and rescaling one costs a millisecond or two.
+        while len(self._scaled) > _SCALED_CACHE:
+            del self._scaled[next(iter(self._scaled))]
         return pix
 
     def _icon_scale(self):

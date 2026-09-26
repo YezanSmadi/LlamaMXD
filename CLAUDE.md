@@ -2902,7 +2902,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     biggest screen in device pixels, and `extract_video_thumbnails` / `extract_hdr_tonemapped_thumbnails`
     take it as `max_size`, shrinking each frame as it is decoded (`utilities._shrink`, `cv2.INTER_AREA`
     — 3.7ms per 4K frame against Pillow LANCZOS's 57ms); `pil_to_qimage` stores an image without alpha
-    as `Format_RGB888` (3 bytes a pixel). A 4K frame on a 1440p screen is 11MB, a set of ten 110MB.
+    as `Format_RGB32` (Qt's native format; see below). A 4K frame on a 1440p screen is 14MB.
     **The previous file's tone-mapped set is dropped when the file changes** (`update_global_file`); it
     used to stay until the next render (316MB held behind an SDR clip) and was never reused anyway.
     Measured on a real display, working set (before -> after): idle with the spinner ready 376 ->
