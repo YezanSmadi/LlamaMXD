@@ -4,9 +4,9 @@
 fixture clips, and their outputs probed (golden). Also: stop() mid-run leaves nothing behind,
 and a job that can't run fails with a readable reason. (Downloads need the network: not here.)
 
-Known issue recorded in the golden (fix it, then --update): an Encode with a trim and a Passthru
-audio track puts the copied track ~1s ahead of the re-encoded streams (enc_multi_audio.mkv's
-stream_starts)."""
+
+`stream_starts` guards A/V sync: a trimmed Encode with a Passthru track once put the copied track
+~1s ahead of the re-encoded streams (enc_multi_audio.mkv, enc_trim_passthru_aac.mp4)."""
 import os
 import time
 
@@ -104,6 +104,7 @@ def cases():
         ("Encoding", "enc_multi_audio.mkv", dict(enc, input_file=multi, output_format=".mkv", audio_streams=[
             _audio(1, "Opus", passthru=True, language="jpn"), _audio(0, "MP3", "192 kbps", "Mono", "44100 Hz", language="eng")])),
         ("Encoding", "enc_downscale_retime.mp4", dict(enc, resolution="360p", fps="12")),
+        ("Encoding", "enc_trim_passthru_aac.mp4", dict(enc, audio_streams=[_audio(0, "AAC", passthru=True)])),
     ]
     if utilities.supports_libplacebo():
         out.append(("Encoding", "enc_hdr_to_sdr.mp4", dict(enc, input_file=hdr, encoder="H.265", profile="Main",

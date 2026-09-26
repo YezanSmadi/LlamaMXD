@@ -164,6 +164,10 @@ def build_encode_command(output_path=None):
             streams.append(source[f"a:{cfg['src_index']}"])
             if cfg["codec_arg"] == "copy":
                 copied.append((i, source, cfg))
+                # The input seek lands on the keyframe before the trim start; a copied track kept
+                # the packets from there, so the muxer shifted the re-encoded streams ~1s later.
+                if v.START_SECS:
+                    output_kwargs[f"copypriorss:a:{i}"] = 0
             output_kwargs[f"c:a:{i}"] = cfg["codec_arg"]
             if cfg["bitrate_arg"]:
                 output_kwargs[f"b:a:{i}"] = cfg["bitrate_arg"]

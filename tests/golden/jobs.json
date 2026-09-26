@@ -126,7 +126,7 @@
     ]
    ],
    "container": ".mkv",
-   "duration": 3.0,
+   "duration": 2.0,
    "fps": 24.0,
    "hdr": false,
    "profile": "Constrained Baseline",
@@ -135,9 +135,47 @@
     360
    ],
    "stream_starts": [
-    "h264@0.98",
-    "opus@0.0",
-    "mp3@0.98"
+    "h264@0.0",
+    "opus@0.02",
+    "mp3@0.0"
+   ],
+   "video": "H.264",
+   "video_streams": [
+    [
+     "H.264",
+     "8-bit 4:2:0",
+     "SDR"
+    ]
+   ]
+  },
+  "partial_left": false
+ },
+ "enc_trim_passthru_aac.mp4": {
+  "outcome": {
+   "end": "done",
+   "reached_100": true
+  },
+  "output": {
+   "audio_streams": [
+    [
+     "AAC",
+     "Stereo",
+     "48000 Hz",
+     "und"
+    ]
+   ],
+   "container": ".mp4",
+   "duration": 2.0,
+   "fps": 24.0,
+   "hdr": false,
+   "profile": "Constrained Baseline",
+   "size": [
+    640,
+    360
+   ],
+   "stream_starts": [
+    "h264@0.0",
+    "aac@0.0"
    ],
    "video": "H.264",
    "video_streams": [

@@ -108,7 +108,7 @@ python tests/run_all.py
 goldens after an *intended* change; `python tests/run_all.py ui jobs` runs a subset). Each check runs
 in its own process against a sandbox: the log goes to `%TEMP%\llamamxd-tests`, the UI check uses its
 own settings.json / presets.json, and fixture clips are generated there by the bundled ffmpeg.
-- `check_commands` — golden ffmpeg argv for 25 Encode + 6 Mux settings, and the yt-dlp plan + argv for
+- `check_commands` — golden ffmpeg argv for 26 Encode + 6 Mux settings, and the yt-dlp plan + argv for
   all 259 Downloader dropdown combinations on a stand-in YouTube format list. `-fps_mode`,
   libplacebo, the GPU (NVIDIA / NVENC) and tool paths are pinned, so the goldens hold on any machine.
 - `check_core` — goldens of `formats` (the whole cascade), `naming`, `keybinds`, and `probe_media` /
@@ -118,10 +118,9 @@ own settings.json / presets.json, and fixture clips are generated there by the b
 - `check_jobs` — real Mux / Encode jobs through `FfmpegJob`, their outputs probed (streams, languages,
   length, each stream's start time); stop() mid-run; a failing job's reason.
 
-Each check was shown to fail on a deliberate one-line break. **Known issues** the goldens record as
-they are today: the About license box is 1px squeezed at 1.5x (reported as KNOWN), and an Encode with a
-trim *and* a Passthru audio track puts the copied track ~1s ahead of the re-encoded streams
-(`jobs.json`, `enc_multi_audio.mkv`'s `stream_starts`).
+Each check was shown to fail on a deliberate one-line break. **Known issue**: the About license box
+is 1px squeezed at 1.5x (reported as KNOWN, not failed). The jobs check's `stream_starts` guards the
+trim + Passthru fix below.
 
 ## Architecture
 
@@ -3365,6 +3364,12 @@ without an app release; a frozen app has no `python -m yt_dlp` anyway.
   21m41s clip, not a 5s one). `ffmpeg_build._trim_kwargs` does it the safe
   way. `END_TIME`/`END_SECS` in `ffmpeg_vars` are only safe as an input-side
   `-to` paired with an input-side `-ss`.
+- **A copied track in a trimmed Encode needs `-copypriorss:a:N 0`** (`build_encode_command` adds it
+  for every Passthru track when the start is trimmed). The input-side `-ss` lands on the keyframe
+  before the start; re-encoded streams drop what precedes the start, but a copied one kept those
+  packets, so an MKV came out with ~1s of audio before the picture (the muxer shifted the re-encoded
+  streams to 0.98s) and 1s too long. MP4 hid it behind an edit list. Muxing is unchanged on purpose:
+  every stream is copied there, so all start together at the keyframe (the rundown's "· keyframe").
 - **`Dropdown.hidePopup` is also called by Qt on style changes** (a live theme
   switch), which is why `popupClosed` is gated on the popup having genuinely
   been open — otherwise Settings' theme preview reverted itself on every

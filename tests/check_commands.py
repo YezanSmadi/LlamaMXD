@@ -90,6 +90,9 @@ ENCODE_CASES = [
         dict(_audio(index=0, codec="AAC", bitrate="96 kbps", channels="Mono", language="fre",
                     source="external", file="C:/in/extra.m4a"), id="ext:12345678"),
     ]),
+    encode("trimmed_passthru", start_secs=65, duration_secs=10, output_path="C:/out/clip.mkv",
+           output_format=".mkv", audio_streams=[_audio(index=0, passthru=True),
+                                                _audio(index=1, codec="Opus", language="jpn")]),
     encode("external_first_video_stripped", strip_video=True, output_path="C:/out/clip.mka",
            output_format=".mkv", audio_streams=[
                dict(_audio(index=0, passthru=True, source="external", file="C:/in/extra.m4a"), id="ext:1"),
