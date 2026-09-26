@@ -34,6 +34,11 @@ KNOWN_SQUEEZE = [
 ]
 BASE_W, BASE_H = 896, 540
 
+# Free disk space changes as tests write files, and Settings shows it: pin it.
+from core import system_info  # noqa: E402
+
+system_info.disk_usage = lambda path: (500 * 1024 ** 3, 100 * 1024 ** 3)
+
 app = M._make_app(log_qt=False)
 M.init_workers()
 M._apply_theme(app)

@@ -400,12 +400,3 @@ def containers_for(video_codec, audio_codec):
 def short_name(codec):
     """The codec name without a parenthetical suffix (no current codec has one)."""
     return (codec or "").split(" (")[0]
-
-
-def coerce(value, allowed, fallback=None):
-    """Snap `value` into `allowed`; returns `(value, changed)`."""
-    if not allowed:
-        return fallback, False
-    if value in allowed:
-        return value, False
-    return (fallback if fallback in allowed else allowed[0]), True

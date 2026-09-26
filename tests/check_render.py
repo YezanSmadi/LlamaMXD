@@ -9,10 +9,9 @@ import os
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from harness import GOLDEN, WORK, check_golden, fixture, report  # noqa: E402
+from harness import WORK, check_golden, fixture, report  # noqa: E402
 
-import check_ui  # noqa: E402  (isolated settings + the offscreen MainWindow)
-from check_ui import app, settle, set_scale, states, window  # noqa: E402
+from check_ui import settle, set_scale, states, window  # noqa: E402  (isolated settings + the offscreen MainWindow)
 from PySide6.QtCore import QPoint, QRectF, Qt  # noqa: E402
 from PySide6.QtGui import QColor, QImage, QPainter  # noqa: E402
 

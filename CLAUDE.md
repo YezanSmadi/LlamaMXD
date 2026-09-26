@@ -2132,7 +2132,7 @@ two spacers (10→6) and the notice box's own margins (9,7,5,7→9,5,5,5) and th
 it at 379/385 — a real 6px margin, not a coin flip. **Re-run that stress sequence (several scale round-trips,
 switching through every sub-tab at each one, watching each page's own `verticalScrollBar().isVisible()`) after
 touching any spacer on a page that's meant to fit — a single "fits" measurement at one scale, once, is not
-enough to trust near this edge.** On a relicense change `about.LICENSE_NAME`, `COPYRIGHT` and `NOTICE`
+enough to trust near this edge.** On a relicense change `about.COPYRIGHT` and `NOTICE`
 together. Nothing on the page is a setting. **The About page ends in
 `addStretch(1)`**: now that this page has its own scroll area sized off nothing but its own content, this
 just keeps the content hugging the top rather than being spread out once the scroll area stretches the page

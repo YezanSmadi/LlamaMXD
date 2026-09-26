@@ -155,11 +155,6 @@ def get(area):
     return logging.getLogger(f"{ROOT}.{area}")
 
 
-def detail():
-    """The current log detail: "Normal" or "Detailed"."""
-    return _state["detail"]
-
-
 def is_detailed():
     return _state["detail"] == DETAILED
 

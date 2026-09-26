@@ -5,7 +5,7 @@ Choose Stream(s) popup. Each row is one stream, ticked to include it. Which rows
 what order is the caller's; the box shows the list it is given and reports ticks (`changed`)
 and drag reorders (`reordered`)."""
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QPainter, QPainterPath, QPen, QPixmap, QRegion
+from PySide6.QtGui import QPainter, QPainterPath, QPixmap, QRegion
 from PySide6.QtWidgets import (
     QApplication, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget,
 )

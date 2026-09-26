@@ -11,8 +11,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 import check_jobs as J  # noqa: E402  (its fixtures and settings)
 from harness import WORK, fixture, report  # noqa: E402
 
-import check_ui  # noqa: E402,F401  (isolated settings + the offscreen MainWindow)
-from check_ui import settle, window  # noqa: E402
+from check_ui import settle, window  # noqa: E402  (isolated settings + the offscreen MainWindow)
 
 queue = window.tabs["Queue"]
 OUT = os.path.join(WORK, "queue")

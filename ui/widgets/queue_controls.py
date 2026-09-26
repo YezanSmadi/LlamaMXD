@@ -6,7 +6,7 @@ import math
 
 from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFontMetricsF, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
 
 from ui import scale
 from ui import theme as T

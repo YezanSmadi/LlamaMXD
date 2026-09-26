@@ -30,7 +30,6 @@ from ui import theme as T
 from ui.scale import px
 from ui.tabs.media_tab import hms
 from ui.widgets.controls import button, button_width_for, draw_cross, IconButton
-from ui.widgets.dropdown import Dropdown
 from ui.widgets.marquee import _MARQUEE_GAP, _MARQUEE_HOLD, _MARQUEE_SPEED, MarqueeGroup
 from ui.widgets.text import ScaledLabel, ui_font
 from ui.widgets.dialogs import ask_yes_no, show_message

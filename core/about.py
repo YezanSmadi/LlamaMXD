@@ -8,7 +8,6 @@ import sys
 
 REPO_URL = "https://github.com/YezanSmadi/LlamaMXD"
 ISSUES_URL = REPO_URL + "/issues"
-LICENSE_NAME = "GPL-3.0-or-later"
 COPYRIGHT = "Copyright © 2026 Yezan Smadi"
 MASCOT_NAME = "Pak the Llama"
 # The logo is copyrighted apart from the GPL, which covers the source code, not the visual

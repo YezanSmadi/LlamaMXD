@@ -52,18 +52,3 @@ def set_process_priority(pid, level):
     finally:
         _k32.CloseHandle(handle)
 
-
-def get_process_priority(pid):
-    """The level name `pid` currently runs at, or None (used to verify)."""
-    if os.name != "nt":
-        return None
-    handle = _k32.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
-    if not handle:
-        return None
-    try:
-        _k32.GetPriorityClass.restype = ctypes.c_uint32
-        _k32.GetPriorityClass.argtypes = [ctypes.c_void_p]
-        current = _k32.GetPriorityClass(handle)
-    finally:
-        _k32.CloseHandle(handle)
-    return next((name for name, flag in _CLASSES.items() if flag == current), None)
