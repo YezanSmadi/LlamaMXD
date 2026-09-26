@@ -88,8 +88,8 @@ picturing Pak the Llama and (the animation) the coined "PAK-RW"/"LlamaDisc" word
 actual branding — Copyright (c) 2026 Yezan Smadi, all rights reserved (may not be copied, modified,
 redistributed, or used to represent a modified/unofficial build of LlamaMXD, without permission) — the
 same reason Mozilla/Blender/GNOME/VLC keep their own logos out of their code's open-source license —
-while the cable graphic, purely decorative, is Copyright (c) 2026 Yezan Smadi under CC Attribution 4.0
-(CC BY 4.0), reusable with credit. **"LlamaMXD" and "Pak the
+while the cable graphic and the Queue's search icon (`search.svg`), purely decorative, are Copyright (c)
+2026 Yezan Smadi under CC Attribution 4.0 (CC BY 4.0), reusable with credit. **"LlamaMXD" and "Pak the
 Llama"** (`core.about.MASCOT_NAME` — the llama pictured in `LlamaMXD-Logo.svg`) **are unregistered
 trademarks of Yezan Smadi** (`core.about.TRADEMARK_NOTICE`), claimed by use rather than registered with
 a trademark office — hence "LlamaMXD™"/"Pak the Llama™", not the registered-mark "®" — stated in both

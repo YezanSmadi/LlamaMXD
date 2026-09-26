@@ -140,85 +140,85 @@
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#1": [
    220,
-   340,
+   335,
    656,
    55
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#1/ScaledLabel#0": [
    220,
-   340,
+   335,
    656,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#1/SegmentedButton#0": [
    220,
-   367,
+   362,
    256,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2": [
    220,
-   399,
+   394,
    656,
    55
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#0": [
    220,
-   399,
+   394,
    132,
    55
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#0/Dropdown#0": [
    220,
-   426,
+   421,
    132,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#0/ScaledLabel#0": [
    220,
-   399,
+   394,
    64,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#1": [
    362,
-   399,
+   394,
    120,
    55
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#1/Dropdown#0": [
    362,
-   426,
+   421,
    120,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#1/ScaledLabel#0": [
    362,
-   399,
+   394,
    56,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#2": [
    492,
-   399,
+   394,
    96,
    55
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#2/Dropdown#0": [
    492,
-   426,
+   421,
    96,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#2/ScaledLabel#0": [
    492,
-   399,
+   394,
    68,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/ScaledLabel#0": [
    598,
-   436,
+   431,
    0,
    18
   ],
@@ -262,13 +262,13 @@
    220,
    49,
    656,
-   281
+   276
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/_LinkDropFrame#0/ScaledLabel#0": [
    232,
    57,
    632,
-   265
+   260
   ]
  },
  "Downloader@1.5": {
@@ -412,85 +412,85 @@
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#1": [
    330,
-   509,
+   502,
    984,
    83
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#1/ScaledLabel#0": [
    330,
-   509,
+   502,
    984,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#1/SegmentedButton#0": [
    330,
-   550,
+   543,
    384,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2": [
    330,
-   598,
+   591,
    984,
    83
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#0": [
    330,
-   598,
+   591,
    198,
    83
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#0/Dropdown#0": [
    330,
-   639,
+   632,
    198,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#0/ScaledLabel#0": [
    330,
-   598,
+   591,
    95,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#1": [
    543,
-   598,
+   591,
    180,
    83
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#1/Dropdown#0": [
    543,
-   639,
+   632,
    180,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#1/ScaledLabel#0": [
    543,
-   598,
+   591,
    84,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#2": [
    738,
-   598,
+   591,
    144,
    83
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#2/Dropdown#0": [
    738,
-   639,
+   632,
    144,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#2/ScaledLabel#0": [
    738,
-   598,
+   591,
    102,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/ScaledLabel#0": [
    897,
-   654,
+   647,
    0,
    27
   ],
@@ -534,13 +534,13 @@
    330,
    74,
    984,
-   420
+   413
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/_LinkDropFrame#0/ScaledLabel#0": [
    348,
    86,
    948,
-   396
+   389
   ]
  },
  "Downloader@2.0": {
@@ -684,85 +684,85 @@
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#1": [
    440,
-   680,
+   670,
    1312,
    110
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#1/ScaledLabel#0": [
    440,
-   680,
+   670,
    1312,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#1/SegmentedButton#0": [
    440,
-   734,
+   724,
    512,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2": [
    440,
-   798,
+   788,
    1312,
    110
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#0": [
    440,
-   798,
+   788,
    264,
    110
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#0/Dropdown#0": [
    440,
-   852,
+   842,
    264,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#0/ScaledLabel#0": [
    440,
-   798,
+   788,
    127,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#1": [
    724,
-   798,
+   788,
    240,
    110
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#1/Dropdown#0": [
    724,
-   852,
+   842,
    240,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#1/ScaledLabel#0": [
    724,
-   798,
+   788,
    111,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#2": [
    984,
-   798,
+   788,
    192,
    110
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#2/Dropdown#0": [
    984,
-   852,
+   842,
    192,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/QWidget#2/ScaledLabel#0": [
    984,
-   798,
+   788,
    135,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/QWidget#2/ScaledLabel#0": [
    1196,
-   872,
+   862,
    0,
    36
   ],
@@ -806,13 +806,13 @@
    440,
    98,
    1312,
-   562
+   552
   ],
   "/_TabFrame#0/QStackedWidget#0/DownloaderTab#0/_LinkDropFrame#0/ScaledLabel#0": [
    464,
    114,
    1264,
-   530
+   520
   ]
  },
  "Encoding/Audio@1.0": {

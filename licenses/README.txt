@@ -10,6 +10,7 @@ Original Artwork & Trademarks (Excluded from LlamaMXD's GPL-3.0-or-later license
   LlamaDiscLoading/*.png     Copyright (c) 2026 Yezan Smadi. All rights reserved.
                              May not be copied, modified, or used to represent an unofficial build without permission.
   RCA Cable Yellow.svg       Copyright (c) 2026 Yezan Smadi. Licensed under CC BY 4.0.
+  search.svg                 Copyright (c) 2026 Yezan Smadi. Licensed under CC BY 4.0.
 
 "LlamaMXD™" and "Pak the Llama™" are trademarks of Yezan Smadi.
 

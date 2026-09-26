@@ -223,7 +223,7 @@ class DownloaderTab(QWidget):
         self.size_label.setProperty("role", "meta")
         ol.addWidget(self.size_label, 0, Qt.AlignBottom)
         root.addWidget(options)
-        scale.spacer(root, 6)
+        scale.spacer(root, 11)   # as above Muxing / Encoding's save field
 
         save, sl = hrow(spacing=6, align_bottom=False)
         self.save_entry = ScaledLineEdit()
