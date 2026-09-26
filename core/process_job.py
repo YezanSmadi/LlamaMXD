@@ -124,6 +124,9 @@ class ProcessJob:
         except OSError as exc:
             self._fail_early(f"Couldn't start {self.TOOL}: {exc.strerror or exc}")
             return False
+        if self._priority != process_priority.DEFAULT_LEVEL:
+            # The creation flag sets only the CPU class; this adds disk I/O and memory priority.
+            self._sync_priority()
         return True
 
     def _running(self):

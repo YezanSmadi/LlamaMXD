@@ -42,6 +42,23 @@ def _alive(pid):
     return code.value == 259   # STILL_ACTIVE
 
 
+def _priorities(pid):
+    """`[CPU class name, I/O priority, memory priority]` of running process `pid`, read back."""
+    k32, ntdll = ctypes.WinDLL("kernel32"), ctypes.WinDLL("ntdll")
+    k32.OpenProcess.restype = ctypes.c_void_p
+    handle = ctypes.c_void_p(k32.OpenProcess(0x0400, False, pid))   # PROCESS_QUERY_INFORMATION
+    try:
+        k32.GetPriorityClass.argtypes = [ctypes.c_void_p]
+        cpu = {0x80: "High", 0x8000: "Above Normal", 0x20: "Normal", 0x4000: "Below Normal",
+               0x40: "Low"}.get(k32.GetPriorityClass(handle))
+        io, memory = ctypes.c_ulong(), ctypes.c_ulong()
+        ntdll.NtQueryInformationProcess(handle, 33, ctypes.byref(io), 4, None)
+        k32.GetProcessInformation(handle, 0, ctypes.byref(memory), 4)
+        return [cpu, io.value, memory.value]
+    finally:
+        k32.CloseHandle(handle)
+
+
 def _drain(job, until=("done", "failed"), limit=30):
     events, end = [], time.monotonic() + limit
     while time.monotonic() < end:
@@ -130,6 +147,40 @@ def run():
     stats["events_after_stop"] = [e for e in job.poll_events() if e[0] != "progress"]
     stats["suspend_after_stop"] = job.suspend()
     out["ytdlp stop"] = {**stats, **_describe(job, [], folder)}
+
+    # Priority Level: CPU class, disk I/O and memory priority, at launch and on a change, for the
+    # whole yt-dlp tree (its child included, via the periodic re-sync).
+    job, folder = _ytdlp("ytdlp priority", "slow")
+    job._priority = "Low"
+    job.start()
+    end = time.monotonic() + 10
+    while time.monotonic() < end and not os.path.exists(os.path.join(job.work_dir, "child.pid")):
+        time.sleep(0.05)
+    time.sleep(0.3)
+    child = int(open(os.path.join(job.work_dir, "child.pid")).read())
+    for _ in range(15):          # poll_events re-syncs the tree about once a second
+        job.poll_events()
+        time.sleep(0.1)
+    levels = {"launch_low": _priorities(job._proc.pid), "child_low": _priorities(child)}
+    job.set_priority("Below Normal")
+    levels["below_normal"] = _priorities(job._proc.pid)
+    job.set_priority("Normal")
+    levels["normal"] = [_priorities(job._proc.pid), _priorities(child)]
+    job.stop()
+    out["priority levels (ytdlp)"] = levels
+
+    folder = _fresh("ffmpeg priority")
+    final = os.path.join(folder, "out.mkv")
+    job = FfmpegJob([tool_path("ffmpeg"), "-nostdin", "-loglevel", "error", "-progress", "pipe:1", "-re", "-i",
+                     fixture("long.mp4"), "-c", "copy", "-y", partial_path(final)], final, partial_path(final),
+                    input_file=fixture("long.mp4"), priority="Low", label="ffmpeg priority")
+    job.start()
+    time.sleep(0.5)
+    levels = {"launch_low": _priorities(job._proc.pid)}
+    job.set_priority("High")
+    levels["high"] = _priorities(job._proc.pid)
+    job.stop()
+    out["priority levels (ffmpeg)"] = levels
 
     # FfmpegJob: the early failures, and the controls once a job has ended.
     folder = _fresh("ffmpeg missing exe")

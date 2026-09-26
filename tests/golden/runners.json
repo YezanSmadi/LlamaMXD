@@ -51,6 +51,47 @@
   "log": "ffmpeg-ffmpeg_missing_exe-failed.log",
   "progress_monotonic": true
  },
+ "priority levels (ffmpeg)": {
+  "high": [
+   "High",
+   2,
+   5
+  ],
+  "launch_low": [
+   "Low",
+   0,
+   2
+  ]
+ },
+ "priority levels (ytdlp)": {
+  "below_normal": [
+   "Below Normal",
+   1,
+   4
+  ],
+  "child_low": [
+   "Low",
+   0,
+   2
+  ],
+  "launch_low": [
+   "Low",
+   0,
+   2
+  ],
+  "normal": [
+   [
+    "Normal",
+    2,
+    5
+   ],
+   [
+    "Normal",
+    2,
+    5
+   ]
+  ]
+ },
  "ytdlp bad folder": {
   "events": [
    [
