@@ -88,6 +88,8 @@ def _icon_svg(name, color):
         data = _BLACK_STROKE_RE.sub(
             lambda m: (f'stroke="{color}"' if m.group(1) else f'stroke{m.group(2)}{color}{m.group(3)}'), data)
         data = data.replace('fill="currentColor"', f'fill="{color}"')
+        # The search / sort icons are drawn in Illustrator's #231f20 rather than pure black.
+        data = data.replace("#231f20", color)
         _SVG_CACHE[key] = QSvgRenderer(QByteArray(data.encode("utf-8")))
     return _SVG_CACHE[key]
 
@@ -787,6 +789,9 @@ class Dropdown(QComboBox):
             self.blockSignals(True)
             self.setCurrentIndex(idx)
             self.blockSignals(False)
+        # Invisible until it is placed: Qt shows the list at its own spot first, and a subclass
+        # that moves or widens it would otherwise be seen there for a moment.
+        self._container.setWindowOpacity(0.0)
         super().showPopup()
         self._open = True
         Dropdown.open_one = self
@@ -805,11 +810,15 @@ class Dropdown(QComboBox):
             y = max(area.top(), above_y - gap - c.height())
         else:
             y = below.y() + gap
-        c.move(below.x(), y)
+        self._place_popup(c, below.x(), y)
         c.setWindowOpacity(0.25)
         self._set_unroll_mask(1)
         self._unroll.stop()
         self._unroll.start()
+
+    def _place_popup(self, container, x, y):
+        """Puts the open list at `x`, `y` (screen px, its top-left); a subclass may widen or shift it."""
+        container.move(x, y)
 
     def hidePopup(self):
         self._unroll.stop()

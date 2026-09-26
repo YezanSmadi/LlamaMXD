@@ -738,6 +738,7 @@ class SettingsTab(QWidget):
         """Free disk space can change while the app sits on another tab —
         refresh it every time Settings is shown, not just at startup."""
         self._refresh_disk_usage()
+        self.when_done_menu.set(self.app.when_done)      # the Queue tab can change it too
 
     # ------------------------------------------------------------------ #
     #  Theme

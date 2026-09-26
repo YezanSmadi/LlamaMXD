@@ -567,8 +567,8 @@ class DownloaderTab(QWidget):
 
     @staticmethod
     def _describe(settings):
-        bits = [settings["mode"], settings["quality"], settings["output_format"]]
-        return f"{settings['title'] or 'Download'}  ·  " + " · ".join(b for b in bits if b)
+        """The queue row's title; its resolution, codec and length columns come from the settings."""
+        return settings["title"] or "Download"
 
     def download_now(self):
         settings = self._gather_settings()

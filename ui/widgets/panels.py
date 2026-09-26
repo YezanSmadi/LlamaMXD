@@ -9,7 +9,7 @@ from datetime import datetime
 
 import numpy as np
 from PySide6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform
+from PySide6.QtGui import QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QFileDialog, QGridLayout, QLabel, QVBoxLayout, QWidget
 
@@ -307,7 +307,7 @@ def _load_frames():
 
 def _ensure_frames():
     """Starts decoding the sequence once, on a worker; `_LOADING["frames"]` fills in when
-    done. Until then the spinner draws a plain ring, so it is never blank."""
+    done. Until then (or if they fail to load) the spinner draws nothing."""
     if "frames" in _LOADING or _LOADING.get("loading"):
         return
     _LOADING["loading"] = True
@@ -319,7 +319,7 @@ def _ensure_frames():
         else:
             _LOADING["frames"] = None
             llamalog.get("ui").warning("The loading animation (assets/LlamaDiscLoading) failed to "
-                                       "load; a plain ring is drawn instead")
+                                       "load; the spinner stays blank")
 
     def work():
         try:
@@ -350,7 +350,7 @@ def _recolor(frame, rgb):
 class LoadingSpinner(QWidget):
     """The PNG-sequence LlamaDisc spinner (see above). Plays only while it is on screen and
     lets every mouse event through to whatever it sits on (the DropBox's double-click and
-    drops). Until the frames are decoded, or if they can't be, it draws a plain ring."""
+    drops). It draws nothing until the frames are decoded, and nothing at all if they can't be."""
 
     DEFAULT_SIZE = 64  # real px — only until the host sizes it via set_side()
 
@@ -404,21 +404,6 @@ class LoadingSpinner(QWidget):
         if frames:
             primary = T.theme.color("primary")
             p.drawImage(self.rect(), _recolor(frames[idx], (primary.red(), primary.green(), primary.blue())))
-            return
-        # The sub-tab colour, not `primary`: they are the same except in a theme that swaps
-        # them (Terminal), where primary is black and would vanish on the dark frame.
-        colour = T.theme.color("subtab_active")
-        w, h = self.width(), self.height()
-        thick = w * 0.14
-        ring = QRectF(thick / 2, thick / 2, w - thick, h - thick)
-        faint = QColor(colour)
-        faint.setAlphaF(0.3)
-        p.setPen(QPen(faint, thick))
-        p.drawEllipse(ring)
-        pen = QPen(colour, thick)
-        pen.setCapStyle(Qt.RoundCap)
-        p.setPen(pen)
-        p.drawArc(ring, round(-idx / _LOADING_FRAMES * 360 * 16), 100 * 16)
 
 
 # --------------------------------------------------------------------------- #

@@ -147,6 +147,7 @@ ui/widgets/toast.py       Toast / ToastManager
 ui/widgets/frameless.py   ResizeGrips (the borderless window's eight native-resize handles) +
                           WindowControls (its close / maximise / minimise icons)
 ui/widgets/tooltip.py     tip(widget, text) — the shared themed hover tooltip
+ui/widgets/queue_controls.py  Queue's SortButton (cycling), SearchToggle + SearchBar (unrolling), SlideHost (details panel)
 ui/widgets/keyfield.py    KeyField — Settings' click-then-press-a-key box
 ui/tabs/media_tab.py      MediaTab — the frame Muxing and Encoding share
 ui/tabs/muxing.py, encoding.py, downloader.py, queue.py, settings.py
@@ -1880,6 +1881,18 @@ status column. Clicking a row opens its details; the ✕ removes it.
 - When a batch ends, "All queued jobs finished." is toasted and Settings'
   "When Done" action runs (see "Tabs → Settings").
 
+**Row info, sort, search (revamp).** A row reads thumbnail | title | length | resolution | HDR/SDR | audio codec + channels (`AAC 2.0`) | status | ✕ (11px, status shown without its trailing dots).
+`QueueTab._row_meta` works the last three out at add time from the settings *as they will leave the file*
+(length = the trim applied to the probed duration, so 1h minus 15s from the start reads 00:59:45; resolution =
+the Encoding downscale pick if it is below the source, else the source height; audio = Encoding's first stream
+codec / Muxing's first track's), from `app.media_info` (which is still the task's file when `add_task` runs) or,
+for a download, `ytdlp_cache` + the settings; `—` where there is none. Column widths are measured from the widest
+value each can hold (`_measure_columns`), so only the title can be cut: it scrolls (the queue's shared
+`MarqueeGroup`) past 25 characters or when it overflows its box. Callers now pass just the title as `description`.
+Each row records `"added"` (time.time()). **Sort By:** is a `SortDropdown` (face `Sort By: | A to Z`, the open list shows only options; A to Z default / Z to A / Recent = newest added first / Latest = oldest added first) in the middle of the bottom row, and `_apply_sort` reorders `_rows` (so run order follows), the layout and the active job's `rest` — on every pick and every add. Beside it the round `SearchToggle` opens `SearchBar`, which floats over the bottom of the list just above the buttons (placed by `QueueTab._place_search`, not in the layout, so a long queue runs on beneath it and no band cuts the rows off): it only ever grows horizontally from the middle out to both sides (and back in), takes no room at all, filters rows by title as you type and clears when closed; the X inside the box (secondary colour) only clears the text. To the right of Start Queue, `WhenDoneButton` (a small square `Dropdown` filled like Start Queue, 3px from it, with a triangle; its list is wider than the button, always opens to its left, with the current choice highlighted) sets Settings' `app.when_done`, kept in step both ways (`Queue.on_enter` / `Settings.on_enter`). The details panel is a `SlideHost`: it floats over the bottom of the list (placed by `QueueTab._place_search`, not in the layout — the list keeps its full height and runs on beneath it, nothing behind the panel but the panel), rises once, and picking another row while it is open only swaps the contents. Opening the search row with the panel open shortens the panel from the bottom (`SlideHost.set_inset`; its list `_DetailScroll` prefers 140px but gives way to 40) while its top edge stays put. The tab layout has no spacing of its own (spacers and the `GAP`), so nothing pops when the search row appears. It omits Start Time when the trim is the whole file, and Duration is
+always the output length. The sort/search SVGs need `_icon_svg`'s `#231f20` recolour; the A/Z letters were
+converted from `<text>` to outlines (Oswald) since live text rendered with colour fringes.
+
 **Details popup** (below the list, fixed 140px scroll area so a long Encode
 list scrolls): `_DETAIL_FIELDS` drives which settings keys show and how
 (`time`, `bool`); a key absent from a task's dict is skipped, which is how each
@@ -2279,8 +2292,7 @@ autosave when the tab is left and on close.
   fix and a 306MB baked rainbow sprite sheet; **none of that exists any more** — a raster
   sequence has no renderer to work around. rlottie is still used by the Wave Loop.
   `_ensure_frames` decodes the sequence once on a `run_async` worker (~2s; `QImage`s cross
-  threads, as everywhere) at the first `LoadingSpinner`; until then, or if a frame is missing, the
-  spinner draws a plain ring tinted in `subtab_active`, so it is never blank. Plays only while
+  threads, as everywhere) at the first `LoadingSpinner`; until then, or if they cannot be loaded, it draws nothing (there is no fallback ring). Plays only while
   shown (`showEvent`/`hideEvent`, one single-shot timer re-armed for each frame's due time) and is
   transparent to the mouse.
   **Two things on the label side are themed**, both recoloured at paint time: the pink divider

@@ -628,7 +628,7 @@ class MediaTab(QWidget):
             return
         name = os.path.basename(settings["input_file"].replace("\\", "/"))
         queue_tab = self.app.tabs["Queue"]
-        task_id = queue_tab.add_task(f"{name}  ·  {self.DIRECT_LABEL}", settings=settings,
+        task_id = queue_tab.add_task(name, settings=settings,
                                      status="Queued", source_tab=self.TAB)
         outcome = queue_tab.start_task(task_id)
         self.app.notify({
@@ -643,6 +643,5 @@ class MediaTab(QWidget):
         if not self._validate_settings(settings):
             return
         name = os.path.basename(settings["input_file"].replace("\\", "/"))
-        description = f"{name}  ·  {settings['duration_secs']}s from {settings['start_secs']}s"
-        self.app.tabs["Queue"].add_task(description, settings=settings, status="Queued", source_tab=self.TAB)
+        self.app.tabs["Queue"].add_task(name, settings=settings, status="Queued", source_tab=self.TAB)
         self.app.notify(f"{self.VERB_ING} job added to queue.")
