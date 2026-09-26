@@ -13,7 +13,9 @@ from PySide6.QtWidgets import (
 from ui import scale
 from ui import theme as T
 from ui.scale import px
-from ui.widgets.controls import CheckBox, MarqueeGroup, MarqueeLabel, ScaledLabel
+from ui.widgets.marquee import MarqueeGroup, MarqueeLabel
+from ui.widgets.text import ScaledLabel
+from ui.widgets.toggles import CheckBox
 from ui.widgets.panels import BorderedFrame
 from ui.widgets.tooltip import hold_tips
 

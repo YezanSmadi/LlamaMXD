@@ -13,7 +13,8 @@ import check_commands  # noqa: E402  (the stand-in yt-dlp format list)
 from harness import WORK, check_golden, fixture, report  # noqa: E402
 
 from check_ui import settle, window  # noqa: E402
-from ui.widgets.controls import Dropdown, SegmentedButton  # noqa: E402
+from ui.widgets.dropdown import Dropdown  # noqa: E402
+from ui.widgets.toggles import SegmentedButton  # noqa: E402
 
 toasts = []
 window.notify = lambda message, go_to_queue=True: toasts.append(message)

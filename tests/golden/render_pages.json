@@ -7,6 +7,8 @@
  "Encoding/Overview@1.5": "c886e65d47683b8e",
  "Encoding/Video@1.0": "d1dc9345ac36cfbe",
  "Encoding/Video@1.5": "9c6906aeaca9a0ce",
+ "Encoding/audio-only Wave Loop@1.0": "5bd47cbac78c6144",
+ "Encoding/expanded preview@1.0": "ea984a604649e802",
  "Muxing/Audio@1.0": "f871aab897fbc875",
  "Muxing/Audio@1.5": "7fc81c89867af429",
  "Muxing/Overview@1.0": "158f2ae5b7367d12",
@@ -24,5 +26,6 @@
  "Settings/Performance@1.0": "8cf31a5f8c38caf9",
  "Settings/Performance@1.5": "9b54c46bcd3c3e2c",
  "Settings/Shortcuts@1.0": "ee123c240668d427",
- "Settings/Shortcuts@1.5": "8db60d71d6bb5a55"
+ "Settings/Shortcuts@1.5": "8db60d71d6bb5a55",
+ "info-badge tooltip@1.0": "6390de5762845b0e"
 }

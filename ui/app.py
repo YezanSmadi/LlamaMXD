@@ -36,7 +36,7 @@ from ui.tabs.media_tab import set_line_text
 from ui.tabs.muxing import MuxingTab
 from ui.tabs.queue import QueueTab
 from ui.tabs.settings import SettingsTab
-from ui.widgets.controls import Dropdown
+from ui.widgets.dropdown import Dropdown
 from ui.widgets.dialogs import ask_yes_no, confirm_countdown, show_message
 from ui.widgets.frameless import ResizeGrips, WindowControls
 from ui.widgets.panels import ASSETS, Sidebar, TabIndicator

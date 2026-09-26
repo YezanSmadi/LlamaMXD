@@ -16,7 +16,8 @@ from core.probe import probe_media
 from ui import scale
 from ui.scale import px
 from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow, set_line_text
-from ui.widgets.controls import CheckBox, IconButton, button, button_width_for
+from ui.widgets.controls import button, button_width_for, IconButton
+from ui.widgets.toggles import CheckBox
 from ui.widgets.dialogs import pick_external_streams, show_message
 from ui.widgets.tooltip import tip
 from ui.widgets.tracklist import TrackListBox

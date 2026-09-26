@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QWidget
 from ui import scale
 from ui import theme as T
 from ui.scale import px
-from ui.widgets.controls import ui_font
+from ui.widgets.text import ui_font
 
 _TOAST_WIDTH = 260
 _TOAST_HEIGHT = 44

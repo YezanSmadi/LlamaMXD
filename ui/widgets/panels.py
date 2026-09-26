@@ -18,9 +18,9 @@ from ui import scale
 from ui import theme as T
 from ui import workers
 from ui.scale import px
-from ui.widgets.controls import (
-    MarqueeGroup, MarqueeLabel, ScaledLabel, button, restyle, ui_font,
-)
+from ui.widgets.controls import button, restyle
+from ui.widgets.marquee import MarqueeGroup, MarqueeLabel
+from ui.widgets.text import ScaledLabel, ui_font
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ASSETS = os.path.join(_REPO_ROOT, "assets")

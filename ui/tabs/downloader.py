@@ -17,18 +17,11 @@ from core import downloader, naming
 from ui import scale
 from ui.scale import fpx, px
 from ui.tabs.media_tab import hrow, set_line_text
-from ui.widgets.controls import (
-    NO_OPTION,
-    Dropdown,
-    MarqueeLabel,
-    ScaledLabel,
-    ScaledLineEdit,
-    SegmentedButton,
-    button,
-    field_label,
-    labeled,
-    set_enabled,
-)
+from ui.widgets.controls import button, field_label, labeled, set_enabled
+from ui.widgets.dropdown import Dropdown, NO_OPTION
+from ui.widgets.marquee import MarqueeLabel
+from ui.widgets.text import ScaledLabel, ScaledLineEdit
+from ui.widgets.toggles import SegmentedButton
 from ui.widgets.dialogs import confirm_output_path, show_message
 from ui.widgets.panels import BorderedFrame
 from ui.widgets.tooltip import tip

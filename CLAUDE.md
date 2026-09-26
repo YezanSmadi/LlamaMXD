@@ -159,14 +159,20 @@ ui/single_instance.py     InstanceLock: a per-user lock file so only one LlamaMX
 ui/keymap.py              KeyMap: the live shortcuts + matching a QKeyEvent against them
 ui/keynav.py              KeyNav: Tab / Enter selection of a tab's controls (the ring) + an open dropdown's keys
 ui/tips.py                shared hover-tooltip copy (codec / container / audio-format explanations)
-ui/widgets/controls.py    Dropdown, CheckBox, Switch, SegmentedButton, TimeSpinner, MarqueeLabel,
-                          IconButton (✕ / ▲ / ▼ / select-all / deselect-all / undo / redo), ScaledLabel / ScaledButton /
-                          ScaledLineEdit (stock text painted through the scaled painter — see
-                          "UI scale") + helpers
-                          (button, labeled, set_enabled, draw_cross)
+ui/widgets/controls.py    button / labeled / field_label / set_enabled / restyle / anim / draw_cross helpers, IconButton
+                          (✕ / ▲ / ▼ / select-all / deselect-all / undo / redo)
+ui/widgets/text.py        ScaledLabel / ScaledButton / ScaledLineEdit / ClickableLabel (text painted through the scaled
+                          painter — see "UI scale"), ui_font, set_font_px
+ui/widgets/dropdown.py    Dropdown, NO_OPTION
+ui/widgets/toggles.py     CheckBox, Switch, SegmentedButton
+ui/widgets/timespinner.py TimeSpinner (+ its _TimeField)
+ui/widgets/marquee.py     MarqueeLabel, MarqueeGroup
 ui/widgets/panels.py      SubTabBar, DropBox, LoadingSpinner, BorderedFrame, SummaryPanel, Sidebar, TabIndicator
 ui/widgets/tracklist.py   TrackListBox — Muxing's checkable, scrollable track picker
-ui/widgets/carousel.py    ThumbnailCarousel + WaveLayer + the info tooltip
+ui/widgets/carousel.py    ThumbnailCarousel
+ui/widgets/wave.py        WaveLayer: the Wave Loop (rlottie) and its artwork fixes
+ui/widgets/info_badge.py  the preview's info badge painters + _InfoTooltip
+ui/widgets/preview_overlay.py  _ExpandedPreviewOverlay: the expanded preview
 ui/widgets/dialogs.py     MessageDialog, show_message / ask_yes_no / ask_text,
                           confirm_output_path, AudioStreamPickerDialog, ExternalStreamPickerDialog
 ui/widgets/toast.py       Toast / ToastManager

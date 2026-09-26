@@ -23,18 +23,10 @@ from ui import scale
 from ui import theme as T
 from ui.scale import fpx
 from ui.tabs.media_tab import hrow, set_line_text
-from ui.widgets.controls import (
-    CheckBox,
-    ClickableLabel,
-    Dropdown,
-    ScaledLabel,
-    ScaledLineEdit,
-    Switch,
-    button,
-    button_width_for,
-    field_label,
-    restyle,
-)
+from ui.widgets.controls import button, button_width_for, field_label, restyle
+from ui.widgets.dropdown import Dropdown
+from ui.widgets.text import ClickableLabel, ScaledLabel, ScaledLineEdit
+from ui.widgets.toggles import CheckBox, Switch
 from ui.keymap import canonical
 from ui.widgets.dialogs import ask_yes_no, show_message
 from ui.widgets.keyfield import KeyField, display_key

@@ -10,18 +10,10 @@ from core import formats
 from core.capabilities import av1_preset_range, libplacebo_problem_text, supports_libplacebo
 from ui import scale
 from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow
-from ui.widgets.controls import (
-    NO_OPTION,
-    CheckBox,
-    ClickableLabel,
-    Dropdown,
-    ScaledLabel,
-    Switch,
-    button,
-    field_label,
-    labeled,
-    set_enabled,
-)
+from ui.widgets.controls import button, field_label, labeled, set_enabled
+from ui.widgets.dropdown import Dropdown, NO_OPTION
+from ui.widgets.text import ClickableLabel, ScaledLabel
+from ui.widgets.toggles import CheckBox, Switch
 from ui.widgets.dialogs import choose_audio_streams, show_message
 from ui.widgets.tooltip import tip
 from ui.tips import (

@@ -14,7 +14,9 @@ from core import formats
 from core.probe import probe_media
 from ui import scale
 from ui import theme as T
-from ui.widgets.controls import CheckBox, ScaledLabel, ScaledLineEdit, button, button_width_for
+from ui.widgets.controls import button, button_width_for
+from ui.widgets.text import ScaledLabel, ScaledLineEdit
+from ui.widgets.toggles import CheckBox
 from ui.widgets.panels import ASSETS
 from ui.widgets.tracklist import TrackListBox, describe_stream, row_label
 from ui.workers import run_async

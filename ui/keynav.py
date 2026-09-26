@@ -11,7 +11,9 @@ from shiboken6 import isValid
 
 from ui import theme as T
 from ui.scale import fpx, px
-from ui.widgets.controls import Dropdown, SegmentedButton, _TimeField
+from ui.widgets.dropdown import Dropdown
+from ui.widgets.timespinner import _TimeField
+from ui.widgets.toggles import SegmentedButton
 from ui.widgets.panels import SubTabBar
 from ui.widgets.tracklist import _TrackRow
 

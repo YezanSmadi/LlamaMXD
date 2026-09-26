@@ -18,19 +18,14 @@ from PySide6.QtWidgets import (
 
 from core import formats, naming, presets
 from ui import scale
-from ui.widgets.carousel import ThumbnailCarousel, _ExpandedPreviewOverlay
-from ui.widgets.controls import (
-    NO_OPTION,
-    CheckBox,
-    Dropdown,
-    MarqueeLabel,
-    ScaledLineEdit,
-    TimeSpinner,
-    button,
-    button_width_for,
-    labeled,
-    set_enabled,
-)
+from ui.widgets.carousel import ThumbnailCarousel
+from ui.widgets.preview_overlay import _ExpandedPreviewOverlay
+from ui.widgets.controls import button, button_width_for, labeled, set_enabled
+from ui.widgets.dropdown import Dropdown, NO_OPTION
+from ui.widgets.marquee import MarqueeLabel
+from ui.widgets.text import ScaledLineEdit
+from ui.widgets.timespinner import TimeSpinner
+from ui.widgets.toggles import CheckBox
 from ui.widgets.dialogs import ask_text, ask_yes_no, confirm_output_path, show_message
 from ui.widgets.panels import MEDIA_FILTER, DropBox, SubTabBar, SummaryPanel
 from ui.widgets.tooltip import tip

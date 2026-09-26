@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QWidget
 
 from ui import keymap, scale
 from ui import theme as T
-from ui.widgets.controls import ui_font
+from ui.widgets.text import ui_font
 
 PROMPT = "Press a key…"
 

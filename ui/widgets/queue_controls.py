@@ -10,7 +10,9 @@ from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QWidget
 
 from ui import scale
 from ui import theme as T
-from ui.widgets.controls import Dropdown, ScaledLineEdit, draw_cross, ui_font
+from ui.widgets.controls import draw_cross
+from ui.widgets.dropdown import Dropdown
+from ui.widgets.text import ScaledLineEdit, ui_font
 from ui.widgets.svg import svg_renderer
 from ui.widgets.tooltip import tip
 

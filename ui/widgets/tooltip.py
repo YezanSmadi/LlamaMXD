@@ -10,7 +10,7 @@ from PySide6.QtGui import QCursor
 from ui import scale
 from ui import theme as T
 from ui.scale import px
-from ui.widgets.controls import ScaledLabel
+from ui.widgets.text import ScaledLabel
 
 TIP_DELAY_MS = 400       # how long the cursor must sit still over a widget before its tip shows
 _DELAY_MS = TIP_DELAY_MS
