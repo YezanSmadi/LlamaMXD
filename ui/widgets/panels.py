@@ -362,8 +362,8 @@ def _request_frames(side, start=0):
                 _LOADING["failed"] = True
                 llamalog.get("ui").warning("The loading animation (assets/LlamaDiscLoading) failed to "
                                            "load; the spinner stays blank")
-        elif _LOADING.get("gen") == gen:
-            frames[n] = frame
+        elif _LOADING.get("gen") == gen or frames[n] is None:
+            frames[n] = frame   # a superseded size still beats a blank frame
 
     def one(n):
         if _LOADING.get("gen") != gen:

@@ -283,8 +283,9 @@ class EncodingTab(MediaTab):
             self.app.media.start_hdr_render(self._preview_path)
 
     def reset_hdr_preview(self):
-        """A new file is coming: HDR→SDR goes back off, without swapping frames (the carousel
-        is about to be cleared anyway)."""
+        """A new file is coming: the old raw frames go, and HDR→SDR goes back off without
+        swapping frames (the carousel is about to be cleared anyway)."""
+        self._raw_frames = []
         if not self.hdr_switch.isChecked():
             return
         self.hdr_switch.setChecked(False)

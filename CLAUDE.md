@@ -2385,7 +2385,11 @@ autosave when the tab is left and on close.
   screen, and each replaces its old-size frame the moment it's ready (`emit_progress`), so a spinner
   that grew is sharp at once rather than playing stretched frames until the whole set is done — the
   decode (~110 frames/s at 640) outruns playback (60). A newer size bumps a generation that cancels
-  the frames not yet started. Each frame's scoring doesn't depend on the size, so it's kept after the
+  the frames not yet started; a frame of a superseded size is still kept when its slot is empty. It
+  can't starve: each decode starts at the frame about to play and every finished frame stays until
+  replaced — a size change every 150ms for 4s from a cold start (27 decodes, each cancelling the
+  last) loaded 44 / 72 / 105 / 133 / 143 frames by each half second, with blanks only in the first
+  60ms, before any frame existed. Each frame's scoring doesn't depend on the size, so it's kept after the
   first decode (`_LOADING["scores"]`, 5MB with compact types) and a re-decode only resizes. Measured
   growing a spinner from 256 to 640px: stretched frames shown 94 (1.55s) -> 2 (0.03s), the whole set
   1.55s -> 0.9s; frames byte-identical to the previous code at 256 / 384 / 640, cold and cached; a
@@ -3002,7 +3006,11 @@ picks the toast. **Only one ffmpeg runs at a time.**
     take it as `max_size`, shrinking each frame as it is decoded (`previews._shrink`, `cv2.INTER_AREA`
     — 3.7ms per 4K frame against Pillow LANCZOS's 57ms); `pil_to_qimage` stores an image without alpha
     as `Format_RGB32` (Qt's native format; see below). A 4K frame on a 1440p screen is 14MB.
-    **The previous file's tone-mapped set is dropped when the file changes** (`select_file`); it
+    **The previous file's frames — raw and tone-mapped — are dropped when the file changes**
+    (`select_file`, and Encoding's own `_raw_frames` in `reset_hdr_preview`); only a reselect of the
+    same file reuses them. The raw set used to wait for the next file's frames to replace it, so a
+    file with none (audio, cover art, no preview) kept the old video's: 141MB of a 4K file's frames
+    held behind an audio file (269MB committed -> 128MB, idle 121MB). The tone-mapped set
     used to stay until the next render (316MB held behind an SDR clip) and was never reused anyway.
     Measured on a real display, working set (before -> after): idle with the spinner ready 376 ->
     173MB, a 1080p file 464 -> 241, 4K 703 -> 288, 4K HDR with both sets 1022 -> 398, back to 1080p 785

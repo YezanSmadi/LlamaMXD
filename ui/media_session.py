@@ -97,7 +97,11 @@ class MediaSession:
                 tab.carousel.clear_preview()
             # Interrupt the old file's HDR render and turn its HDR->SDR switch off.
             self._cancel_hdr_render()
-            # Only one tone-mapped set is cached; don't hold the old one (~300MB at 4K) meanwhile.
+            # Only the current file's frames are kept (a reselect of it reuses them): don't hold
+            # the old raw and tone-mapped sets meanwhile, or at all if the new file has none.
+            self.thumb_frames = []
+            self.thumb_frames_path = None
+            self._thumb_seeks = []
             self.hdr_frames = None
             self.hdr_frames_path = None
             self._reset_hdr_previews()
