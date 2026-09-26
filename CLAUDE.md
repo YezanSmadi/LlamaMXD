@@ -116,6 +116,14 @@ own settings.json / presets.json, and fixture clips are generated there by the b
   art, a late-start MKV, and `keys.mp4` / `sparse.mp4` for the keyframe path and its exact redos):
   each frame's seek, that repeating it gives the same picture, and the tone-mapped set at those seeks.
 
+- `check_leaks` — each user action repeated after a warm-up (importing video and audio, dialogs,
+  toasts, queue rows and their details, theme / tab switches, expanding the preview, a dropdown's
+  popup, a Downloader fetch): live QObjects, widgets, top-level windows, threads, theme-signal
+  connections and scale bindings must not grow. Deferred deletes are flushed and dead bindings swept
+  first (the harness pumps events outside a real event loop, where deleteLater never runs). Memory
+  isn't compared; measured by hand it plateaus (imports: +39MB at 20 rounds, +40MB at 60 — the
+  spinner's frames filling in; resizes +5.5MB either way).
+
 UI checks end through `harness.finish()` (`TerminateProcess` once their results are printed): Qt's
 native teardown crashes at exit now and then (3 of 10 runs on one check, before and after any
 change here), and even `os._exit` runs the DLLs' unload code where it happens.
@@ -2684,7 +2692,9 @@ autosave when the tab is left and on close.
   Verified on the real desktop: no `WS_CAPTION`, `frameGeometry == geometry`.
   The OS file pickers (`QFileDialog`) are Windows' own and stay native. `show_message`,
   `ask_yes_no` (True only on an explicit Yes), `ask_text` (stripped text or
-  None), `confirm_output_path`. `AudioStreamPickerDialog` /
+  None), `confirm_output_path`. **`show_modal` deletes the dialog** (`deleteLater` after `exec`,
+  so callers still read its entry or picks first): the window owns every dialog, so each one used
+  to live as long as the window — about 0.45MB and 23 objects per popup, found by `check_leaks`. `AudioStreamPickerDialog` /
   `choose_audio_streams` — Encoding's **Choose Stream(s)**, which holds nothing but the
   tracks: no title and no explanation (`MessageDialog.SHOW_HEADER = False` skips both), a
   `TrackListBox` (one checkbox per audio stream, drag a row to reorder, marquee for a long

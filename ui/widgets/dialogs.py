@@ -141,7 +141,11 @@ class MessageDialog(QDialog):
         self.done(0)
 
     def show_modal(self):
+        """Run the dialog; its button's label. The dialog is deleted once control returns to the
+        event loop (the window owns it, so it would otherwise live as long as the window) —
+        after the caller has read whatever it needs from it."""
         self.exec()
+        self.deleteLater()
         return self.result_label
 
 
