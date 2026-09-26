@@ -451,7 +451,8 @@ class SettingsTab(QWidget):
         notice_box = BorderedFrame(color_key="secondary")
         scale.fixed(notice_box, w=_ABOUT_NOTICE_W)
         notice_l = QVBoxLayout(notice_box)
-        scale.margins(notice_l, 9, 5, 5, 5)
+        pad_left, pad_right = 9, 5
+        scale.margins(notice_l, pad_left, 5, pad_right, 5)
         # A stock QLabel so the text is selectable (see MessageDialog). Its font is an
         # instance stylesheet re-bound on every rescale: a plain setFont is overridden at the
         # next polish. Rich text only to link the GNU URL; the wording is about.NOTICE verbatim.
@@ -473,7 +474,10 @@ class SettingsTab(QWidget):
         # The link colour is inline (rich text ignores CSS), so a theme change rebuilds the text.
         T.theme.changed.connect(lambda: notice.setText(notice_html()))
         scale.bind_style(notice, lambda: f"font-size: {scale.font_px(12)}px;")
-        scale.fixed(notice, w=_ABOUT_NOTICE_W - 14)
+        # The box's rounded width less its rounded margins: scaling `W - 14` alone rounds a pixel
+        # wider at some scales and squeezes the box.
+        scale.bind(notice, lambda: notice.setFixedWidth(
+            scale.px(_ABOUT_NOTICE_W) - scale.px(pad_left) - scale.px(pad_right)), "fixed-w")
         notice_l.addWidget(notice)
         page.addWidget(notice_box, 0, Qt.AlignLeft)
         scale.spacer(page, 6)

@@ -29,10 +29,7 @@ from PySide6.QtWidgets import QWidget  # noqa: E402
 
 SCALES = (1.0, 1.5, 2.0)
 # Squeezes that predate the test suite: (state prefix, widget path suffix). Reported, not failed.
-KNOWN_SQUEEZE = [
-    # The About page's license box is 1px narrower than its content at 1.5x.
-    ("Settings/About@1.5", "/BorderedFrame#0: needs 967x170, has 966x"),
-]
+KNOWN_SQUEEZE = []
 BASE_W, BASE_H = 896, 540
 
 # Free disk space changes as tests write files, and Settings shows it: pin it.

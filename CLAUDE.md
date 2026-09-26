@@ -132,9 +132,11 @@ change here), and even `os._exit` runs the DLLs' unload code where it happens.
 - `check_jobs` — real Mux / Encode jobs through `FfmpegJob`, their outputs probed (streams, languages,
   length, each stream's start time); stop() mid-run; a failing job's reason.
 
-Each check was shown to fail on a deliberate one-line break. **Known issue**: the About license box
-is 1px squeezed at 1.5x (reported as KNOWN, not failed). The jobs check's `stream_starts` guards the
-trim + Passthru fix below.
+Each check was shown to fail on a deliberate one-line break. There are no KNOWN exceptions: the About
+license box's 1px squeeze at 1.5x is fixed (the notice's width is now the box's rounded width less its
+rounded margins; scaling `644 - 14` on its own came out a pixel too wide at 39 of 241 scales from 0.6x
+to 3.0x). `check_runners` also reads back each job's CPU class, I/O and memory priority. The jobs
+check's `stream_starts` guards the trim + Passthru fix below.
 
 ## Architecture
 
@@ -2229,7 +2231,15 @@ Enter/focus-out, and never while invalid) holds `app.naming_template`.
 **Priority Level** (High / Above Normal / Normal / Below Normal / Low,
 default Normal) is applied to every ffmpeg / yt-dlp job at launch
 (`creationflags`) and immediately to a running one (`job.set_priority` via
-`QueueTab.apply_priority`). Realtime is deliberately not offered. yt-dlp's
+`QueueTab.apply_priority`). Realtime is deliberately not offered. **Below Normal and
+Low also lower the job's disk I/O and memory priority** (`priority.io_memory_for`: I/O low / very low
+via `NtSetInformationProcess` class 33, which has no documented API; memory 4 / 2 of 5 via
+`SetProcessInformation`), set right after launch (`ProcessJob._launch`, since the creation flag only
+carries the CPU class) and on every change; Normal and up put both back to normal. Measured with two
+unbuffered readers on one hard disk: the other reader got 70MB/s beside a job at normal I/O priority
+and 174MB/s (185 alone) beside one at low. The HDR preview render keeps its fixed Below Normal CPU
+class on purpose: under a High job it yields, under a Low one it outranks the job, which is right for
+work the user is looking at. yt-dlp's
 whole process tree is set, and re-set about once a second in `poll_events`
 while the level isn't Normal, since a child only inherits a Low/Below Normal
 parent's class (its ffmpeg merge would otherwise run at Normal under a High
@@ -2388,7 +2398,11 @@ autosave when the tab is left and on close.
   *and the hub collar* (the collar was missing at first, and left a thin pink line where the
   stripe meets the hub — its edge pixels are pink-to-collar blends), the ring against the collar
   and the overlay. A pixel goes to the stroke it matches best. Scoring runs on each frame's
-  distinct colours (`np.unique`) rather than every pixel, ~2x faster (load ~4s on a worker).
+  distinct colours (`np.unique`), and only for pixels inside `_candidate_box()` — the RGB bounds of
+  every blend line out to where it leaves the colour cube, widened by the tolerance, derived from the
+  constants so it can't drift — which rules out ~75% of pixels with no change to the result. Frames
+  decode on up to half the CPUs (at most 3), leaving the rest to the window being built. Load at the
+  default size 4.9s -> 0.9s (640px: 6.1s -> 1.3s), every frame's image and themed data byte-identical.
   A frame with fewer than 100 strong stripe pixels (the whole rainbow side, and the edge-on
   frames 36-39 / 108) has nothing themed — anything that matched there is a look-alike.
   **Weights are scored at the full 640px and shrunk with the image** (`cv2.INTER_AREA`, in
