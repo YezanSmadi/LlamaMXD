@@ -132,15 +132,14 @@ def ffmpeg_commands():
     out = {}
     for tab, cases in (("Encoding", ENCODE_CASES), ("Muxing", MUX_CASES)):
         for name, settings in cases:
-            ffmpeg_vars.load(settings, tab)
+            job = ffmpeg_vars.derive(settings, tab)
             try:
-                argv = ffmpeg_build.compile_command("C:/out/temp.partial.mp4")
-                out[f"{tab}/{name}"] = {"argv": argv, "hdr_tonemap": ffmpeg_build.uses_hdr_tonemap()}
+                argv = ffmpeg_build.compile_command(job, "C:/out/temp.partial.mp4")
+                out[f"{tab}/{name}"] = {"argv": argv, "hdr_tonemap": ffmpeg_build.uses_hdr_tonemap(job)}
             except Exception as exc:        # a refusal is a result too
                 out[f"{tab}/{name}"] = {"error": f"{type(exc).__name__}: {exc}"}
-    ffmpeg_vars.load(ENCODE_CASES[0][1], "Encoding")
-    out["Encoding/h264_basic@detailed"] = ffmpeg_build.compile_command("C:/out/t.mp4", loglevel="level+info")
-    ffmpeg_vars.load({})
+    out["Encoding/h264_basic@detailed"] = ffmpeg_build.compile_command(
+        ffmpeg_vars.derive(ENCODE_CASES[0][1], "Encoding"), "C:/out/t.mp4", loglevel="level+info")
     return out
 
 

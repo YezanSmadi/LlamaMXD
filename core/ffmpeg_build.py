@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
 
-"""Builds the ffmpeg-python Stream for the job loaded into `core.ffmpeg_vars`: one builder per
-tab (Muxing is always `-c copy`), plus `compile_command()` for the full argv. Runs nothing."""
+"""Builds the ffmpeg-python Stream for a job (`core.ffmpeg_vars.JobVars`): one builder per tab
+(Muxing is always `-c copy`), plus `compile_command()` for the full argv. Runs nothing."""
 
 import ffmpeg
 
-from core import ffmpeg_vars as v
 from core import gpu
 from core.tools import tool_path
 from core.utilities import (
@@ -21,27 +20,27 @@ def _runner_flags(loglevel="error"):
     return ["-hide_banner", "-nostdin", "-loglevel", loglevel, "-nostats", "-progress", "pipe:1"]
 
 
-def _trim_kwargs():
+def _trim_kwargs(job):
     """-ss as an input kwarg and -t as an output kwarg (never an output-side -to), each only
     when set."""
-    input_kwargs = {"ss": v.START_TIME} if v.START_SECS else {}
-    output_kwargs = {"t": v.DURATION_TIME} if v.DURATION_SECS else {}
+    input_kwargs = {"ss": job.start_time} if job.start_secs else {}
+    output_kwargs = {"t": job.duration_time} if job.duration_secs else {}
     return input_kwargs, output_kwargs
 
 
-def uses_hdr_tonemap():
-    """Whether the loaded job runs the libplacebo tone-map (HDR_TO_SDR on a kept video stream of
+def uses_hdr_tonemap(job):
+    """Whether `job` runs the libplacebo tone-map (HDR_TO_SDR on a kept video stream of
     an Encode job): decides the Vulkan device flags and the post-encode colour-tag check."""
     return (
-        v.SOURCE_TAB != "Muxing" and v.HDR_TO_SDR and not v.STRIP_VIDEO
+        job.source_tab != "Muxing" and job.hdr_to_sdr and not job.strip_video
         and supports_libplacebo()
     )
 
 
-def _faststart_kwargs():
+def _faststart_kwargs(job):
     """+faststart (moov atom first, for progressive playback), only for mp4/mov: other muxers
     ignore it by leniency, not by contract."""
-    return {"movflags": "+faststart"} if v.OUTPUT_EXT in (".mp4", ".mov") else {}
+    return {"movflags": "+faststart"} if job.output_ext in (".mp4", ".mov") else {}
 
 
 def _mux_input(entry, primary, input_kwargs, external_cache):
@@ -66,75 +65,75 @@ def _input_positions(streams):
     return {node: position for position, node in enumerate(inputs)}
 
 
-def build_mux_command(output_path=None):
+def build_mux_command(job, output_path=None):
     """Muxing job -> Stream: one `-map` per checked track (the primary or an added file), all
-    `-c copy`. Writes to `output_path` if given, else OUTPUT_PATH."""
-    input_kwargs, output_kwargs = _trim_kwargs()
-    primary = ffmpeg.input(v.INPUT_FILE, **input_kwargs)
+    `-c copy`. Writes to `output_path` if given, else the job's own."""
+    input_kwargs, output_kwargs = _trim_kwargs(job)
+    primary = ffmpeg.input(job.input_file, **input_kwargs)
     external_cache = {}
 
     streams = []
-    if not v.STRIP_VIDEO:
-        for entry in v.VIDEO_TRACKS:
+    if not job.strip_video:
+        for entry in job.video_tracks:
             src = _mux_input(entry, primary, input_kwargs, external_cache)
             streams.append(src[f"v:{entry['index']}"])
 
-    if not v.STRIP_AUDIO:
-        for entry in v.AUDIO_TRACKS:
+    if not job.strip_audio:
+        for entry in job.audio_tracks:
             src = _mux_input(entry, primary, input_kwargs, external_cache)
             streams.append(src[f"a:{entry['index']}"])
 
     output_kwargs["c"] = "copy"
     # Global, not `-strict:a`: see build_encode_command.
     output_kwargs["strict"] = "-2"
-    output_kwargs.update(_faststart_kwargs())
+    output_kwargs.update(_faststart_kwargs(job))
     # No A/V Sync here: -fps_mode needs a real video encode.
 
-    return ffmpeg.output(*streams, output_path or v.OUTPUT_PATH, **output_kwargs).overwrite_output()
+    return ffmpeg.output(*streams, output_path or job.output_path, **output_kwargs).overwrite_output()
 
 
-def build_encode_command(output_path=None):
+def build_encode_command(job, output_path=None):
     """Encoding job -> Stream: re-encodes every stream that isn't stripped, with one `-map` per
     output stream (without explicit maps ffmpeg takes one best video and one best audio).
-    Writes to `output_path` if given, else OUTPUT_PATH."""
-    input_kwargs, output_kwargs = _trim_kwargs()
-    stream = ffmpeg.input(v.INPUT_FILE, **input_kwargs)
+    Writes to `output_path` if given, else the job's own."""
+    input_kwargs, output_kwargs = _trim_kwargs(job)
+    stream = ffmpeg.input(job.input_file, **input_kwargs)
     external_cache = {}       # one input per external audio file
     streams = []
 
-    if v.STRIP_VIDEO:
+    if job.strip_video:
         output_kwargs["vn"] = None
     else:
         streams.append(stream["v"])
-        output_kwargs["c:v"] = v.VIDEO_CODEC_ARG
+        output_kwargs["c:v"] = job.video_codec_arg
         # ffmpeg otherwise copies the source's per-track statistics tags (BPS, DURATION,
         # title, ...) onto the re-encoded stream, so tools report the source's bitrate.
         # Side effect: any `-map_metadata` of a type turns off the default copy for every
         # stream, so copied audio tracks get their tags mapped back below.
         output_kwargs["map_metadata:s:v:0"] = "-1"
-        if v.HW_ENCODER:
+        if job.hw_encoder:
             # A GPU encoder takes its own rate-control flags, not -crf / -q:v.
-            output_kwargs.update(gpu.rate_control_kwargs(v.HW_ENCODER, v.QUALITY))
-        elif v.QUALITY_KIND == "crf":
-            output_kwargs["crf"] = v.QUALITY
-        elif v.QUALITY_KIND == "qscale":
-            output_kwargs["q:v"] = v.QUALITY
-        if v.PROFILE_ARG:
-            output_kwargs["profile:v"] = v.PROFILE_ARG
-        if v.LEVEL_ARG:
-            output_kwargs["level:v"] = v.LEVEL_ARG
-        if v.PIX_FMT_ARG:
-            output_kwargs["pix_fmt"] = v.PIX_FMT_ARG
-        if v.QUALITY_PRESET_ARG:
-            output_kwargs["quality"] = v.QUALITY_PRESET_ARG
-        if v.FPS_ARG:
-            output_kwargs["r"] = v.FPS_ARG
-        output_kwargs.update(v.SPEED_ARG)
-        if v.AV_SYNC:
+            output_kwargs.update(gpu.rate_control_kwargs(job.hw_encoder, job.quality))
+        elif job.quality_kind == "crf":
+            output_kwargs["crf"] = job.quality
+        elif job.quality_kind == "qscale":
+            output_kwargs["q:v"] = job.quality
+        if job.profile_arg:
+            output_kwargs["profile:v"] = job.profile_arg
+        if job.level_arg:
+            output_kwargs["level:v"] = job.level_arg
+        if job.pix_fmt_arg:
+            output_kwargs["pix_fmt"] = job.pix_fmt_arg
+        if job.quality_preset_arg:
+            output_kwargs["quality"] = job.quality_preset_arg
+        if job.fps_arg:
+            output_kwargs["r"] = job.fps_arg
+        output_kwargs.update(job.speed_arg)
+        if job.av_sync:
             # -fps_mode needs ffmpeg 5.1+; older builds get -vsync, same behaviour.
             output_kwargs["fps_mode" if supports_fps_mode() else "vsync"] = "cfr"
         video_filters = []
-        if v.HDR_TO_SDR:
+        if job.hdr_to_sdr:
             if not supports_libplacebo():
                 # BT.2390 or nothing, never a lesser curve. Normally caught at queue time; this
                 # surfaces as a Failed task.
@@ -145,20 +144,20 @@ def build_encode_command(output_path=None):
             output_kwargs["colorspace"] = "bt709"
             # peak_detect off only with a mastering peak and a real MaxCLL (see
             # libplacebo_tonemap_vf).
-            has_reliable_metadata = v.MASTERING_MAX_NITS is not None and bool(v.MAX_CLL)
+            has_reliable_metadata = job.mastering_max_nits is not None and bool(job.max_cll)
             video_filters.append(libplacebo_tonemap_vf(peak_detect=not has_reliable_metadata))
-        if v.SCALE_VF:
+        if job.scale_vf:
             # After the tone-map, which already ends on a software yuv420p frame.
-            video_filters.append(v.SCALE_VF)
+            video_filters.append(job.scale_vf)
         if video_filters:
             output_kwargs["vf"] = ",".join(video_filters)
 
     copied = []      # (output position, input stream, cfg) of each copied audio track
-    if v.STRIP_AUDIO or not v.AUDIO_STREAMS:
+    if job.strip_audio or not job.audio_streams:
         output_kwargs["an"] = None
     else:
         # `i` is the position in the output (what `:a:N` addresses), not `src_index`.
-        for i, cfg in enumerate(v.AUDIO_STREAMS):
+        for i, cfg in enumerate(job.audio_streams):
             # A stream from another file is mapped from its own input, trimmed like the primary.
             source = _mux_input(cfg, stream, input_kwargs, external_cache)
             streams.append(source[f"a:{cfg['src_index']}"])
@@ -166,7 +165,7 @@ def build_encode_command(output_path=None):
                 copied.append((i, source, cfg))
                 # The input seek lands on the keyframe before the trim start; a copied track kept
                 # the packets from there, so the muxer shifted the re-encoded streams ~1s later.
-                if v.START_SECS:
+                if job.start_secs:
                     output_kwargs[f"copypriorss:a:{i}"] = 0
             output_kwargs[f"c:a:{i}"] = cfg["codec_arg"]
             if cfg["bitrate_arg"]:
@@ -193,24 +192,23 @@ def build_encode_command(output_path=None):
     # Global, not `-strict:a`: an experimental codec-in-container pairing (TrueHD in MP4) is
     # refused by the muxer's own compliance check, which `-strict:a` doesn't reach.
     output_kwargs["strict"] = "-2"
-    output_kwargs.update(_faststart_kwargs())
+    output_kwargs.update(_faststart_kwargs(job))
 
-    return ffmpeg.output(*streams, output_path or v.OUTPUT_PATH, **output_kwargs).overwrite_output()
-
-
-def build_command(output_path=None):
-    """Dispatch on which tab queued the loaded job."""
-    if v.SOURCE_TAB == "Muxing":
-        return build_mux_command(output_path)
-    return build_encode_command(output_path)
+    return ffmpeg.output(*streams, output_path or job.output_path, **output_kwargs).overwrite_output()
 
 
-def compile_command(output_path=None, loglevel="error"):
-    """The complete argv for the loaded job, with the runner's flags: what `FfmpegJob` launches.
-    Call after `ffmpeg_vars.load()`. The Vulkan flags go in the `cmd` prefix, not
+def build_command(job, output_path=None):
+    """Dispatch on which tab queued `job`."""
+    if job.source_tab == "Muxing":
+        return build_mux_command(job, output_path)
+    return build_encode_command(job, output_path)
+
+
+def compile_command(job, output_path=None, loglevel="error"):
+    """The complete argv for `job`, with the runner's flags: what `FfmpegJob` launches. The Vulkan flags go in the `cmd` prefix, not
     `.global_args()`: after the output spec ffmpeg rejects `-filter_hw_device`."""
-    graph = build_command(output_path)
+    graph = build_command(job, output_path)
     prefix = _runner_flags(loglevel)
-    if uses_hdr_tonemap():
+    if uses_hdr_tonemap(job):
         prefix += VULKAN_DEVICE_FLAGS
     return ffmpeg.compile(graph, cmd=[tool_path("ffmpeg"), *prefix])

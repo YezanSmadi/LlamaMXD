@@ -1,14 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""One queued job's settings flattened into module variables for building its ffmpeg command.
-
-`load()` fills them as the job starts, so they describe the job as it was queued, not the form
-now. Read them through the module (`from core import ffmpeg_vars as v`; `v.INPUT_FILE`):
-`from ... import NAME` copies the value once. Most come raw, as the UI shows them
-(`ENCODER = "H.264"`), and as an ffmpeg-ready `*_ARG` (`VIDEO_CODEC_ARG = "libx264"`). A key
-from the other tab keeps its default, so a Mux job's `VIDEO_CODEC_ARG` is "copy"."""
+"""One queued job's settings translated into what its ffmpeg command needs: `derive()` returns
+a frozen `JobVars`, built when the job starts from the settings it was queued with (never the form
+as it is now). Values are ffmpeg-ready (`video_codec_arg = "libx264"`); a key from the other tab
+keeps its default, so a Mux job's `video_codec_arg` is "copy"."""
 
 import os
+from dataclasses import dataclass, field
 
 from core import formats, gpu
 
@@ -78,89 +76,50 @@ _LEVEL_ARGS = {
 _CHANNEL_COUNTS = {"Mono": 1, "Stereo": 2, "5.1": 6, "5.2": 7, "7.1": 8, "7.2": 9, "9.1": 10}
 
 # ---------------------------------------------------------------------- #
-#  The variables (defaults = "no job loaded")
+#  The job
 # ---------------------------------------------------------------------- #
-
-# --- Job ---
-SOURCE_TAB = ""             # "Encoding" or "Muxing" — who queued this job
-
-# --- Input file ---
-INPUT_FILE = ""             # full path
-INPUT_DIR = ""              # folder it lives in
-INPUT_NAME = ""             # "clip.mkv"
-INPUT_STEM = ""             # "clip"
-INPUT_EXT = ""              # ".mkv" (lowercased)
-
-# --- Output ---
-OUTPUT_PATH = ""            # full path, as typed/browsed/auto-filled
-OUTPUT_DIR = ""
-OUTPUT_NAME = ""            # "clip_encoded.mp4"
-OUTPUT_STEM = ""            # "clip_encoded"
-OUTPUT_EXT = ""             # extension actually on OUTPUT_PATH
-OUTPUT_FORMAT = ""          # dropdown value, ".mp4"; a hand-typed path's extension can differ
-
-# --- Trim ---
-START_SECS = 0              # int seconds
-DURATION_SECS = 0           # int seconds; 0 means "to the end of the file"
-END_SECS = None             # START_SECS + DURATION_SECS, or None when to-end
-START_TIME = "00:00:00"     # the same three as HH:MM:SS
-DURATION_TIME = "00:00:00"
-END_TIME = None
-
-# Never use END_TIME / END_SECS as an output-side -to: after an input-side -ss the output
-# timeline starts at 0, so `-ss 00:21:36 -i in -to 00:21:41` makes a 21m41s clip. Pass both -ss
-# and -to to the input, or (the default) an output-side -t duration.
-
-# --- Stream presence ---
-AV_SYNC = False             # align A/V start + pass through common metadata
-STRIP_VIDEO = False         # -> -vn   (check before using any video value)
-STRIP_AUDIO = False         # -> -an   (never both — the UI makes that unreachable)
-
-# --- Encoding / Video ---
-ENCODER = formats.SELECT    # "H.264", ... or "Select"
-VIDEO_CODEC_ARG = "copy"    # -c:v   "libx264", ... or "copy"
-PROFILE = ""                # "High 10", ... ("" when the codec has none)
-PROFILE_ARG = None          # -profile:v   "high10", ... or None
-LEVEL = ""                  # "4.0", ... ("" when the codec has none)
-LEVEL_ARG = None            # -level:v   "4.0", ... or None
-PIX_FMT_ARG = None          # -pix_fmt   "yuv422p10le", ... or None (see _PIX_FMT_ARGS)
-QUALITY_PRESET_ARG = None   # -quality   "film3+", ... or None (CineForm only; see _QUALITY_PRESET_ARGS)
-QUALITY = None              # slider value (int); None on a Mux job
-QUALITY_KIND = None         # "crf" (-crf) / "qscale" (-q:v) / None on Select (QUALITY still set)
-SPEED = ""                  # "fast", "4", ... ("" when the codec has none)
-SPEED_ARG = {}              # {"preset": "fast"} / {"cpu-used": "4", "deadline": "good"} / {}
-GPU_ENABLED = False         # the Settings tab's global GPU switch
-HW_ENCODER = None           # hardware encoder id ("h264_nvenc") for ENCODER, else None (core.gpu)
-HDR_TO_SDR = False          # HDRtoSDR switch
-MASTERING_MAX_NITS = None   # the source's ST 2086 mastering peak (nits), snapshotted at queue time
-MAX_CLL = None              # the source's MaxCLL; with a mastering peak, turns peak_detect off
-RESOLUTION = formats.SOURCE_RESOLUTION   # "Source", "1080p", ... (formats.RESOLUTIONS)
-SOURCE_HEIGHT = None        # the source's height (px), snapshotted at queue time
-SCALE_VF = None             # -vf "scale=-2:<height>" for a real downscale, else None
-FPS = formats.SOURCE_FPS    # "Source", "30", ... (formats.FPS_VALUES)
-SOURCE_FPS = None           # the source's fps, snapshotted at queue time
-FPS_ARG = None              # -r value for a real rate change, else None
-
-# --- Encoding / Audio ---
-# One entry per included audio stream, in output order ([] when stripped): {"src_index" (its
-# index in its own file), "source"/"file" (primary or an external file), "codec_arg" ("copy"
-# for Passthru), "bitrate_arg", "channels_arg", "sample_rate_arg" (None = omit), "language"
-# (re-encoded streams only)}. Per-stream flags address the position in this list, not
-# src_index: ffmpeg numbers `:a:N` over the output's streams.
-AUDIO_STREAMS = []
-
-# --- Muxing ---
-VIDEO_TRACK = "Auto"
-VIDEO_TRACK_INDEX = None
-VIDEO_TRACK_FILE = ""
-AUDIO_TRACK = "Auto"
-AUDIO_TRACK_INDEX = None
-AUDIO_TRACK_FILE = ""
+@dataclass(frozen=True)
+class JobVars:
+    """One job's ffmpeg-ready values (the defaults describe "no job")."""
+    source_tab: str = ""            # "Encoding" or "Muxing"
+    input_file: str = ""
+    output_path: str = ""
+    output_ext: str = ""            # the extension actually on output_path, lowercased
+    # Trim. Never use an end time as an output-side -to: after an input-side -ss the output starts
+    # at 0, so `-ss 00:21:36 -i in -to 00:21:41` makes a 21m41s clip. -ss in, -t out.
+    start_secs: int = 0
+    duration_secs: int = 0          # 0 = to the end of the file
+    start_time: str = "00:00:00"
+    duration_time: str = "00:00:00"
+    av_sync: bool = False
+    strip_video: bool = False
+    strip_audio: bool = False
+    # Encoding / video
+    video_codec_arg: str = "copy"   # -c:v (a hardware encoder id when the GPU path applies)
+    profile_arg: str = None         # -profile:v
+    level_arg: str = None           # -level:v
+    pix_fmt_arg: str = None         # -pix_fmt (the intermediates only)
+    quality_preset_arg: str = None  # -quality (CineForm only)
+    quality: int = None             # the slider value
+    quality_kind: str = None        # "crf" / "qscale" / None
+    speed_arg: dict = field(default_factory=dict)   # {"preset": ...} / {"cpu-used": ..., "deadline": "good"}
+    hw_encoder: str = None          # e.g. "h264_nvenc": decides the rate-control flags
+    hdr_to_sdr: bool = False
+    mastering_max_nits: float = None    # the source's, snapshotted at queue time
+    max_cll: int = None
+    scale_vf: str = None            # -vf "scale=-2:<height>" for a real downscale
+    fps_arg: str = None             # -r for a real rate change
+    # One entry per included audio stream, in output order: {"src_index" (its index in its own
+    # file), "source"/"file", "codec_arg" ("copy" for Passthru), "bitrate_arg", "channels_arg",
+    # "sample_rate_arg" (None = omit), "language" (re-encoded streams only)}. Per-stream flags
+    # address the position in this list: ffmpeg numbers `:a:N` over the output's streams.
+    audio_streams: list = field(default_factory=list)
+    # Muxing: {"source", "file", "index"} per checked track; index is 0-based among that file's own
+    # streams of the kind (`-map <input>:v:<index>`).
+    video_tracks: list = field(default_factory=list)
+    audio_tracks: list = field(default_factory=list)
 
 
-# ---------------------------------------------------------------------- #
-#  Loading
-# ---------------------------------------------------------------------- #
 def _hms(total_seconds):
     """Seconds as HH:MM:SS."""
     hours, rest = divmod(int(total_seconds), 3600)
@@ -232,103 +191,46 @@ def _speed_kwargs(encoder, value):
 
 
 def derive(settings, source_tab=""):
-    """Every variable above, from one task's settings dict, as `{NAME: value}`."""
+    """The `JobVars` for one task's settings dict."""
     s = settings or {}
-
-    input_file = s.get("input_file") or ""
     output_path = s.get("output_path") or ""
-    in_dir, in_name, in_stem, in_ext = _split_path(input_file)
-    out_dir, out_name, out_stem, out_ext = _split_path(output_path)
-
     start = int(s.get("start_secs") or 0)
     duration = int(s.get("duration_secs") or 0)
-    end = start + duration if duration else None
 
     encoder = s.get("encoder") or formats.SELECT
     profile = s.get("profile") or ""
     level = s.get("level") or ""
     quality_spec = formats.quality_for(encoder)
-    speed = s.get("speed") or ""
-    gpu_enabled = bool(s.get("gpu_enabled"))
     # Hardware encoders have their own -preset vocabulary: omit it and use their default.
-    hw_encoder = gpu.hw_encoder_for(encoder) if gpu_enabled else None
-    video_codec_arg = hw_encoder or formats.VIDEO_ENCODERS.get(encoder, "copy")
-    speed_arg = {} if hw_encoder else _speed_kwargs(encoder, speed)
+    hw_encoder = gpu.hw_encoder_for(encoder) if s.get("gpu_enabled") else None
 
-    resolution = s.get("resolution") or formats.SOURCE_RESOLUTION
-    source_height = s.get("source_height")
-    scale_vf = _scale_vf(resolution, source_height)
-
-    fps = s.get("fps") or formats.SOURCE_FPS
-    source_fps = s.get("source_fps")
-    fps_arg = _fps_arg(fps, source_fps)
-
-    audio_streams = [_audio_stream_args(entry) for entry in (s.get("audio_streams") or [])]
-
-    video_tracks = s.get("video_tracks") or []
-    audio_tracks = s.get("audio_tracks") or []
-
-    return {
-        "SOURCE_TAB": source_tab,
-
-        "INPUT_FILE": input_file,
-        "INPUT_DIR": in_dir,
-        "INPUT_NAME": in_name,
-        "INPUT_STEM": in_stem,
-        "INPUT_EXT": in_ext,
-
-        "OUTPUT_PATH": output_path,
-        "OUTPUT_DIR": out_dir,
-        "OUTPUT_NAME": out_name,
-        "OUTPUT_STEM": out_stem,
-        "OUTPUT_EXT": out_ext,
-        "OUTPUT_FORMAT": s.get("output_format") or "",
-
-        "START_SECS": start,
-        "DURATION_SECS": duration,
-        "END_SECS": end,
-        "START_TIME": _hms(start),
-        "DURATION_TIME": _hms(duration),
-        "END_TIME": _hms(end) if end is not None else None,
-
-        "AV_SYNC": bool(s.get("av_sync")),
-        "STRIP_VIDEO": bool(s.get("strip_video")),
-        "STRIP_AUDIO": bool(s.get("strip_audio")),
-
-        "ENCODER": encoder,
-        "VIDEO_CODEC_ARG": video_codec_arg,
-        "PROFILE": profile,
-        "PROFILE_ARG": _profile_arg(encoder, profile),
-        "LEVEL": level,
-        "LEVEL_ARG": _LEVEL_ARGS.get(encoder, {}).get(level, level) or None,
-        "PIX_FMT_ARG": _PIX_FMT_ARGS.get(encoder, {}).get(profile),
-        "QUALITY_PRESET_ARG": _QUALITY_PRESET_ARGS.get(encoder, {}).get(profile),
-        "QUALITY": int(s["quality"]) if s.get("quality") is not None else None,
-        "QUALITY_KIND": quality_spec["kind"] if quality_spec else None,
-        "SPEED": speed,
-        "SPEED_ARG": speed_arg,
-        "GPU_ENABLED": gpu_enabled,
-        "HW_ENCODER": hw_encoder,
-        "HDR_TO_SDR": bool(s.get("hdr_to_sdr")),
-        "MASTERING_MAX_NITS": s.get("mastering_max_nits"),
-        "MAX_CLL": s.get("max_cll"),
-        "RESOLUTION": resolution,
-        "SOURCE_HEIGHT": source_height,
-        "SCALE_VF": scale_vf,
-        "FPS": fps,
-        "SOURCE_FPS": source_fps,
-        "FPS_ARG": fps_arg,
-
-        "AUDIO_STREAMS": audio_streams,
-
-        # Each entry: {"source", "file", "index"}; index is 0-based among that file's own
-        # streams of the kind (`-map <input>:v:<index>`).
-        "VIDEO_TRACKS": video_tracks,
-        "AUDIO_TRACKS": audio_tracks,
-    }
-
-
-def load(settings, source_tab=""):
-    """Point every module variable at one job's values (`load({})` resets them). Called on
-    the GUI thread as each job starts; one job runs at a time."""
-    globals().update(derive(settings, source_tab))
+    return JobVars(
+        source_tab=source_tab,
+        input_file=s.get("input_file") or "",
+        output_path=output_path,
+        output_ext=_split_path(output_path)[3],
+        start_secs=start,
+        duration_secs=duration,
+        start_time=_hms(start),
+        duration_time=_hms(duration),
+        av_sync=bool(s.get("av_sync")),
+        strip_video=bool(s.get("strip_video")),
+        strip_audio=bool(s.get("strip_audio")),
+        video_codec_arg=hw_encoder or formats.VIDEO_ENCODERS.get(encoder, "copy"),
+        profile_arg=_profile_arg(encoder, profile),
+        level_arg=_LEVEL_ARGS.get(encoder, {}).get(level, level) or None,
+        pix_fmt_arg=_PIX_FMT_ARGS.get(encoder, {}).get(profile),
+        quality_preset_arg=_QUALITY_PRESET_ARGS.get(encoder, {}).get(profile),
+        quality=int(s["quality"]) if s.get("quality") is not None else None,
+        quality_kind=quality_spec["kind"] if quality_spec else None,
+        speed_arg={} if hw_encoder else _speed_kwargs(encoder, s.get("speed") or ""),
+        hw_encoder=hw_encoder,
+        hdr_to_sdr=bool(s.get("hdr_to_sdr")),
+        mastering_max_nits=s.get("mastering_max_nits"),
+        max_cll=s.get("max_cll"),
+        scale_vf=_scale_vf(s.get("resolution") or formats.SOURCE_RESOLUTION, s.get("source_height")),
+        fps_arg=_fps_arg(s.get("fps") or formats.SOURCE_FPS, s.get("source_fps")),
+        audio_streams=[_audio_stream_args(entry) for entry in (s.get("audio_streams") or [])],
+        video_tracks=s.get("video_tracks") or [],
+        audio_tracks=s.get("audio_tracks") or [],
+    )

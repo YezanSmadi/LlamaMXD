@@ -141,7 +141,7 @@ core/theme.py             brand palettes, contrast helpers, settings.json read/w
 core/about.py             Settings' About page: repo / issue-tracker URLs, the GPL short notice, paths to LICENSE.txt and licenses/
 core/llamalog.py          LlamaLog: the rotating log file, crash hooks, URL scrubbing, per-job output ring buffer
 core/utilities.py         ffprobe media probe + duration, capability checks, preview frame decode
-core/ffmpeg_vars.py       one queued job's settings flattened into module globals (raw + *_ARG)
+core/ffmpeg_vars.py       one queued job's settings -> a frozen JobVars of ffmpeg-ready values
 core/ffmpeg_build.py      builds a Mux or Encode job's ffmpeg-python Stream / full argv
 core/ffmpeg_runner.py     runs one ffmpeg job off the GUI thread (progress, suspend/resume, stop)
 core/tools.py             resolves ffmpeg/ffprobe/yt-dlp/deno to absolute paths (bundled, then PATH)
@@ -1885,7 +1885,7 @@ status column. Clicking a row opens its details; the ✕ removes it.
   front of `rest`; returns `started` / `next` / `paused`.
 - **Removing the active row kills its process first** — a process must never
   outlive its row — and continues with the next job if the queue was running.
-- `_process_next` loads `ffmpeg_vars` and compiles the argv **on the GUI
+- `_process_next` derives the job's `JobVars` and compiles the argv **on the GUI
   thread** (workers only ever see a plain list), prints it, and starts an
   `FfmpegJob`; Downloader tasks go to `_start_download` (a `YtDlpJob` from the
   task's `download` plan).
@@ -2654,12 +2654,14 @@ picks the toast. **Only one ffmpeg runs at a time.**
 
 **Jobs are real ffmpeg processes.** The pipeline is four pieces:
 
-- **`core/ffmpeg_vars.py`** — `load(settings, source_tab)` flattens one job's
-  settings dict into module globals (`INPUT_FILE`, `START_TIME`,
-  `VIDEO_CODEC_ARG`, …). Each comes in its raw UI form and, where they
-  differ, an ffmpeg-ready `*_ARG` form. Read them through the module
-  (`from core import ffmpeg_vars as v`), never `from … import NAME`, which
-  copies the value once.
+- **`core/ffmpeg_vars.py`** — `derive(settings, source_tab)` returns a frozen
+  `JobVars` (`input_file`, `start_time`, `video_codec_arg`, …) of ffmpeg-ready
+  values, passed explicitly to every `ffmpeg_build` function
+  (`compile_command(job, output_path, loglevel)`, `uses_hdr_tonemap(job)`). It
+  replaced module globals set by a `load()`, which every builder read
+  implicitly; the ~25 values nothing read (the old single-track picker's
+  `VIDEO_TRACK*`, the unused raw forms, `END_TIME`) went with them. Upper-case
+  names below (`AUDIO_STREAMS`, `SCALE_VF`, `FPS_ARG`, …) are its lower-case fields.
 
   **`AUDIO_STREAMS` is the one list-shaped variable here, not a scalar** —
   the direct consequence of Encoding no longer describing "the audio" as one
@@ -3362,8 +3364,8 @@ without an app release; a frozen app has no `python -m yt_dlp` anyway.
   `-ss` rebases the output timeline to 0, so an output-side `-to X` acts as a
   *duration* of X, not "stop at X" (`-ss 00:21:36 -i in -to 00:21:41` makes a
   21m41s clip, not a 5s one). `ffmpeg_build._trim_kwargs` does it the safe
-  way. `END_TIME`/`END_SECS` in `ffmpeg_vars` are only safe as an input-side
-  `-to` paired with an input-side `-ss`.
+  way; `JobVars` deliberately has no end time. An end time is only safe as an
+  input-side `-to` paired with an input-side `-ss`.
 - **A copied track in a trimmed Encode needs `-copypriorss:a:N 0`** (`build_encode_command` adds it
   for every Passthru track when the start is trimmed). The input-side `-ss` lands on the keyframe
   before the start; re-encoded streams drop what precedes the start, but a copied one kept those

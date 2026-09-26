@@ -26,10 +26,10 @@ def _run(settings, tab, name, stop_after=None):
         if os.path.exists(path):
             os.remove(path)
     settings = dict(settings, output_path=final)
-    ffmpeg_vars.load(settings, tab)
-    job = FfmpegJob(ffmpeg_build.compile_command(partial_path(final)), final, partial_path(final),
-                    duration_secs=settings.get("duration_secs") or 0, input_file=settings["input_file"],
-                    start_secs=settings.get("start_secs") or 0, verify_hdr_tag=ffmpeg_build.uses_hdr_tonemap(),
+    job_vars = ffmpeg_vars.derive(settings, tab)
+    job = FfmpegJob(ffmpeg_build.compile_command(job_vars, partial_path(final)), final, partial_path(final),
+                    duration_secs=job_vars.duration_secs, input_file=job_vars.input_file,
+                    start_secs=job_vars.start_secs, verify_hdr_tag=ffmpeg_build.uses_hdr_tonemap(job_vars),
                     label=name)
     job.start()
     events, t0 = [], time.monotonic()

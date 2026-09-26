@@ -1029,21 +1029,21 @@ class QueueTab(QWidget):
             self._start_download(task_id, row, rest)
             return
         # Loaded and compiled here on the GUI thread: workers only ever see a plain argv.
-        ffmpeg_vars.load(row["settings"], row["source_tab"])
-        final_path = os.path.abspath(ffmpeg_vars.OUTPUT_PATH)
+        job_vars = ffmpeg_vars.derive(row["settings"], row["source_tab"])
+        final_path = os.path.abspath(job_vars.output_path)
         temp_path = partial_path(final_path)
         try:
-            args = compile_command(temp_path, loglevel=llamalog.ffmpeg_loglevel())
+            args = compile_command(job_vars, temp_path, loglevel=llamalog.ffmpeg_loglevel())
         except Exception as exc:
             llamalog.get("queue").exception("Couldn't build the ffmpeg command for task %s", task_id)
             self._fail_task(task_id, rest, f"Couldn't build the ffmpeg command: {exc}")
             return
         job = FfmpegJob(
             args, final_path, temp_path,
-            duration_secs=ffmpeg_vars.DURATION_SECS,
-            input_file=ffmpeg_vars.INPUT_FILE,
-            start_secs=ffmpeg_vars.START_SECS,
-            verify_hdr_tag=uses_hdr_tonemap(),
+            duration_secs=job_vars.duration_secs,
+            input_file=job_vars.input_file,
+            start_secs=job_vars.start_secs,
+            verify_hdr_tag=uses_hdr_tonemap(job_vars),
             priority=self.app.priority_level,
         )
         self._active = {"task_id": task_id, "job": job, "rest": rest,
