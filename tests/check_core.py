@@ -7,7 +7,7 @@ from datetime import datetime
 
 from harness import check_golden, fixture, report
 
-from core import formats, keybinds, naming, utilities
+from core import capabilities, formats, keybinds, naming, previews, probe
 
 # Raw byte counts and bit rates follow the encoder build that made the fixtures; the snapped
 # display values are what the app acts on.
@@ -91,14 +91,25 @@ def probe_snapshot():
         path = fixture(name)
         # Never on an audio-only file: OpenCV's read() doesn't return there (the app gets the
         # Wave Loop from the probe instead).
-        frames = [] if name == "audio.m4a" else utilities.extract_video_thumbnails(path, 10, max_size=(320, 180))
-        out[name] = {"probe": _strip(utilities.probe_media(path)),
-                     "duration": round(utilities.probe_duration(path) or 0, 3),
-                     "previewable": utilities._has_previewable_video(path),
+        frames = [] if name == "audio.m4a" else previews.extract_video_thumbnails(path, 10, max_size=(320, 180))
+        out[name] = {"probe": _strip(probe.probe_media(path)),
+                     "duration": round(probe.probe_duration(path) or 0, 3),
+                     "previewable": probe._has_previewable_video(path),
                      "frames": [list(f.size) for f in frames]}
-    out["hdr.mkv"]["verify_sdr_tag"] = utilities.verify_hdr_sdr_tag(fixture("hdr.mkv"))
-    out["sdr.mp4"]["verify_sdr_tag"] = utilities.verify_hdr_sdr_tag(fixture("sdr.mp4"))
-    out["missing"] = _strip(utilities.probe_media("C:/nope/missing.mkv"))
+    for name in ("late.mkv", "late.ts"):
+        path = fixture(name)
+        out[name] = {"probe": _strip(probe.probe_media(path)), "duration": round(probe.probe_duration(path) or 0, 3)}
+    for name in ("sdr.mp4", "late.mkv", "vp9.webm"):         # the ffmpeg fallback OpenCV rarely needs
+        out[name]["ffmpeg_fallback_frames"] = [list(f.size) for f in previews._extract_thumbnails_ffmpeg(
+            fixture(name), 4, (200, 120))]
+    out["hdr.mkv"]["tonemapped_frames"] = [list(f.size) for f in previews.extract_hdr_tonemapped_thumbnails(
+        fixture("hdr.mkv"), 3, max_size=(200, 120))]
+    out["capabilities"] = {"fps_mode": capabilities.supports_fps_mode(),
+                           "libplacebo_problem": capabilities.libplacebo_problem(),
+                           "av1_preset_range": list(capabilities.av1_preset_range())}
+    out["hdr.mkv"]["verify_sdr_tag"] = probe.verify_hdr_sdr_tag(fixture("hdr.mkv"))
+    out["sdr.mp4"]["verify_sdr_tag"] = probe.verify_hdr_sdr_tag(fixture("sdr.mp4"))
+    out["missing"] = _strip(probe.probe_media("C:/nope/missing.mkv"))
     return out
 
 

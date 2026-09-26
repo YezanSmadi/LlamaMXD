@@ -11,7 +11,7 @@ from PySide6.QtGui import QIcon, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QDialog, QFileDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from core import formats
-from core.utilities import probe_media
+from core.probe import probe_media
 from ui import scale
 from ui import theme as T
 from ui.widgets.controls import CheckBox, ScaledLabel, ScaledLineEdit, button, button_width_for

@@ -8,7 +8,7 @@ import ffmpeg
 
 from core import gpu
 from core.tools import tool_path
-from core.utilities import (
+from core.capabilities import (
     VULKAN_DEVICE_FLAGS, libplacebo_problem_text, libplacebo_tonemap_vf, supports_fps_mode,
     supports_libplacebo,
 )

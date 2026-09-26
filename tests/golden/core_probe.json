@@ -42,6 +42,14 @@
    "width": null
   }
  },
+ "capabilities": {
+  "av1_preset_range": [
+   0,
+   13
+  ],
+  "fps_mode": true,
+  "libplacebo_problem": null
+ },
  "hdr.mkv": {
   "duration": 3.999,
   "frames": [
@@ -129,7 +137,141 @@
    ],
    "width": 640
   },
+  "tonemapped_frames": [
+   [
+    200,
+    112
+   ],
+   [
+    200,
+    112
+   ],
+   [
+    200,
+    112
+   ]
+  ],
   "verify_sdr_tag": false
+ },
+ "late.mkv": {
+  "duration": 6.023,
+  "ffmpeg_fallback_frames": [
+   [
+    200,
+    112
+   ],
+   [
+    200,
+    112
+   ],
+   [
+    200,
+    112
+   ],
+   [
+    200,
+    112
+   ]
+  ],
+  "probe": {
+   "audio": "AAC",
+   "audio_bitrate": null,
+   "audio_channels": "Mono",
+   "audio_sample_rate": "44100 Hz",
+   "audio_streams": [
+    {
+     "bitrate_display": null,
+     "channels": 1,
+     "channels_display": "Mono",
+     "codec": "AAC",
+     "index": 0,
+     "language": null,
+     "lossless": false,
+     "sample_rate": 44100,
+     "sample_rate_display": "44100 Hz"
+    }
+   ],
+   "chapters": null,
+   "container": ".mkv",
+   "creation_time": null,
+   "duration": 6.022999999999996,
+   "fps": 25.0,
+   "has_audio": true,
+   "has_video": true,
+   "hdr": false,
+   "height": 180,
+   "mastering_max_nits": null,
+   "mastering_min_nits": null,
+   "max_cll": null,
+   "max_fall": null,
+   "title": null,
+   "video": "H.264",
+   "video_level": "1.2",
+   "video_profile": "Constrained Baseline",
+   "video_streams": [
+    {
+     "bitrate_display": null,
+     "codec": "H.264",
+     "codec_name": "H264",
+     "color_format": "8-bit 4:2:0",
+     "fps": 25.0,
+     "fps_display": "25",
+     "hdr": false,
+     "hdr_display": "SDR",
+     "index": 0,
+     "language": null,
+     "level": "1.2",
+     "profile": "Constrained Baseline",
+     "resolution_display": "320x180"
+    }
+   ],
+   "width": 320
+  }
+ },
+ "late.ts": {
+  "duration": 6.0,
+  "probe": {
+   "audio": null,
+   "audio_bitrate": null,
+   "audio_channels": null,
+   "audio_sample_rate": null,
+   "audio_streams": [],
+   "chapters": null,
+   "container": ".ts",
+   "creation_time": null,
+   "duration": 6.0,
+   "fps": 25.0,
+   "has_audio": false,
+   "has_video": true,
+   "hdr": false,
+   "height": 180,
+   "mastering_max_nits": null,
+   "mastering_min_nits": null,
+   "max_cll": null,
+   "max_fall": null,
+   "title": null,
+   "video": "H.264",
+   "video_level": "1.2",
+   "video_profile": "Constrained Baseline",
+   "video_streams": [
+    {
+     "bitrate_display": null,
+     "codec": "H.264",
+     "codec_name": "H264",
+     "color_format": "8-bit 4:2:0",
+     "fps": 25.0,
+     "fps_display": "25",
+     "hdr": false,
+     "hdr_display": "SDR",
+     "index": 0,
+     "language": null,
+     "level": "1.2",
+     "profile": "Constrained Baseline",
+     "resolution_display": "320x180"
+    }
+   ],
+   "width": 320
+  }
  },
  "missing": {
   "audio": null,
@@ -270,6 +412,24 @@
  },
  "sdr.mp4": {
   "duration": 4.0,
+  "ffmpeg_fallback_frames": [
+   [
+    200,
+    112
+   ],
+   [
+    200,
+    112
+   ],
+   [
+    200,
+    112
+   ],
+   [
+    200,
+    112
+   ]
+  ],
   "frames": [
    [
     320,
@@ -371,6 +531,24 @@
  },
  "vp9.webm": {
   "duration": 4.008,
+  "ffmpeg_fallback_frames": [
+   [
+    200,
+    112
+   ],
+   [
+    200,
+    112
+   ],
+   [
+    200,
+    112
+   ],
+   [
+    200,
+    112
+   ]
+  ],
   "frames": [
    [
     320,

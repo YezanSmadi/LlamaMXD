@@ -23,12 +23,9 @@ from shiboken6 import isValid
 
 from core import downloader, formats, gpu, llamalog, power, priority, window_mode, window_style
 from core.theme import load_settings
-from core.utilities import (
-    extract_hdr_tonemapped_thumbnails,
-    extract_video_thumbnails,
-    libplacebo_problem,
-    probe_media,
-)
+from core.capabilities import libplacebo_problem
+from core.previews import extract_hdr_tonemapped_thumbnails, extract_video_thumbnails
+from core.probe import probe_media
 from ui import scale
 from ui import theme as T
 from ui.keymap import KeyMap

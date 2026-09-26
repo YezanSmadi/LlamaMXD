@@ -140,7 +140,9 @@ core/keybinds.py          the remappable shortcuts: action table, default keys, 
 core/theme.py             brand palettes, contrast helpers, settings.json read/write
 core/about.py             Settings' About page: repo / issue-tracker URLs, the GPL short notice, paths to LICENSE.txt and licenses/
 core/llamalog.py          LlamaLog: the rotating log file, crash hooks, URL scrubbing, per-job output ring buffer
-core/utilities.py         ffprobe media probe + duration, capability checks, preview frame decode
+core/probe.py             ffprobe: probe_media, a file's real length, the HDR colour-tag check
+core/capabilities.py      what the bundled ffmpeg can do: -fps_mode, libplacebo/Vulkan, AV1 presets
+core/previews.py          preview frames (OpenCV, else ffmpeg) and the HDR tone-mapped set
 core/ffmpeg_vars.py       one queued job's settings -> a frozen JobVars of ffmpeg-ready values
 core/ffmpeg_build.py      builds a Mux or Encode job's ffmpeg-python Stream / full argv
 core/ffmpeg_runner.py     runs one ffmpeg job off the GUI thread (progress, suspend/resume, stop)
@@ -292,9 +294,10 @@ app's exe or in a `dependables/` folder next to it (both installer layouts
 work), then the repo's `dependables/`, then PATH. Cached per process.
 
 **Every** ffmpeg/ffprobe call goes through it — `ffmpeg_build.compile_command`'s
-argv[0], and all eight `subprocess.run`s in `core/utilities.py` (probe,
-duration, HDR metadata/tag checks, the `supports_*` capability checks, the
-HDR preview frames). Verified by running a real Mux and Encode job with every
+argv[0], and `run_tool(name, *args)` / `ffprobe_json(*args)` (also here: no console window,
+text output), which every query in `core/probe.py` and `core/capabilities.py` uses; the preview
+frames in `core/previews.py` launch through `tool_path` with their own flags (binary output,
+below-normal priority). Verified by running a real Mux and Encode job with every
 ffmpeg folder removed from PATH: both launched `dependables\ffmpeg.exe`.
 
 **Absolute paths are load-bearing for yt-dlp**, not tidiness: a relative
@@ -550,7 +553,7 @@ properly." once. A later file that does have frames reveals the carousel normall
 `populated` fires once per carousel, and with the flag left set the drop box stayed up over a
 file that had loaded.
 
-**A file's real length can differ from its header** (`utilities._effective_duration`, used by
+**A file's real length can differ from its header** (`probe._effective_duration`, used by
 both `probe_media`'s `duration` and `probe_duration`). Found with `GladiatorName.mkv`, a 35s
 clip cut from a film with its original timestamps kept: it starts at 5465.5s and its header
 Duration is 5501.162s — the END timestamp, not the length. ffmpeg itself is unaffected (it
@@ -578,7 +581,7 @@ keeps cv2's count and its tone-mapped set stays index-for-index aligned with the
 jump that never re-emits, so it can't loop). The index resets only when the
 input file actually changes.
 
-**What the probe gives the tabs** (`core.utilities.probe_media`, best-effort
+**What the probe gives the tabs** (`core.probe.probe_media`, best-effort
 ffprobe; every field may be None and every failure returns Nones rather than
 raising — it only ever *improves* defaults): container, video/audio codec,
 video profile/level, width/height, fps, HDR, duration, file size, the
@@ -590,7 +593,7 @@ Level and every per-stream audio control, caps the Resolution and FPS
 ladders to the source's own height/rate, lets Muxing populate its track
 boxes (`ui/tabs/muxing.py`), lets both tabs default the output container to
 the source's, and lets Muxing work out which containers the file can be
-remuxed into. `fps` (`core.utilities._parse_frame_rate`) converts ffprobe's
+remuxed into. `fps` (`core.probe._parse_frame_rate`) converts ffprobe's
 rational `r_frame_rate` string (`"24000/1001"`) into a plain float (23.976),
 since neither `formats.fps_values_for` nor the UI wants to parse a fraction
 string itself.
@@ -601,7 +604,7 @@ times for HEVC (confirmed empirically — raw `120` is "4.0", not "12.0"), a
 `seq_level_idx` table lookup for AV1 (confirmed: a 720p30 clip's raw `5` is
 "3.1"), and a named-level code for MPEG-2 (mirrors
 `ffmpeg_vars._LEVEL_ARGS["MPEG-2"]` in reverse) — see
-`core.utilities._ffprobe_level`. Audio Channels/Sample Rate match a probed
+`core.probe._ffprobe_level`. Audio Channels/Sample Rate match a probed
 value exactly against `formats.channels_display_for` /
 `sample_rate_display_for` (a 7.1 or 22050 Hz source has no option to land on);
 Bitrate *snaps to the closest* `formats.AUDIO_BITRATES` entry
@@ -1427,7 +1430,7 @@ removing a track renumbers the ones below it) and a track from another file says
 `External: <name>` after the number. **Video details are `codec · profile · level ·
 size · fps · HDR kind · bit depth + chroma · bit rate · language`**
 (`H.265 · Main 10 · L3.1 · 1280x720 · 23.976 fps · HDR10 · 10-bit 4:2:0 · eng`), from
-`core.utilities._describe_video_stream` — which now also asks ffprobe for `pix_fmt` /
+`core.probe._describe_video_stream` — which now also asks ffprobe for `pix_fmt` /
 `bits_per_raw_sample` and reuses the codec-aware `_ffprobe_level`. `hdr_display` is
 `HDR10` (PQ), `HLG` or `SDR` — anything that isn't PQ/HLG, the same call
 `probe_media`'s `hdr` makes; a stream's own bit rate is absent from most Matroska
@@ -1437,7 +1440,7 @@ checkbox captions, so it gets `compact=True` (codec · profile · size · HDR on
 it is · language) and its "Track N" is the stream's number in *its own file*.
 
 `Add Stream(s)` browses a second file, probes it off the GUI thread
-(`core.utilities.probe_media` via `run_async` — never on the GUI thread,
+(`core.probe.probe_media` via `run_async` — never on the GUI thread,
 same rule as everywhere else), and either adds its lone matching-kind stream
 straight away or — when it has more than one — opens
 `ExternalStreamPickerDialog` (`ui/widgets/dialogs.py`) to choose which. Each
@@ -1600,7 +1603,7 @@ all derive from the encoder (`formats.profiles_for` / `levels_for` /
 `quality_for`; `_apply_speed`, `_apply_quality`). A Speed retarget snaps to
 the encoder's own recommended default (`speed_default_for`), not the first
 — most extreme — entry. AV1's speed list comes from a live probe
-(`core.utilities.av1_preset_range`), since SVT-AV1's preset ceiling varies by
+(`core.capabilities.av1_preset_range`), since SVT-AV1's preset ceiling varies by
 ffmpeg build (confirmed: 0–8 before an update, -2 to 13 after). The slider
 keeps its value across a codec switch while it still fits the new range.
 
@@ -2779,7 +2782,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
   a real video encode. **`-fps_mode` isn't universal** — added in ffmpeg 5.1
   (mid-2022); an older install (this app's own dev machine runs a 2020
   build) doesn't recognize it at all and would fail *every* Encoding job
-  outright with A/V Sync on by default. `core.utilities.supports_fps_mode()`
+  outright with A/V Sync on by default. `core.capabilities.supports_fps_mode()`
   checks once per process (parses `ffmpeg -h full`'s own option listing,
   cached — a subprocess per job would be wasted work for an answer that
   can't change mid-run) and `build_encode_command` falls back to the older,
@@ -2799,10 +2802,10 @@ picks the toast. **Only one ffmpeg runs at a time.**
     translated) the moment GPU acceleration resolves a hardware encoder —
     see above.
   - **HDR→SDR** — when `HDR_TO_SDR` and the video isn't stripped, adds
-    `-vf` from `core.utilities.libplacebo_tonemap_vf(peak_detect=...)`
+    `-vf` from `core.capabilities.libplacebo_tonemap_vf(peak_detect=...)`
     (`libplacebo=apply_dolbyvision=true:peak_detect=<bool>:tonemapping=
     bt.2390:colorspace=bt709:color_primaries=bt709:color_trc=bt709:
-    format=yuv420p` — moved to `core/utilities.py`, not `ffmpeg_build.py`,
+    format=yuv420p` — moved to `core/probe.py`, not `ffmpeg_build.py`,
     specifically so the HDR *preview* thumbnails, below, can share the exact
     same filter string with the real encode without a circular import) plus
     explicit `-color_primaries bt709 -color_trc bt709 -colorspace bt709`
@@ -2816,7 +2819,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     confirmed via `ffmpeg -h filter=tonemap`, no BT.2390 among them) was
     tried first and removed once a real Vulkan/libplacebo setup was
     confirmed working (see below) — don't reintroduce it as a fallback.
-    `core.utilities.supports_libplacebo()` gates this two ways instead. It is
+    `core.capabilities.supports_libplacebo()` gates this two ways instead. It is
     `libplacebo_problem() is None`, and that is **two checks, not one**: the
     filter is listed by `ffmpeg -filters` (else `LIBPLACEBO_MISSING`), *and* a
     one-frame probe of the real `libplacebo_tonemap_vf()` on an explicit
@@ -2844,7 +2847,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     way.** libplacebo's `peak_detect` (on by default) dynamically estimates
     each frame's true peak brightness by analysing pixel values over a
     ~100-frame smoothing window, meant to compensate for a source with no
-    static metadata to trust. `core.utilities._probe_hdr_static_metadata`
+    static metadata to trust. `core.probe._probe_hdr_static_metadata`
     reads the source's ST 2086 mastering-display luminance and MaxCLL/MaxFALL
     (a separate, frame-level ffprobe query — confirmed neither value shows up
     in ffprobe's *stream*-level output, only a full `-show_frames` on the
@@ -2865,7 +2868,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     `MAX_CLL` for `build_encode_command` to read.
 
     **A post-encode safety net re-verifies the real output, not just the
-    filter in isolation.** `core.utilities.verify_hdr_sdr_tag(path)` re-probes
+    filter in isolation.** `core.probe.verify_hdr_sdr_tag(path)` re-probes
     the finished file's own `color_transfer` after an HDR→SDR job completes;
     `FfmpegJob` (see `core/ffmpeg_runner.py` below) reports the task **Failed**
     — file still saved, for inspection, never deleted — rather than Done if
@@ -2886,7 +2889,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     BT.2020) source has no color management at all — it clips/rescales the
     wide-range values into 8-bit RGB, producing a washed-out picture of the
     *untouched* HDR data rather than a preview of what the export will look
-    like. `core.utilities.extract_hdr_tonemapped_thumbnails` instead runs one
+    like. `core.previews.extract_hdr_tonemapped_thumbnails` instead runs one
     short-lived real ffmpeg + libplacebo process **per frame** (an input-side
     `-ss` approximate seek, then a single-frame decode through the identical
     `libplacebo_tonemap_vf` filter the real encode uses), targeting the exact
@@ -2927,7 +2930,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     ~2GB (the worker's transient PIL images beside the QImages), for the ~10s the render takes.
     **Frames are now stored no bigger than they can be drawn**: `_preview_max_size` (`ui/app.py`) is the
     biggest screen in device pixels, and `extract_video_thumbnails` / `extract_hdr_tonemapped_thumbnails`
-    take it as `max_size`, shrinking each frame as it is decoded (`utilities._shrink`, `cv2.INTER_AREA`
+    take it as `max_size`, shrinking each frame as it is decoded (`previews._shrink`, `cv2.INTER_AREA`
     — 3.7ms per 4K frame against Pillow LANCZOS's 57ms); `pil_to_qimage` stores an image without alpha
     as `Format_RGB32` (Qt's native format; see below). A 4K frame on a 1440p screen is 14MB.
     **The previous file's tone-mapped set is dropped when the file changes** (`update_global_file`); it

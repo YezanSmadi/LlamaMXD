@@ -26,7 +26,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 from core import llamalog
-from core.utilities import fps_text
+from core.probe import fps_text
 from ui import scale
 from ui import theme as T
 from ui.scale import fpx, px

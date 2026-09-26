@@ -18,7 +18,7 @@ import time
 
 from core import llamalog
 from core import priority as process_priority
-from core.utilities import probe_duration, verify_hdr_sdr_tag
+from core.probe import probe_duration, verify_hdr_sdr_tag
 
 # CREATE_NO_WINDOW; the priority class is ORed in at launch from Settings. Normal by default:
 # throttling measured no benefit to the GUI and slowed every encode.

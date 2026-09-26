@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from core import downloader, ffmpeg_vars, formats, llamalog, power
 from core.ffmpeg_build import compile_command, uses_hdr_tonemap
 from core.ffmpeg_runner import FfmpegJob, partial_path
-from core.utilities import extract_video_thumbnail
+from core.previews import extract_video_thumbnail
 from core.ytdlp_runner import _STAGE_FOR_PART, _STAGE_FOR_POST, YtDlpJob
 from ui import scale
 from ui import theme as T

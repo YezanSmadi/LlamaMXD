@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSlider, QVBoxLayout, QWidget
 
 from core import formats
-from core.utilities import av1_preset_range, libplacebo_problem_text, supports_libplacebo
+from core.capabilities import av1_preset_range, libplacebo_problem_text, supports_libplacebo
 from ui import scale
 from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow
 from ui.widgets.controls import (

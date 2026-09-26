@@ -156,7 +156,7 @@ _SPEED_SPECS = {
     "VP8": {"kind": "cpu-used", "values": [str(n) for n in range(6)], "default": "4"},
     "VP9": {"kind": "cpu-used", "values": [str(n) for n in range(9)], "default": "4"},
     # Only a fallback: SVT-AV1's range varies by build, and `speed_values_for`'s `av1_range`
-    # (from core.utilities.av1_preset_range) replaces it.
+    # (from core.capabilities.av1_preset_range) replaces it.
     "AV1": {"kind": "preset", "values": [str(n) for n in range(9)], "default": "8"},
 }
 

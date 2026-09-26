@@ -12,7 +12,7 @@ import time
 
 from harness import WORK, check_golden, fixture, report
 
-from core import ffmpeg_build, ffmpeg_vars, utilities
+from core import capabilities, ffmpeg_build, ffmpeg_vars, probe
 from core.ffmpeg_runner import FfmpegJob, partial_path
 
 OUT = os.path.join(WORK, "jobs")
@@ -52,7 +52,7 @@ def _summary(path):
     """What a probe says about an output, minus build-dependent byte counts."""
     if not os.path.exists(path):
         return None
-    info = utilities.probe_media(path)
+    info = probe.probe_media(path)
     return {
         "container": info["container"], "video": info["video"], "profile": info["video_profile"],
         "size": [info["width"], info["height"]], "fps": info["fps"] and round(info["fps"], 3), "hdr": info["hdr"],
@@ -106,7 +106,7 @@ def cases():
         ("Encoding", "enc_downscale_retime.mp4", dict(enc, resolution="360p", fps="12")),
         ("Encoding", "enc_trim_passthru_aac.mp4", dict(enc, audio_streams=[_audio(0, "AAC", passthru=True)])),
     ]
-    if utilities.supports_libplacebo():
+    if capabilities.supports_libplacebo():
         out.append(("Encoding", "enc_hdr_to_sdr.mp4", dict(enc, input_file=hdr, encoder="H.265", profile="Main",
                                                            level="4.0", hdr_to_sdr=True, mastering_max_nits=1000.0,
                                                            max_cll=1000, audio_streams=[], strip_audio=True)))

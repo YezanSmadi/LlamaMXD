@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QSizePolicy, QVBoxLayout, QWidget
 
 from core import formats
-from core.utilities import probe_media
+from core.probe import probe_media
 from ui import scale
 from ui.scale import px
 from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow, set_line_text

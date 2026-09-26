@@ -52,6 +52,12 @@ _CLIPS = {
     # 30s at 720p: long enough to stop an encode part-way.
     "long.mp4": ["-f", "lavfi", "-i", "testsrc2=s=1280x720:r=30:d=30", "-map", "0", "-c:v", "libx264",
                  "-preset", "ultrafast"],
+    # Timestamps starting 60s in: the MKV header's duration is the end time, the TS's is honest
+    # (probe._effective_duration must tell them apart).
+    "late.mkv": ["-f", "lavfi", "-i", "testsrc2=s=320x180:r=25:d=6", "-f", "lavfi", "-i", "sine=d=6",
+                 "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-output_ts_offset", "60"],
+    "late.ts": ["-f", "lavfi", "-i", "testsrc2=s=320x180:r=25:d=6", "-c:v", "libx264", "-preset", "ultrafast",
+                "-output_ts_offset", "60"],
     # Audio only.
     "audio.m4a": [*_TONE, "-map", "0", "-c:a", "aac"],
     # VP9 + Opus in WebM.
