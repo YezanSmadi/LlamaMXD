@@ -3,33 +3,14 @@
 """The borderless window's chrome: `ResizeGrips` (eight invisible strips that start the OS's
 native resize) and `WindowControls` (close / maximise / minimise). The grips are real pixels,
 like OS chrome; the controls belong to the sidebar and scale with it."""
-import os
-import re
-
-from PySide6.QtCore import QByteArray, QRectF, Qt, Signal
+from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QPainter
-from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QWidget
 
 from ui import scale
 from ui import theme as T
 from ui.scale import px
-
-_ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
-_FILL = re.compile(r'fill="(?!none")[^"]*"')   # every painted fill; the `fill="none"` on a group stays
-_renderers = {}
-
-
-def _tinted_svg(name, color):
-    """A cached `QSvgRenderer` for `assets/<name>` with every painted fill set to `color` (the
-    three icons ship in different colours). Stays vector, smooth at any scale."""
-    key = (name, color)
-    if key not in _renderers:
-        with open(os.path.join(_ASSETS, name), "r", encoding="utf-8") as fh:
-            data = _FILL.sub(f'fill="{color}"', fh.read())
-        _renderers[key] = QSvgRenderer(QByteArray(data.encode("utf-8")))
-    return _renderers[key]
-
+from ui.widgets.svg import svg_renderer
 
 class WindowControls(QWidget):
     """Close, maximise and minimise as bare icons in the sidebar's text colour; the icon under
@@ -102,7 +83,7 @@ class WindowControls(QWidget):
                 color = normal
             p.setOpacity(0.4 if inert else 1.0)
             rect = self._icon_rect(i, (i + 0.5) * self.SLOT_W * f, self.HEIGHT * f / 2, self.ICON_SIZES[i] * f)
-            _tinted_svg(name, color).render(p, rect)
+            svg_renderer(name, color, "fills").render(p, rect)
 
     def mouseMoveEvent(self, event):
         slot = self._slot_at(event.position())

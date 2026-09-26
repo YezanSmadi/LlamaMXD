@@ -6,14 +6,12 @@ User-action signals (`Dropdown.picked`, `CheckBox.clicked`, `Switch.clicked`,
 `SegmentedButton.changed`) fire only on user changes, never when code sets a value, so a tab
 can write a settings dict into the form without tripping its own handlers."""
 import math
-import os
 import re
 import time
 
 from PySide6 import QtGui
 from shiboken6 import isValid
 from PySide6.QtCore import (
-    QByteArray,
     QEasingCurve,
     QPointF,
     QRectF,
@@ -36,7 +34,6 @@ from PySide6.QtGui import (
     QTextDocument,
     QTextOption,
 )
-from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractButton,
     QApplication,
@@ -58,29 +55,9 @@ from PySide6.QtWidgets import (
 from ui import scale
 from ui import theme as T
 from ui.scale import px
+from ui.widgets.svg import svg_renderer
 
 NO_OPTION = "—"
-
-_ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
-_SVG_CACHE = {}
-_BLACK_STROKE_RE = re.compile(r'stroke(=")#000(?:000)?"|stroke(:\s*)#000(?:000)?(;?)')
-
-
-def _icon_svg(name, color):
-    """A cached `QSvgRenderer` for `assets/<name>` with its black strokes (attribute or CSS
-    form) and `currentColor` fills recoloured to `color`."""
-    key = (name, color)
-    if key not in _SVG_CACHE:
-        with open(os.path.join(_ASSETS, name), "r", encoding="utf-8") as fh:
-            data = fh.read()
-        data = _BLACK_STROKE_RE.sub(
-            lambda m: (f'stroke="{color}"' if m.group(1) else f'stroke{m.group(2)}{color}{m.group(3)}'), data)
-        data = data.replace('fill="currentColor"', f'fill="{color}"')
-        # The search / sort icons are drawn in Illustrator's #231f20 rather than pure black.
-        data = data.replace("#231f20", color)
-        _SVG_CACHE[key] = QSvgRenderer(QByteArray(data.encode("utf-8")))
-    return _SVG_CACHE[key]
-
 
 def ui_font(size, bold=False, family=None):
     """A font at `size` reference pixels (Roboto unless `family`), for custom painters and for
@@ -578,7 +555,7 @@ class IconButton(QPushButton):
             side = min(rect.width(), rect.height()) * fraction
             icon_rect = QRectF(0, 0, side, side)
             icon_rect.moveCenter(rect.center())
-            _icon_svg(_SVG_ICON_KINDS[self._kind], color.name()).render(p, icon_rect)
+            svg_renderer(_SVG_ICON_KINDS[self._kind], color.name(), "ink").render(p, icon_rect)
             return
         c = rect.center()
         half_w, half_h = 3.5, 2.2

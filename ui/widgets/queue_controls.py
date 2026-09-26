@@ -10,7 +10,8 @@ from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QWidget
 
 from ui import scale
 from ui import theme as T
-from ui.widgets.controls import Dropdown, ScaledLineEdit, _icon_svg, draw_cross, ui_font
+from ui.widgets.controls import Dropdown, ScaledLineEdit, draw_cross, ui_font
+from ui.widgets.svg import svg_renderer
 from ui.widgets.tooltip import tip
 
 GAP = 10                    # reference px between stacked rows (the tab's old layout spacing)
@@ -21,7 +22,7 @@ _SEARCH_MS = 240
 def _paint_icon(p, name, color, rect, fraction):
     """Draw `assets/<name>` tinted `color`, centred in `rect` at `fraction` of its shorter side,
     keeping the art's aspect ratio."""
-    renderer = _icon_svg(name, color.name())
+    renderer = svg_renderer(name, color.name(), "ink")
     if name == "search.svg":
         # The artwork sits in the top 72 of a 72x156 canvas; crop to it so it fills its circle.
         renderer.setViewBox(QRectF(0, 0, 72, 72))

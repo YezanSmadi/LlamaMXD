@@ -171,6 +171,7 @@ ui/widgets/toast.py       Toast / ToastManager
 ui/widgets/frameless.py   ResizeGrips (the borderless window's eight native-resize handles) +
                           WindowControls (its close / maximise / minimise icons)
 ui/widgets/tooltip.py     tip(widget, text) — the shared themed hover tooltip
+ui/widgets/svg.py         svg_renderer(name, color, mode): SVG assets recoloured by text, cached
 ui/widgets/queue_controls.py  Queue's SortButton (cycling), SearchToggle + SearchBar (unrolling), SlideHost (details panel)
 ui/widgets/keyfield.py    KeyField — Settings' click-then-press-a-key box
 ui/tabs/media_tab.py      MediaTab — the frame Muxing and Encoding share
@@ -373,7 +374,7 @@ applied live by `MainWindow._apply_window_mode` (also at launch, and
   before (1.0, 1.1, 1.14, 1.16 — the default size worst), 0 after, and all four sides
   match. Judge icons like this by their real pixels: a 1px line magnified with smooth
   scaling *looks* grey. The three SVGs ship in three colours (black, near-black, navy), so
-  `_tinted_svg` swaps every painted `fill` in the file text and renders it as a vector
+  `svg_renderer(..., "fills")` swaps every painted `fill` in the file text and renders it as a vector
   (smooth at any scale) — not a rendered-then-tinted bitmap. Shown in Borderless only
   (`MainWindow._sync_window_chrome`), fullscreen included. Close is `MainWindow.close`,
   so the unfinished-jobs prompt still applies; Maximise toggles `showMaximized` /
@@ -1315,7 +1316,7 @@ of) and **fills the row**, stopping only where a narrow column sits to its
 right: `Select All` / `Deselect All` — two **icon buttons** (`IconButton` kinds
 `select-multiple` / `deselect-multiple`, `assets/select-multiple.svg` /
 `deselect-multiple.svg`, recoloured to the button's own text colour by string-replacing
-the SVG's black `stroke` — `controls._icon_svg`, same trick as the carousel's
+the SVG's black `stroke` — `svg_renderer(..., "ink")`, same trick as the carousel's
 `fill="currentColor"` swap; each has a hover tooltip, since there's no caption)
 sharing a line on top (checks/unchecks
 every row in the box — `TrackListBox.item_ids()`, every row regardless of
@@ -1914,7 +1915,7 @@ for a download, `ytdlp_cache` + the settings; `—` where there is none. Column 
 value each can hold (`_measure_columns`), so only the title can be cut: it scrolls (the queue's shared
 `MarqueeGroup`) past 25 characters or when it overflows its box. Callers now pass just the title as `description`.
 Each row records `"added"` (time.time()). **Sort By:** is a `SortDropdown` (face `Sort By: | A to Z`, the open list shows only options; A to Z default / Z to A / Recent = newest added first / Latest = oldest added first) in the middle of the bottom row, and `_apply_sort` reorders `_rows` (so run order follows), the layout and the active job's `rest` — on every pick and every add. Beside it the round `SearchToggle` opens `SearchBar`, which floats over the bottom of the list just above the buttons (placed by `QueueTab._place_search`, not in the layout, so a long queue runs on beneath it and no band cuts the rows off): it only ever grows horizontally from the middle out to both sides (and back in), takes no room at all, filters rows by title as you type and clears when closed; the X inside the box (secondary colour) only clears the text. To the right of Start Queue, `WhenDoneButton` (a small square `Dropdown` filled like Start Queue, 3px from it, with a triangle; its list is wider than the button, always opens to its left, with the current choice highlighted) sets Settings' `app.when_done`, kept in step both ways (`Queue.on_enter` / `Settings.on_enter`). The details panel is a `SlideHost`: it floats over the bottom of the list (placed by `QueueTab._place_search`, not in the layout — the list keeps its full height and runs on beneath it, nothing behind the panel but the panel), rises once, and picking another row while it is open only swaps the contents. Opening the search row with the panel open shortens the panel from the bottom (`SlideHost.set_inset`; its list `_DetailScroll` prefers 140px but gives way to 40) while its top edge stays put. The tab layout has no spacing of its own (spacers and the `GAP`), so nothing pops when the search row appears. It omits Start Time when the trim is the whole file, and Duration is
-always the output length. The sort/search SVGs need `_icon_svg`'s `#231f20` recolour; the A/Z letters were
+always the output length. The sort/search SVGs need the "ink" mode's `#231f20` recolour; the A/Z letters were
 converted from `<text>` to outlines (Oswald) since live text rendered with colour fringes.
 
 **Details popup** (below the list, fixed 140px scroll area so a long Encode
@@ -2461,7 +2462,7 @@ autosave when the tab is left and on close.
   - **Badges**: the mute badge (`assets/audio-mute.svg`, 14% of the short
     side, top-left) while audio is stripped; the info badge (9%,
     bottom-left) once a probe lands. Both are SVGs rendered through a cached
-    `QSvgRenderer` (`_svg_renderer`), not a scaled bitmap — a raster PNG
+    `QSvgRenderer` (`svg_renderer`), not a scaled bitmap — a raster PNG
     downscaled to the badge's actual ~20-40px on-screen size showed a
     visible stepped edge even through `SmoothPixmapTransform`, which an SVG
     doesn't have at any size. The mute badge renders `audio-mute.svg`

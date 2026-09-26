@@ -12,7 +12,7 @@ import math
 import os
 import time
 
-from PySide6.QtCore import QByteArray, QEasingCurve, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEasingCurve, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import (
     QColor,
     QCursor,
@@ -23,7 +23,6 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
 )
-from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QWidget
 
 from core import llamalog
@@ -33,6 +32,7 @@ from ui import theme as T
 from ui.scale import fpx, px
 from ui.widgets.controls import ScaledLabel
 from ui.widgets.panels import ASSETS, force_white_fills, local_paths
+from ui.widgets.svg import svg_renderer
 
 _DOT_R_LARGE = 4.0
 _DOT_R_MED = 3.0
@@ -159,19 +159,6 @@ def _wave():
     return _CACHE["wave"]
 
 
-def _svg_renderer(name, color=None):
-    """A cached `QSvgRenderer` for `assets/<name>`, with `fill="currentColor"` swapped for
-    `color` if given (else rendered as authored)."""
-    key = f"svg:{name}:{color}"
-    if key not in _CACHE:
-        with open(os.path.join(ASSETS, name), "r", encoding="utf-8") as fh:
-            data = fh.read()
-        if color:
-            data = data.replace('fill="currentColor"', f'fill="{color}"')
-        _CACHE[key] = QSvgRenderer(QByteArray(data.encode("utf-8")))
-    return _CACHE[key]
-
-
 def _paint_info_badge(painter, rect):
     """The info badge from `assets/info.svg`, a disc with the "i" cut out as a hole: a circle in
     the glyph colour first, then the SVG recoloured to the disc colour on top, so the glyph shows
@@ -186,7 +173,7 @@ def _paint_info_badge(painter, rect):
     painter.setBrush(QColor(glyph_color))
     inset = rect.width() * 0.1
     painter.drawEllipse(rect.adjusted(inset, inset, -inset, -inset))
-    _svg_renderer("info.svg", disc_color).render(painter, rect)
+    svg_renderer("info.svg", disc_color).render(painter, rect)
     painter.restore()
 
 
@@ -758,7 +745,7 @@ class ThumbnailCarousel(QWidget):
         p.drawEllipse(icon_rect)
         name = "shrink.svg" if self._expanded else "expand.svg"
         inset = icon_rect.width() * 0.22
-        _svg_renderer(name, T.theme.hex("secondary_text")).render(p, icon_rect.adjusted(inset, inset, -inset, -inset))
+        svg_renderer(name, T.theme.hex("secondary_text")).render(p, icon_rect.adjusted(inset, inset, -inset, -inset))
         p.restore()
 
     def paint_badges(self, p, rect):
@@ -769,7 +756,7 @@ class ThumbnailCarousel(QWidget):
         mute_size, _ = self._badge_sizes(rect)
         if self._strip_audio and not self._expanded:
             margin = max(px(4), round(mute_size * 0.28))
-            _svg_renderer("audio-mute.svg").render(
+            svg_renderer("audio-mute.svg").render(
                 p, QRectF(rect.left() + margin, rect.top() + margin, mute_size, mute_size))
         if self._media_info:
             if self._expanded:
