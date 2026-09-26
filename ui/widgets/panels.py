@@ -223,6 +223,7 @@ class SubTabBar(QWidget):
 _LOADING_DIR = os.path.join(ASSETS, "LlamaDiscLoading")
 _LOADING_FPS = 60.0
 _LOADING_FRAMES = 143
+_LOADING_SOURCE = 640   # the PNGs' own size
 # Colours as rendered into the PNGs (not the source art's exact hex values). Two things on the
 # label side are themed. The stroke: the divider stripe and the outer rim, pink. And the hub's
 # inner edge: the label's translucent hub overlay (#FAD39B at 50% alpha) lying over that same
@@ -287,9 +288,21 @@ def _stroke_weights(pixels):
     return idx, np.clip((best[idx] - 0.2) / 0.8, 0, 1), kinds[idx]
 
 
-def _load_frames():
-    """Decodes the sequence (worker thread): `[(QImage, indices, weights, kinds, original rgb)]`,
-    or None if it can't be read. Only the stroke pixels are kept apart for recolouring."""
+def _frame_side(side):
+    """The size frames are decoded at for a spinner `side` real px across: rounded up to a
+    multiple of 64 (so a window drag doesn't re-decode at every step), at most the PNGs' own."""
+    return max(64, min(_LOADING_SOURCE, math.ceil(side / 64) * 64))
+
+
+def _load_frames(side):
+    """Decodes the sequence at `side` px (worker thread): `[(QImage, indices, deltas, original)]`,
+    or None if it can't be read. The image is premultiplied RGBA; `indices` are its themed
+    pixels, `deltas` (n x 2) how far each moves per unit of each stroke's colour change, and
+    `original` their premultiplied RGB. Weights are scored at full size and shrunk with the
+    same area filter as the image: recolouring is linear, so this equals recolouring at full
+    size and then scaling down (scoring the scaled frame leaves a pink fringe on the thin rim,
+    whose pixels blend three colours)."""
+    import cv2   # already loaded by core.utilities; only needed here, on the worker
     frames = []
     for n in range(_LOADING_FRAMES):
         image = QImage(os.path.join(_LOADING_DIR, f"{n:03d}.png"))
@@ -300,30 +313,50 @@ def _load_frames():
         pixels = np.frombuffer(image.constBits(), dtype=np.uint8,
                                count=h * image.bytesPerLine()).reshape(h, image.bytesPerLine())[:, : w * 4].reshape(h, w, 4)
         idx, weights, kinds = _stroke_weights(pixels)
-        original = pixels.reshape(-1, 4)[idx, :3].astype(np.float32)
-        frames.append((image, idx, weights, kinds, original))
+        alpha = pixels[..., 3].astype(np.float32) / 255
+        premult = pixels.astype(np.float32)
+        premult[..., :3] *= alpha[..., None]
+        deltas = np.zeros((h * w, 2), dtype=np.float32)
+        deltas[idx, kinds] = weights * alpha.ravel()[idx]
+        deltas = deltas.reshape(h, w, 2)
+        if side < w:
+            premult = cv2.resize(premult, (side, side), interpolation=cv2.INTER_AREA)
+            deltas = cv2.resize(deltas, (side, side), interpolation=cv2.INTER_AREA)
+        out = np.ascontiguousarray(np.clip(np.rint(premult), 0, 255).astype(np.uint8))
+        small = QImage(out.data, out.shape[1], out.shape[0], out.shape[1] * 4,
+                       QImage.Format_RGBA8888_Premultiplied).copy()
+        deltas = deltas.reshape(-1, 2)
+        themed = np.flatnonzero(deltas.max(1) > 1e-3)
+        frames.append((small, themed, deltas[themed], premult.reshape(-1, 4)[themed]))
     return frames
 
 
-def _ensure_frames():
-    """Starts decoding the sequence once, on a worker; `_LOADING["frames"]` fills in when
-    done. Until then (or if they fail to load) the spinner draws nothing."""
-    if "frames" in _LOADING or _LOADING.get("loading"):
+def _request_frames(side):
+    """Decodes the sequence for a spinner `side` real px across, on a worker, unless frames of
+    that size are already loaded or loading. `_LOADING["frames"]` is replaced when done, so a
+    spinner keeps drawing the previous size (scaled) meanwhile; nothing before the first set."""
+    want = _frame_side(side)
+    _LOADING["want"] = want
+    if _LOADING.get("failed") or _LOADING.get("busy") or _LOADING.get("side") == want:
         return
-    _LOADING["loading"] = True
+    _LOADING["busy"] = True
 
     def done(frames):
-        _LOADING.pop("loading", None)
+        _LOADING["busy"] = False
         if frames:
-            _LOADING["frames"] = frames
+            # Resized again while this one decoded: keep it only if there is nothing to draw yet.
+            if _LOADING["want"] == want or not _LOADING.get("frames"):
+                _LOADING["frames"], _LOADING["side"] = frames, want
+            if _LOADING["want"] != want:
+                _request_frames(_LOADING["want"])
         else:
-            _LOADING["frames"] = None
+            _LOADING["failed"] = True
             llamalog.get("ui").warning("The loading animation (assets/LlamaDiscLoading) failed to "
                                        "load; the spinner stays blank")
 
     def work():
         try:
-            return _load_frames()
+            return _load_frames(want)
         except Exception:
             llamalog.get("ui").warning("Decoding the loading animation failed", exc_info=True)
             return None
@@ -335,15 +368,15 @@ def _recolor(frame, rgb):
     """A copy of one decoded frame with its themed pixels moved to `rgb` (0-255 ints): the
     stripe and rim from the original pink to `rgb`, the hub's inner edge from `_ring_colour`
     of the pink to `_ring_colour` of `rgb`, each pixel by its own share."""
-    image, idx, weights, kinds, original = frame
+    image, idx, deltas, original = frame
     out = image.copy()
     if len(idx):
         pixels = np.frombuffer(out.bits(), dtype=np.uint8, count=out.height() * out.bytesPerLine())
         pixels = pixels.reshape(out.height(), out.bytesPerLine())[:, : out.width() * 4].reshape(-1, 4)
         theme = np.array(rgb, dtype=np.float32)
         moves = np.stack([theme - _STROKES[0][0], _ring_colour(theme) - _STROKES[1][0]])
-        shifted = original + weights[:, None] * moves[kinds]
-        pixels[idx, :3] = np.clip(np.rint(shifted), 0, 255).astype(np.uint8)
+        shifted = original[:, :3] + deltas @ moves
+        pixels[idx, :3] = np.rint(np.clip(shifted, 0, original[:, 3:])).astype(np.uint8)
     return out
 
 
@@ -365,11 +398,23 @@ class LoadingSpinner(QWidget):
         self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._tick)
+        # Frames are decoded for the size the host settles on, not every size a drag passes.
+        self._size_timer = QTimer(self)
+        self._size_timer.setSingleShot(True)
+        self._size_timer.setInterval(300)
+        self._size_timer.timeout.connect(self._request_frames)
         T.theme.changed.connect(self.update)
-        _ensure_frames()
+
+    def _request_frames(self):
+        # Only for a host on screen: a tab never shown yet has an unlaid-out 640x480 drop box.
+        host = self.parentWidget()
+        if host is None or host.isVisible():
+            _request_frames(self.width() * (self.devicePixelRatioF() or 1.0))
 
     def showEvent(self, e):
         self._t0 = time.monotonic()
+        self._size_timer.stop()
+        self._request_frames()
         self._schedule()
 
     def hideEvent(self, e):
@@ -382,6 +427,7 @@ class LoadingSpinner(QWidget):
         side = max(1, round(side))
         if side != self.width() or side != self.height():
             self.resize(side, side)
+            self._size_timer.start()
 
     def _tick(self):
         if self.isVisible():

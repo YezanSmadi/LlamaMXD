@@ -10,6 +10,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import cv2
+import numpy as np
 from PIL import Image
 
 from core import formats, llamalog
@@ -1037,7 +1038,23 @@ def _has_previewable_video(path):
     return bool(streams) and not (streams[0].get("disposition") or {}).get("attached_pic")
 
 
-def _extract_thumbnails_ffmpeg(video_path, count):
+def _shrink(rgb, max_size):
+    """`rgb` (an image array) area-scaled to fit inside `max_size` (w, h), aspect kept; as is
+    when it already fits or `max_size` is None."""
+    if max_size:
+        h, w = rgb.shape[:2]
+        k = min(max_size[0] / w, max_size[1] / h)
+        if k < 1:
+            rgb = cv2.resize(rgb, (max(1, round(w * k)), max(1, round(h * k))), interpolation=cv2.INTER_AREA)
+    return rgb
+
+
+def _fit_pil(image, max_size):
+    """A PIL image as RGB, shrunk like `_shrink`."""
+    return Image.fromarray(_shrink(np.asarray(image.convert("RGB")), max_size))
+
+
+def _extract_thumbnails_ffmpeg(video_path, count, max_size=None):
     """`count` interior frames taken with ffmpeg instead of OpenCV -- the fallback
     for a file OpenCV can't seek (it works from the container's frame count, which
     is wrong for a file whose header duration is an end timestamp: every interior
@@ -1062,7 +1079,7 @@ def _extract_thumbnails_ffmpeg(video_path, count):
                 capture_output=True, timeout=30, creationflags=_NO_WINDOW,
             )
             with Image.open(io.BytesIO(completed.stdout)) as image:
-                frames.append(image.convert("RGB"))
+                frames.append(_fit_pil(image, max_size))
         except (OSError, subprocess.SubprocessError) as exc:
             llamalog.get("probe").debug("ffmpeg preview frame %d of %s failed: %s", i, video_path, exc)
             misses += 1
@@ -1071,18 +1088,19 @@ def _extract_thumbnails_ffmpeg(video_path, count):
     return frames
 
 
-def extract_video_thumbnails(video_path, count=10):
+def extract_video_thumbnails(video_path, count=10, max_size=None):
     """Grabs `count` frames spread evenly across the video's *interior* as
-    raw PIL Images (unsized): OpenCV first, and ffmpeg
+    PIL Images, each shrunk to fit inside `max_size` (w, h) if given: OpenCV first, and ffmpeg
     (`_extract_thumbnails_ffmpeg`) only if OpenCV produced nothing at all.
 
     Returns a list 1..count long — shorter if the clip is too short to yield
     that many distinct frames or some seeks fail. Returns an empty list if
     nothing decodes at all (not a video, unreadable, missing codec)."""
-    return _extract_thumbnails_cv2(video_path, count) or _extract_thumbnails_ffmpeg(video_path, count)
+    return (_extract_thumbnails_cv2(video_path, count, max_size)
+            or _extract_thumbnails_ffmpeg(video_path, count, max_size))
 
 
-def _extract_thumbnails_cv2(video_path, count):
+def _extract_thumbnails_cv2(video_path, count, max_size=None):
     """The OpenCV half of `extract_video_thumbnails`.
 
     Sample positions are the fractions 1/(count+1) … count/(count+1) of the
@@ -1099,7 +1117,7 @@ def _extract_thumbnails_cv2(video_path, count):
             success, frame = cap.read()
             if not success or frame is None:
                 return []
-            return [Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))]
+            return [Image.fromarray(cv2.cvtColor(_shrink(frame, max_size), cv2.COLOR_BGR2RGB))]
 
         targets = _interior_sample_frames(total, count)
 
@@ -1108,7 +1126,7 @@ def _extract_thumbnails_cv2(video_path, count):
             cap.set(cv2.CAP_PROP_POS_FRAMES, target)
             success, frame = cap.read()
             if success and frame is not None:
-                frames.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+                frames.append(Image.fromarray(cv2.cvtColor(_shrink(frame, max_size), cv2.COLOR_BGR2RGB)))
             else:
                 # A frame count that doesn't match the file (see
                 # `_extract_thumbnails_ffmpeg`) fails every seek, each one slowly:
@@ -1156,7 +1174,7 @@ def _hdr_decoder_threads():
     return max(1, min(4, os.cpu_count() or 1))
 
 
-def extract_hdr_tonemapped_thumbnails(video_path, count=10, should_cancel=None):
+def extract_hdr_tonemapped_thumbnails(video_path, count=10, should_cancel=None, max_size=None):
     """Like `extract_video_thumbnails`, but each frame is decoded and
     tone-mapped by ffmpeg's own libplacebo BT.2390 chain
     (`libplacebo_tonemap_vf` — the exact filter `build_encode_command` uses
@@ -1241,7 +1259,7 @@ def extract_hdr_tonemapped_thumbnails(video_path, count=10, should_cancel=None):
                     llamalog.get("probe").warning("HDR preview frame %d of %s: ffmpeg exited %s: %s", i, video_path,
                                                   completed.returncode, tail[-1] if tail else "no output")
                 with Image.open(out_path) as img:
-                    return img.convert("RGB").copy()
+                    return _fit_pil(img, max_size)
             except (OSError, subprocess.SubprocessError) as exc:
                 llamalog.get("probe").warning("HDR preview frame %d of %s failed: %s", i, video_path, exc)
                 return None

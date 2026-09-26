@@ -13,7 +13,7 @@ import threading
 import time
 
 from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QIcon, QPainter, QPainterPath
+from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QAbstractButton,
     QApplication,
@@ -80,6 +80,15 @@ def _probe_summary(info):
     if info.get("file_size"):
         parts.append(f"{info['file_size'] / 1024 ** 2:.1f} MB")
     return ", ".join(parts)
+
+
+def _preview_max_size():
+    """The largest a preview frame is ever drawn, in device pixels: the biggest screen (the
+    expanded preview fills at most the window, the window at most its screen). Frames are
+    stored no bigger — a 4K frame kept whole is 33MB, ten of them per set."""
+    sizes = [(round(s.geometry().width() * s.devicePixelRatio()), round(s.geometry().height() * s.devicePixelRatio()))
+             for s in QGuiApplication.screens()]
+    return max(sizes, key=lambda size: size[0] * size[1]) if sizes else None
 
 
 def _empty_media_info():
@@ -950,6 +959,10 @@ class MainWindow(QWidget):
             # rendering, and its own HDR→SDR switch — interrupt the one and
             # turn the other back off so the new file never inherits either.
             self._cancel_hdr_render()
+            # Only one tone-mapped set is cached, and a new file's render replaces it: kept
+            # until then, an SDR file after an HDR one held the old set (~300MB at 4K) for good.
+            self.hdr_frames = None
+            self.hdr_frames_path = None
             for tab in self.media_tabs:
                 reset_hdr = getattr(tab, "reset_hdr_preview", None)
                 if callable(reset_hdr):
@@ -982,11 +995,13 @@ class MainWindow(QWidget):
             if cached_info:
                 return
 
+        max_size = _preview_max_size()
+
         def work():
             if not cached_info:
                 info = probe_media(path)
                 emit_progress(lambda i: self._deliver_media_info(token, path, i), info)
-            return [pil_to_qimage(f) for f in extract_video_thumbnails(path, count=10)]
+            return [pil_to_qimage(f) for f in extract_video_thumbnails(path, count=10, max_size=max_size)]
 
         run_async(work, lambda frames: self._deliver_thumbnails(token, path, frames or []))
 
@@ -1127,8 +1142,11 @@ class MainWindow(QWidget):
         cancel_event = threading.Event()
         self._hdr_cancel_event = cancel_event
 
+        max_size = _preview_max_size()
+
         def work():
-            frames = extract_hdr_tonemapped_thumbnails(path, count=10, should_cancel=cancel_event.is_set)
+            frames = extract_hdr_tonemapped_thumbnails(path, count=10, should_cancel=cancel_event.is_set,
+                                                       max_size=max_size)
             return [pil_to_qimage(f) for f in frames]
 
         run_async(work, lambda frames: self._deliver_hdr(token, path, frames or []))

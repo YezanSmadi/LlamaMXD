@@ -62,6 +62,10 @@ def pil_to_qimage(image):
     unlike QPixmap, QImage isn't tied to the GUI thread)."""
     if image is None:
         return None
+    if image.mode not in ("RGBA", "LA", "PA", "P") and "transparency" not in image.info:
+        # No alpha: 3 bytes a pixel, not 4 (a set of ten 4K preview frames is 75MB less).
+        rgb = image.convert("RGB")
+        return QImage(rgb.tobytes(), rgb.width, rgb.height, rgb.width * 3, QImage.Format_RGB888).copy()
     rgba = image.convert("RGBA")
     data = rgba.tobytes("raw", "RGBA")
     return QImage(data, rgba.width, rgba.height, rgba.width * 4, QImage.Format_RGBA8888).copy()

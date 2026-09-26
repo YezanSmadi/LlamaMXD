@@ -650,6 +650,11 @@ class QueueTab(QWidget):
         thumbnail for the same link, else one decoded / fetched on a worker."""
         def deliver(image):
             if image is not None and not image.isNull() and widget.task_id in self._rows:
+                # Only as big as it can be drawn (the 60x40 slot at up to 4x), not the whole
+                # frame: a 4K preview frame is 33MB.
+                if image.width() > _THUMB_W * 4 and image.height() > _THUMB_H * 4:
+                    image = image.scaled(_THUMB_W * 4, _THUMB_H * 4,
+                                         Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
                 widget.thumb = QPixmap.fromImage(image)
                 widget.update()
 

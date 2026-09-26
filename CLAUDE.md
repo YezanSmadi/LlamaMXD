@@ -2285,14 +2285,20 @@ autosave when the tab is left and on close.
   **LoadingSpinner** (`panels.py`) — `assets/LlamaDiscLoading/000.png`…`142.png`: a spinning CD-R
   (label side "PAK-RW"/"LlamaDisc" plus a llama head, flipping to a rainbow holographic underside),
   a 143-frame, 60fps, **640px PNG sequence** (exported at 2000px from Expressive Animator and
-  downscaled with Pillow LANCZOS; ~14MB on disk, ~234MB decoded). Drawn in its own full colour —
+  downscaled with Pillow LANCZOS; ~14MB on disk, 234MB decoded at 640px — so it is decoded at the size it is drawn, see below). Drawn in its own full colour —
   branded art (Pak the Llama, the wordmark), not a monochrome icon. It replaced a Lottie version
   (`LlamaDisc-Loading.json`) that rlottie couldn't render correctly (no blend-mode support, a
   precomp size bug, missing keyframe end values), which had grown a keyframe rewriter, a precomp
   fix and a 306MB baked rainbow sprite sheet; **none of that exists any more** — a raster
   sequence has no renderer to work around. rlottie is still used by the Wave Loop.
-  `_ensure_frames` decodes the sequence once on a `run_async` worker (~2s; `QImage`s cross
-  threads, as everywhere) at the first `LoadingSpinner`; until then, or if they cannot be loaded, it draws nothing (there is no fallback ring). Plays only while
+  `_request_frames` decodes the sequence on a `run_async` worker (`QImage`s cross threads, as
+  everywhere) **at the size the spinner is drawn** (`_frame_side`: its width in device pixels
+  rounded up to a multiple of 64, at most 640) — ~37MB at the default window size (256px) against
+  234MB at 640. A spinner asks when its size settles (`set_side` -> a 300ms single-shot) and when
+  shown, **only while its drop box is on screen** (a tab never shown has an unlaid-out 640x480 box,
+  which once started a second, 512px decode), so the frames are ready before the first import. A
+  decode that finishes after a newer size was asked for is dropped unless there is nothing to draw
+  yet. Until frames arrive, or if they cannot be loaded, it draws nothing (there is no fallback ring). Plays only while
   shown (`showEvent`/`hideEvent`, one single-shot timer re-armed for each frame's due time) and is
   transparent to the mouse.
   **Two things on the label side are themed**, both recoloured at paint time: the pink divider
@@ -2311,10 +2317,14 @@ autosave when the tab is left and on close.
   and the overlay. A pixel goes to the stroke it matches best. Scoring runs on each frame's
   distinct colours (`np.unique`) rather than every pixel, ~2x faster (load ~4s on a worker).
   A frame with fewer than 100 strong stripe pixels (the whole rainbow side, and the edge-on
-  frames 36-39 / 108) has nothing themed — anything that matched there is a look-alike. Only
-  the themed pixels' indices, weights, kinds and original colours are stored; `_recolor` copies the
-  frame and shifts them by `weights × move[kind]` — ~0.5ms, done every paint, so a theme switch
-  needs no cache invalidation. Checked on Lemon, Vaporwave, black and green themes; on the
+  frames 36-39 / 108) has nothing themed — anything that matched there is a look-alike.
+  **Weights are scored at the full 640px and shrunk with the image** (`cv2.INTER_AREA`, in
+  premultiplied space): recolouring is linear, so the small frame equals recolouring at 640 and then
+  scaling down (measured: within 1/255 on every frame, 4 themes, 256/384/640). Scoring the
+  already-shrunk frame instead left a pink fringe on the thin rim, whose pixels blend three colours.
+  Stored per frame: the premultiplied image and, for its themed pixels only, their indices, per-stroke
+  deltas and original colours; `_recolor` copies the frame and shifts them by `deltas @ moves` (clipped
+  to the pixel's alpha) — done every paint, so a theme switch needs no cache invalidation. Checked on Lemon, Vaporwave, black and green themes; on the
   narrow squashed frames a faint dotted fringe can remain on the ring's edge.
 
   **It fills the DropBox's own height, not a fixed reference size**: `DropBox._resize_spinner`
@@ -2871,16 +2881,16 @@ picks the toast. **Only one ffmpeg runs at a time.**
     `shader_cache` (no cache file written, no speedup), hardware decode (no change — decode
     is ~6 of the 14.6s, the other ~9s is per-process libplacebo/Vulkan start-up and tone
     mapping), one ffmpeg with ten `-ss/-i` inputs (slower, 8.4s, and pixels differ by up to
-    5/255 from separate processes), and downscaling the output (no time saved; the frames
-    stay full 4K anyway, since the expanded preview shows them that large). **Alongside an
+    5/255 from separate processes), and downscaling in ffmpeg (no time saved; frames are shrunk
+    after decoding instead, see below). **Alongside an
     encode** (12s slice of the same file, encode at normal priority; single run each, so the
     percentages are indicative): software H.265 13.5s alone / 16.0s with the render running (+18%),
     the render 9.9s alone / 13.5s with it (+37%); HDR->SDR + x264 6.5s / 8.7s (+32%), render 9.6s /
     12.6s (+32%); NVENC HEVC 3.1s / 3.8s (+22%), render 9.9s / 11.0s (+11% — the encode ended
     first, so most of that render ran alone). **Memory, measured on real 4K HDR files** (Mulan,
     3600x2160, and Beauty and the Beast; process memory from `GetProcessMemoryInfo`, the render's
-    ffmpegs sampled every 80ms): every preview frame is a `Format_RGBA8888` QImage —
-    **29.7MB at 3600x2160** (`pil_to_qimage`, 4 bytes a pixel), so a set of ten is **297MB**. An HDR file
+    ffmpegs sampled every 80ms), **before frames were capped**: every preview frame was a `Format_RGBA8888`
+    QImage — **29.7MB at 3600x2160** (4 bytes a pixel), so a set of ten was **297MB**. An HDR file
     therefore holds two sets (raw + tone-mapped) = ~594MB of frames: the app went from 811MB private
     (a window with no file) to 1146MB with the raw previews (+335MB) and 1442MB once the tone-mapped
     set landed (+296MB), and stayed there — turning the switch on, scrubbing all ten frames and
@@ -2888,10 +2898,18 @@ picks the toast. **Only one ffmpeg runs at a time.**
     the 3 ffmpeg processes hold ~2.7GB private between them (~0.9GB each on a 10-bit 3600x2160 HEVC
     source; 0.73GB measured earlier on Beauty and the Beast) and the app's own peak commit reached
     ~2GB (the worker's transient PIL images beside the QImages), for the ~10s the render takes.
-    **The tone-mapped set of the previous file is not released when the next file is an SDR one**:
-    `hdr_frames` is only replaced by the next *render*, so after an HDR file an SDR clip still held
-    the old 316MB (1232MB private with a 9MB clip loaded); it is never reused either (returning to
-    that file re-rendered it, because the cache holds one set). Not changed — reported. Empty (no preview
+    **Frames are now stored no bigger than they can be drawn**: `_preview_max_size` (`ui/app.py`) is the
+    biggest screen in device pixels, and `extract_video_thumbnails` / `extract_hdr_tonemapped_thumbnails`
+    take it as `max_size`, shrinking each frame as it is decoded (`utilities._shrink`, `cv2.INTER_AREA`
+    — 3.7ms per 4K frame against Pillow LANCZOS's 57ms); `pil_to_qimage` stores an image without alpha
+    as `Format_RGB888` (3 bytes a pixel). A 4K frame on a 1440p screen is 11MB, a set of ten 110MB.
+    **The previous file's tone-mapped set is dropped when the file changes** (`update_global_file`); it
+    used to stay until the next render (316MB held behind an SDR clip) and was never reused anyway.
+    Measured on a real display, working set (before -> after): idle with the spinner ready 376 ->
+    173MB, a 1080p file 464 -> 241, 4K 703 -> 288, 4K HDR with both sets 1022 -> 398, back to 1080p 785
+    -> 246. Queue rows keep a thumbnail scaled to cover 240x160 (4x the slot), not the whole frame.
+    `main.py` sets `OPENBLAS_NUM_THREADS=1` before numpy loads: OpenBLAS otherwise starts a thread per
+    core, each reserving a buffer — ~740MB of commit (not working set) on 32 threads. Empty (no preview
     change) whenever `supports_libplacebo()` is false or the geometry probe
     fails — callers must check the former themselves to tell "no HDR to show"
     apart from "libplacebo isn't available".

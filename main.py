@@ -7,6 +7,10 @@
 import os
 import sys
 
+# Before numpy loads: its OpenBLAS starts a thread per core, each reserving a buffer (~740MB of
+# commit on 32 threads), for linear algebra this app doesn't do.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
