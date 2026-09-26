@@ -85,25 +85,41 @@ def keybinds_snapshot():
                 ("toggle_queue", "F11"), ("preview_next", "Right")]}}
 
 
+def _realigned(path, frames, seeks):
+    """Does repeating each frame's seek (what the HDR render does) give the same picture?"""
+    for frame, (at, exact) in zip(frames, seeks):
+        again, _ = previews._grab_frame(path, at, (320, 180), exact=exact, threads=2)
+        if again is None or again.tobytes() != frame.tobytes():
+            return False
+    return True
+
+
 def probe_snapshot():
     out = {}
-    for name in ("sdr.mp4", "multi.mkv", "hdr.mkv", "audio.m4a", "vp9.webm"):
+    for name in ("sdr.mp4", "multi.mkv", "hdr.mkv", "audio.m4a", "vp9.webm", "cover.m4a", "keys.mp4", "sparse.mp4",
+                 "long.mp4", "late.mkv"):
         path = fixture(name)
-        # Never on an audio-only file: OpenCV's read() doesn't return there (the app gets the
-        # Wave Loop from the probe instead).
-        frames = [] if name == "audio.m4a" else previews.extract_video_thumbnails(path, 10, max_size=(320, 180))
-        out[name] = {"probe": _strip(probe.probe_media(path)),
+        info = probe.probe_media(path)
+        frames, seeks = previews.extract_preview_frames(path, 10, max_size=(320, 180))
+        with_info = previews.extract_preview_frames(path, 10, max_size=(320, 180), info=info)[1]
+        out[name] = {"probe": _strip(info),
                      "duration": round(probe.probe_duration(path) or 0, 3),
                      "previewable": probe._has_previewable_video(path),
-                     "frames": [list(f.size) for f in frames]}
-    for name in ("late.mkv", "late.ts"):
-        path = fixture(name)
-        out[name] = {"probe": _strip(probe.probe_media(path)), "duration": round(probe.probe_duration(path) or 0, 3)}
-    for name in ("sdr.mp4", "late.mkv", "vp9.webm"):         # the ffmpeg fallback OpenCV rarely needs
-        out[name]["ffmpeg_fallback_frames"] = [list(f.size) for f in previews._extract_thumbnails_ffmpeg(
-            fixture(name), 4, (200, 120))]
+                     "frames": [list(f.size) for f in frames],
+                     # (seconds, exact): keyframe (False), redone exactly or from OpenCV (True)
+                     "seeks": [[round(t, 3), exact] for t, exact in seeks],
+                     "same_seeks_with_probe_info": with_info == seeks,
+                     "realigned": _realigned(path, frames, seeks)}
+    path = fixture("late.ts")
+    out["late.ts"] = {"probe": _strip(probe.probe_media(path)), "duration": round(probe.probe_duration(path) or 0, 3)}
+    for name in ("keys.mp4", "late.mkv"):                    # the OpenCV pass on files ffmpeg would take
+        frames, seeks = previews._extract_thumbnails_cv2(fixture(name), 4, (200, 120))
+        out[name]["opencv_frames"] = [[list(f.size) for f in frames], [[round(t, 3), e] for t, e in seeks]]
     out["hdr.mkv"]["tonemapped_frames"] = [list(f.size) for f in previews.extract_hdr_tonemapped_thumbnails(
         fixture("hdr.mkv"), 3, max_size=(200, 120))]
+    seeks = previews.extract_preview_frames(fixture("keys.mp4"), 3, max_size=(200, 120))[1]
+    out["keys.mp4"]["tonemapped_at_seeks"] = len(previews.extract_hdr_tonemapped_thumbnails(
+        fixture("keys.mp4"), 3, max_size=(200, 120), seeks=seeks))
     out["capabilities"] = {"fps_mode": capabilities.supports_fps_mode(),
                            "libplacebo_problem": capabilities.libplacebo_problem(),
                            "av1_preset_range": list(capabilities.av1_preset_range())}

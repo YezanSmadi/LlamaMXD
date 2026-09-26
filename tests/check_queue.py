@@ -9,6 +9,7 @@ import time
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 import check_jobs as J  # noqa: E402  (its fixtures and settings)
+import harness  # noqa: E402
 from harness import WORK, fixture, report  # noqa: E402
 
 from check_ui import settle, window  # noqa: E402  (isolated settings + the offscreen MainWindow)
@@ -97,3 +98,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+    harness.finish()

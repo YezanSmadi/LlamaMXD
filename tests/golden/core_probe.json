@@ -34,13 +34,17 @@
    "mastering_min_nits": null,
    "max_cll": null,
    "max_fall": null,
+   "previewable": false,
    "title": null,
    "video": null,
    "video_level": null,
    "video_profile": null,
    "video_streams": [],
    "width": null
-  }
+  },
+  "realigned": true,
+  "same_seeks_with_probe_info": true,
+  "seeks": []
  },
  "capabilities": {
   "av1_preset_range": [
@@ -49,6 +53,69 @@
   ],
   "fps_mode": true,
   "libplacebo_problem": null
+ },
+ "cover.m4a": {
+  "duration": 0.021,
+  "frames": [],
+  "previewable": false,
+  "probe": {
+   "audio": "AAC",
+   "audio_bitrate": "96 kbps",
+   "audio_channels": "Mono",
+   "audio_sample_rate": "48000 Hz",
+   "audio_streams": [
+    {
+     "bitrate_display": "96 kbps",
+     "channels": 1,
+     "channels_display": "Mono",
+     "codec": "AAC",
+     "index": 0,
+     "language": "und",
+     "lossless": false,
+     "sample_rate": 48000,
+     "sample_rate_display": "48000 Hz"
+    }
+   ],
+   "chapters": null,
+   "container": ".m4a",
+   "creation_time": null,
+   "duration": 0.021333,
+   "fps": 90000.0,
+   "has_audio": true,
+   "has_video": true,
+   "hdr": false,
+   "height": 64,
+   "mastering_max_nits": null,
+   "mastering_min_nits": null,
+   "max_cll": null,
+   "max_fall": null,
+   "previewable": false,
+   "title": null,
+   "video": null,
+   "video_level": null,
+   "video_profile": "Baseline",
+   "video_streams": [
+    {
+     "bitrate_display": null,
+     "codec": null,
+     "codec_name": "MJPEG",
+     "color_format": "8-bit 4:2:0",
+     "fps": 90000.0,
+     "fps_display": "90000",
+     "hdr": false,
+     "hdr_display": "SDR",
+     "index": 0,
+     "language": null,
+     "level": null,
+     "profile": "Baseline",
+     "resolution_display": "64x64"
+    }
+   ],
+   "width": 64
+  },
+  "realigned": true,
+  "same_seeks_with_probe_info": true,
+  "seeks": []
  },
  "hdr.mkv": {
   "duration": 3.999,
@@ -114,6 +181,7 @@
    "mastering_min_nits": 0.0001,
    "max_cll": 1000,
    "max_fall": 400,
+   "previewable": true,
    "title": null,
    "video": "H.265",
    "video_level": "2.1",
@@ -137,6 +205,50 @@
    ],
    "width": 640
   },
+  "realigned": false,
+  "same_seeks_with_probe_info": true,
+  "seeks": [
+   [
+    0.375,
+    true
+   ],
+   [
+    0.708,
+    true
+   ],
+   [
+    1.083,
+    true
+   ],
+   [
+    1.458,
+    true
+   ],
+   [
+    1.833,
+    true
+   ],
+   [
+    2.167,
+    true
+   ],
+   [
+    2.542,
+    true
+   ],
+   [
+    2.917,
+    true
+   ],
+   [
+    3.292,
+    true
+   ],
+   [
+    3.625,
+    true
+   ]
+  ],
   "tonemapped_frames": [
    [
     200,
@@ -153,26 +265,227 @@
   ],
   "verify_sdr_tag": false
  },
- "late.mkv": {
-  "duration": 6.023,
-  "ffmpeg_fallback_frames": [
+ "keys.mp4": {
+  "duration": 60.0,
+  "frames": [
    [
-    200,
-    112
+    320,
+    180
    ],
    [
-    200,
-    112
+    320,
+    180
    ],
    [
-    200,
-    112
+    320,
+    180
    ],
    [
-    200,
-    112
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
    ]
   ],
+  "opencv_frames": [
+   [
+    [
+     200,
+     112
+    ],
+    [
+     200,
+     112
+    ],
+    [
+     200,
+     112
+    ],
+    [
+     200,
+     112
+    ]
+   ],
+   [
+    [
+     12.0,
+     true
+    ],
+    [
+     24.0,
+     true
+    ],
+    [
+     36.0,
+     true
+    ],
+    [
+     48.0,
+     true
+    ]
+   ]
+  ],
+  "previewable": true,
+  "probe": {
+   "audio": null,
+   "audio_bitrate": null,
+   "audio_channels": null,
+   "audio_sample_rate": null,
+   "audio_streams": [],
+   "chapters": null,
+   "container": ".mp4",
+   "creation_time": null,
+   "duration": 60.0,
+   "fps": 30.0,
+   "has_audio": false,
+   "has_video": true,
+   "hdr": false,
+   "height": 180,
+   "mastering_max_nits": null,
+   "mastering_min_nits": null,
+   "max_cll": null,
+   "max_fall": null,
+   "previewable": true,
+   "title": null,
+   "video": "H.264",
+   "video_level": "1.3",
+   "video_profile": "Constrained Baseline",
+   "video_streams": [
+    {
+     "bitrate_display": "779 kbps",
+     "codec": "H.264",
+     "codec_name": "H264",
+     "color_format": "8-bit 4:2:0",
+     "fps": 30.0,
+     "fps_display": "30",
+     "hdr": false,
+     "hdr_display": "SDR",
+     "index": 0,
+     "language": "und",
+     "level": "1.3",
+     "profile": "Constrained Baseline",
+     "resolution_display": "320x180"
+    }
+   ],
+   "width": 320
+  },
+  "realigned": true,
+  "same_seeks_with_probe_info": true,
+  "seeks": [
+   [
+    5.455,
+    false
+   ],
+   [
+    10.909,
+    false
+   ],
+   [
+    16.364,
+    false
+   ],
+   [
+    21.818,
+    false
+   ],
+   [
+    27.273,
+    false
+   ],
+   [
+    32.727,
+    false
+   ],
+   [
+    38.182,
+    false
+   ],
+   [
+    43.636,
+    false
+   ],
+   [
+    49.091,
+    false
+   ],
+   [
+    54.545,
+    false
+   ]
+  ],
+  "tonemapped_at_seeks": 3
+ },
+ "late.mkv": {
+  "duration": 6.023,
+  "frames": [
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ]
+  ],
+  "opencv_frames": [
+   [],
+   []
+  ],
+  "previewable": true,
   "probe": {
    "audio": "AAC",
    "audio_bitrate": null,
@@ -204,6 +517,7 @@
    "mastering_min_nits": null,
    "max_cll": null,
    "max_fall": null,
+   "previewable": true,
    "title": null,
    "video": "H.264",
    "video_level": "1.2",
@@ -226,7 +540,51 @@
     }
    ],
    "width": 320
-  }
+  },
+  "realigned": true,
+  "same_seeks_with_probe_info": true,
+  "seeks": [
+   [
+    0.548,
+    true
+   ],
+   [
+    1.095,
+    true
+   ],
+   [
+    1.643,
+    true
+   ],
+   [
+    2.19,
+    true
+   ],
+   [
+    2.738,
+    true
+   ],
+   [
+    3.285,
+    true
+   ],
+   [
+    3.833,
+    true
+   ],
+   [
+    4.38,
+    true
+   ],
+   [
+    4.928,
+    true
+   ],
+   [
+    5.475,
+    true
+   ]
+  ]
  },
  "late.ts": {
   "duration": 6.0,
@@ -249,6 +607,7 @@
    "mastering_min_nits": null,
    "max_cll": null,
    "max_fall": null,
+   "previewable": true,
    "title": null,
    "video": "H.264",
    "video_level": "1.2",
@@ -273,6 +632,139 @@
    "width": 320
   }
  },
+ "long.mp4": {
+  "duration": 30.0,
+  "frames": [
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ]
+  ],
+  "previewable": true,
+  "probe": {
+   "audio": null,
+   "audio_bitrate": null,
+   "audio_channels": null,
+   "audio_sample_rate": null,
+   "audio_streams": [],
+   "chapters": null,
+   "container": ".mp4",
+   "creation_time": null,
+   "duration": 30.0,
+   "fps": 30.0,
+   "has_audio": false,
+   "has_video": true,
+   "hdr": false,
+   "height": 720,
+   "mastering_max_nits": null,
+   "mastering_min_nits": null,
+   "max_cll": null,
+   "max_fall": null,
+   "previewable": true,
+   "title": null,
+   "video": "H.264",
+   "video_level": "3.1",
+   "video_profile": "Constrained Baseline",
+   "video_streams": [
+    {
+     "bitrate_display": "7.5 Mbps",
+     "codec": "H.264",
+     "codec_name": "H264",
+     "color_format": "8-bit 4:2:0",
+     "fps": 30.0,
+     "fps_display": "30",
+     "hdr": false,
+     "hdr_display": "SDR",
+     "index": 0,
+     "language": "und",
+     "level": "3.1",
+     "profile": "Constrained Baseline",
+     "resolution_display": "1280x720"
+    }
+   ],
+   "width": 1280
+  },
+  "realigned": false,
+  "same_seeks_with_probe_info": true,
+  "seeks": [
+   [
+    2.733,
+    true
+   ],
+   [
+    5.467,
+    true
+   ],
+   [
+    8.167,
+    true
+   ],
+   [
+    10.9,
+    true
+   ],
+   [
+    13.633,
+    true
+   ],
+   [
+    16.367,
+    true
+   ],
+   [
+    19.1,
+    true
+   ],
+   [
+    21.833,
+    true
+   ],
+   [
+    24.533,
+    true
+   ],
+   [
+    27.267,
+    true
+   ]
+  ]
+ },
  "missing": {
   "audio": null,
   "audio_bitrate": null,
@@ -292,6 +784,7 @@
   "mastering_min_nits": null,
   "max_cll": null,
   "max_fall": null,
+  "previewable": null,
   "title": null,
   "video": null,
   "video_level": null,
@@ -386,6 +879,7 @@
    "mastering_min_nits": null,
    "max_cll": null,
    "max_fall": null,
+   "previewable": true,
    "title": null,
    "video": "H.264",
    "video_level": "3.0",
@@ -408,28 +902,54 @@
     }
    ],
    "width": 640
-  }
+  },
+  "realigned": true,
+  "same_seeks_with_probe_info": true,
+  "seeks": [
+   [
+    0.375,
+    true
+   ],
+   [
+    0.75,
+    true
+   ],
+   [
+    1.083,
+    true
+   ],
+   [
+    1.458,
+    true
+   ],
+   [
+    1.833,
+    true
+   ],
+   [
+    2.208,
+    true
+   ],
+   [
+    2.583,
+    true
+   ],
+   [
+    2.958,
+    true
+   ],
+   [
+    3.292,
+    true
+   ],
+   [
+    3.667,
+    true
+   ]
+  ]
  },
  "sdr.mp4": {
   "duration": 4.0,
-  "ffmpeg_fallback_frames": [
-   [
-    200,
-    112
-   ],
-   [
-    200,
-    112
-   ],
-   [
-    200,
-    112
-   ],
-   [
-    200,
-    112
-   ]
-  ],
   "frames": [
    [
     320,
@@ -504,6 +1024,7 @@
    "mastering_min_nits": null,
    "max_cll": null,
    "max_fall": null,
+   "previewable": true,
    "title": "Fixture Clip",
    "video": "H.264",
    "video_level": "3.0",
@@ -527,28 +1048,187 @@
    ],
    "width": 640
   },
+  "realigned": false,
+  "same_seeks_with_probe_info": true,
+  "seeks": [
+   [
+    0.375,
+    true
+   ],
+   [
+    0.708,
+    true
+   ],
+   [
+    1.083,
+    true
+   ],
+   [
+    1.458,
+    true
+   ],
+   [
+    1.833,
+    true
+   ],
+   [
+    2.167,
+    true
+   ],
+   [
+    2.542,
+    true
+   ],
+   [
+    2.917,
+    true
+   ],
+   [
+    3.292,
+    true
+   ],
+   [
+    3.625,
+    true
+   ]
+  ],
   "verify_sdr_tag": true
+ },
+ "sparse.mp4": {
+  "duration": 60.0,
+  "frames": [
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ]
+  ],
+  "previewable": true,
+  "probe": {
+   "audio": null,
+   "audio_bitrate": null,
+   "audio_channels": null,
+   "audio_sample_rate": null,
+   "audio_streams": [],
+   "chapters": null,
+   "container": ".mp4",
+   "creation_time": null,
+   "duration": 60.0,
+   "fps": 30.0,
+   "has_audio": false,
+   "has_video": true,
+   "hdr": false,
+   "height": 180,
+   "mastering_max_nits": null,
+   "mastering_min_nits": null,
+   "max_cll": null,
+   "max_fall": null,
+   "previewable": true,
+   "title": null,
+   "video": "H.264",
+   "video_level": "1.3",
+   "video_profile": "Constrained Baseline",
+   "video_streams": [
+    {
+     "bitrate_display": "751 kbps",
+     "codec": "H.264",
+     "codec_name": "H264",
+     "color_format": "8-bit 4:2:0",
+     "fps": 30.0,
+     "fps_display": "30",
+     "hdr": false,
+     "hdr_display": "SDR",
+     "index": 0,
+     "language": "und",
+     "level": "1.3",
+     "profile": "Constrained Baseline",
+     "resolution_display": "320x180"
+    }
+   ],
+   "width": 320
+  },
+  "realigned": true,
+  "same_seeks_with_probe_info": true,
+  "seeks": [
+   [
+    5.455,
+    false
+   ],
+   [
+    10.909,
+    false
+   ],
+   [
+    16.364,
+    false
+   ],
+   [
+    21.818,
+    false
+   ],
+   [
+    27.273,
+    false
+   ],
+   [
+    32.727,
+    false
+   ],
+   [
+    38.182,
+    false
+   ],
+   [
+    43.636,
+    true
+   ],
+   [
+    49.091,
+    true
+   ],
+   [
+    54.545,
+    false
+   ]
+  ]
  },
  "vp9.webm": {
   "duration": 4.008,
-  "ffmpeg_fallback_frames": [
-   [
-    200,
-    112
-   ],
-   [
-    200,
-    112
-   ],
-   [
-    200,
-    112
-   ],
-   [
-    200,
-    112
-   ]
-  ],
   "frames": [
    [
     320,
@@ -623,6 +1303,7 @@
    "mastering_min_nits": null,
    "max_cll": null,
    "max_fall": null,
+   "previewable": true,
    "title": null,
    "video": "VP9",
    "video_level": null,
@@ -645,6 +1326,50 @@
     }
    ],
    "width": 640
-  }
+  },
+  "realigned": true,
+  "same_seeks_with_probe_info": true,
+  "seeks": [
+   [
+    0.375,
+    true
+   ],
+   [
+    0.708,
+    true
+   ],
+   [
+    1.083,
+    true
+   ],
+   [
+    1.458,
+    true
+   ],
+   [
+    1.833,
+    true
+   ],
+   [
+    2.167,
+    true
+   ],
+   [
+    2.542,
+    true
+   ],
+   [
+    2.917,
+    true
+   ],
+   [
+    3.292,
+    true
+   ],
+   [
+    3.625,
+    true
+   ]
+  ]
  }
 }

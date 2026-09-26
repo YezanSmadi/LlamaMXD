@@ -9,6 +9,7 @@ import os
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
+import harness  # noqa: E402
 from harness import WORK, check_golden, fixture, report  # noqa: E402
 
 from check_ui import settle, set_scale, states, window  # noqa: E402  (isolated settings + the offscreen MainWindow)
@@ -115,3 +116,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+    harness.finish()

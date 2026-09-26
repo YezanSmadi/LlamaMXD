@@ -10,6 +10,7 @@ import time
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
+import harness  # noqa: E402
 from harness import WORK, check_golden, fixture, report  # noqa: E402
 
 from check_ui import settle, window  # noqa: E402
@@ -107,11 +108,11 @@ def run():
         f.write(os.urandom(64 * 1024))
     step("load an unreadable file (rejected)", lambda: (select(junk), wait(lambda: dialogs, 30)))
 
-    real = pipeline.extract_video_thumbnails
-    pipeline.extract_video_thumbnails = lambda *a, **k: []
+    real = pipeline.extract_preview_frames
+    pipeline.extract_preview_frames = lambda *a, **k: ([], [])
     step("a video that decodes to no frames (No Preview)",
          lambda: (select(fixture("late.mkv")), wait(lambda: dialogs, 30)))
-    pipeline.extract_video_thumbnails = real
+    pipeline.extract_preview_frames = real
     step("then a file with frames (the carousel comes back)",
          lambda: (select(fixture("multi.mkv")), wait(lambda: pipe("thumb_frames_path") == fixture("multi.mkv"))))
     return report(f"selected-file pipeline ({len(trace)} steps)", check_golden("media", trace))
@@ -119,3 +120,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+    harness.finish()

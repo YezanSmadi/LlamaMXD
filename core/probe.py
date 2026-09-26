@@ -240,13 +240,14 @@ def probe_media(path):
 
     `has_video` / `has_audio` say whether a stream of that kind exists at all: False only when
     the probe ran and found none, None when it never completed ("unknown", never "absent").
+    `previewable` is `_has_previewable_video`'s answer, from the same probe.
     Never raises. Runs a subprocess, so keep it off the GUI thread."""
     unknown = {
         "container": None, "video": None, "audio": None,
         "video_profile": None, "video_level": None, "hdr": None,
         "width": None, "height": None, "duration": None, "file_size": None,
         "audio_channels": None, "audio_sample_rate": None, "audio_bitrate": None,
-        "has_video": None, "has_audio": None, "fps": None,
+        "has_video": None, "has_audio": None, "previewable": None, "fps": None,
         "video_streams": [], "audio_streams": [],
         "mastering_max_nits": None, "mastering_min_nits": None,
         "max_cll": None, "max_fall": None,
@@ -267,7 +268,7 @@ def probe_media(path):
             "stream=codec_type,codec_name,profile,level,channels,sample_rate,"
             "bit_rate,width,height,color_transfer,color_primaries,r_frame_rate,"
             "pix_fmt,bits_per_raw_sample:"
-            "stream_tags=language:format=duration,start_time,bit_rate:"
+            "stream_disposition=attached_pic:stream_tags=language:format=duration,start_time,bit_rate:"
             "format_tags=title,creation_time:chapter=id",
             path)
         streams = payload.get("streams", [])
@@ -280,6 +281,7 @@ def probe_media(path):
     info = dict(unknown)
     info["has_video"] = False
     info["has_audio"] = False
+    info["previewable"] = False
     info["file_size"] = file_size
     # As on disk, not limited to output containers: the tooltip shows import-only formats too.
     extension = os.path.splitext(path)[1].lower()
@@ -307,6 +309,8 @@ def probe_media(path):
     for stream in streams:
         kind, name = stream.get("codec_type"), stream.get("codec_name")
         if kind == "video":
+            if not info["has_video"]:
+                info["previewable"] = not (stream.get("disposition") or {}).get("attached_pic")
             info["has_video"] = True
             info["video_streams"].append(_describe_video_stream(video_index, stream))
             video_index += 1

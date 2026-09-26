@@ -32,6 +32,7 @@ llamalog.setup(version="tests")
 # --------------------------------------------------------------------------- #
 _SRC = ["-f", "lavfi", "-i", "testsrc2=s=640x360:r=24:d=4"]
 _TONE = ["-f", "lavfi", "-i", "sine=f=440:d=4:sample_rate=48000"]
+_KEYS_SRC = ["-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=60", "-map", "0"]
 _TONE2 = ["-f", "lavfi", "-i", "sine=f=660:d=4:sample_rate=44100"]
 _HDR_X265 = ("colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:log-level=error:"
              "master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):"
@@ -63,7 +64,29 @@ _CLIPS = {
     # VP9 + Opus in WebM.
     "vp9.webm": [*_SRC, *_TONE, "-map", "0", "-map", "1", "-c:v", "libvpx-vp9", "-deadline", "realtime",
                  "-cpu-used", "8", "-c:a", "libopus", "-shortest"],
+    # Audio with cover art: a video stream, but nothing to preview.
+    "cover.m4a": [*_TONE, "-f", "lavfi", "-i", "color=c=red:s=64x64:d=1", "-map", "0", "-map", "1",
+                  "-c:a", "aac", "-c:v", "mjpeg", "-frames:v", "1", "-disposition:v:0", "attached_pic"],
+    # 60s with a keyframe every second: previews come from keyframes.
+    "keys.mp4": [*_KEYS_SRC, "-c:v", "libx264", "-preset", "ultrafast", "-x264-params", "keyint=30:scenecut=0"],
+    # Keyframes every 5s except at 40s and 45s: the 43.6s sample lands on the 38.2s sample's
+    # keyframe (35s), so that one is redone at its exact frame.
+    "sparse.mp4": [*_KEYS_SRC, "-c:v", "libx264", "-preset", "ultrafast", "-x264-params", "keyint=1800:scenecut=0",
+                   "-force_key_frames", "0,5,10,15,20,25,30,35,50,55"],
 }
+
+
+def finish():
+    """End a check that built a MainWindow once its results are printed, skipping teardown: Qt's
+    native teardown crashes at exit now and then (see CLAUDE.md), and os._exit still runs the
+    DLLs' own unload code, where it can crash too. TerminateProcess runs none of it."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    import ctypes
+    kernel32 = ctypes.WinDLL("kernel32")
+    kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    kernel32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    kernel32.TerminateProcess(kernel32.GetCurrentProcess(), 0)
 
 
 def fixture(name):

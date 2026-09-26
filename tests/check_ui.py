@@ -10,6 +10,7 @@ import time
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
+import harness  # noqa: E402
 from harness import WORK, check_golden, fixture, report  # noqa: E402
 
 from core import presets, theme  # noqa: E402
@@ -157,3 +158,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+    harness.finish()

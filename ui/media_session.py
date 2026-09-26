@@ -10,7 +10,7 @@ import time
 from PySide6.QtGui import QGuiApplication
 
 from core import formats, llamalog
-from core.previews import extract_hdr_tonemapped_thumbnails, extract_video_thumbnails
+from core.previews import extract_hdr_tonemapped_thumbnails, extract_preview_frames
 from core.probe import probe_media
 from ui.widgets.dialogs import show_message
 from ui.workers import emit_progress, pil_to_qimage, run_async
@@ -65,6 +65,7 @@ class MediaSession:
         # Preview frames (QImages) for the selected file, decoded once off the GUI thread.
         self.thumb_frames = []
         self.thumb_frames_path = None
+        self._thumb_seeks = []            # how each frame was reached: the HDR set repeats them
         self._thumb_token = 0
         self._thumb_t0 = time.monotonic()
         self.info = _empty_media_info()
@@ -122,7 +123,7 @@ class MediaSession:
         cached_info = path == self.info_path
         if cached_info:
             self._broadcast_media_info()
-            # An audio file's Wave Loop comes from the probe: OpenCV's decode never returns on one.
+            # An audio file's Wave Loop comes from the probe, not from the (empty) frame decode.
             if self._is_audio_only(path):
                 self._broadcast_audio_only(True)
         if path == self.thumb_frames_path and self.thumb_frames:
@@ -132,14 +133,17 @@ class MediaSession:
                 return
 
         max_size = _preview_max_size()
+        known = self.info if cached_info else None
 
         def work():
-            if not cached_info:
+            info = known
+            if info is None:
                 info = probe_media(path)
                 emit_progress(lambda i: self._deliver_media_info(token, path, i), info)
-            return [pil_to_qimage(f) for f in extract_video_thumbnails(path, count=10, max_size=max_size)]
+            frames, seeks = extract_preview_frames(path, count=10, max_size=max_size, info=info)
+            return [pil_to_qimage(f) for f in frames], seeks
 
-        run_async(work, lambda frames: self._deliver_thumbnails(token, path, frames or []))
+        run_async(work, lambda result: self._deliver_thumbnails(token, path, *(result or ([], []))))
 
     def _deliver_media_info(self, token, path, info):
         if token != self._thumb_token or info is None:
@@ -167,6 +171,7 @@ class MediaSession:
         self.info_path = None
         self.thumb_frames = []
         self.thumb_frames_path = None
+        self._thumb_seeks = []
         self._preview_index = 0
         self._cancel_hdr_render()
         for tab in self.tabs:
@@ -198,7 +203,7 @@ class MediaSession:
             # The probe may carry a title / chapter count the naming format uses.
             tab.refresh_auto_output()
 
-    def _deliver_thumbnails(self, token, path, frames):
+    def _deliver_thumbnails(self, token, path, frames, seeks=()):
         if token != self._thumb_token:
             return
         took = time.monotonic() - self._thumb_t0
@@ -220,6 +225,7 @@ class MediaSession:
             return
         self.thumb_frames = frames
         self.thumb_frames_path = path
+        self._thumb_seeks = list(seeks)
         llamalog.get("app").info("Previews ready for %s: %d frames in %.1fs",
                                  os.path.basename(path), len(frames), took)
         self._broadcast_thumbnails(frames)
@@ -261,10 +267,11 @@ class MediaSession:
         self._hdr_cancel_event = cancel_event
 
         max_size = _preview_max_size()
+        seeks = self._thumb_seeks if path == self.thumb_frames_path else None
 
         def work():
             frames = extract_hdr_tonemapped_thumbnails(path, count=10, should_cancel=cancel_event.is_set,
-                                                       max_size=max_size)
+                                                       max_size=max_size, seeks=seeks)
             return [pil_to_qimage(f) for f in frames]
 
         run_async(work, lambda frames: self._deliver_hdr(token, path, frames or []))

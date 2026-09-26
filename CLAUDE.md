@@ -112,7 +112,13 @@ own settings.json / presets.json, and fixture clips are generated there by the b
   all 259 Downloader dropdown combinations on a stand-in YouTube format list. `-fps_mode`,
   libplacebo, the GPU (NVIDIA / NVENC) and tool paths are pinned, so the goldens hold on any machine.
 - `check_core` — goldens of `formats` (the whole cascade), `naming`, `keybinds`, and `probe_media` /
-  `probe_duration` / preview frames on the fixtures (SDR, multi-audio, HDR10, audio-only, VP9).
+  `probe_duration` / preview frames on the fixtures (SDR, multi-audio, HDR10, audio-only, VP9, cover
+  art, a late-start MKV, and `keys.mp4` / `sparse.mp4` for the keyframe path and its exact redos):
+  each frame's seek, that repeating it gives the same picture, and the tone-mapped set at those seeks.
+
+UI checks end through `harness.finish()` (`TerminateProcess` once their results are printed): Qt's
+native teardown crashes at exit now and then (3 of 10 runs on one check, before and after any
+change here), and even `os._exit` runs the DLLs' unload code where it happens.
 - `check_ui` — the real `MainWindow` offscreen: every visible widget's rect on 13 pages (plus the
   no-file state) at 1.0 / 1.5 / 2.0x, the squeeze scan, and the Muxing / Encoding preview invariant.
 - `check_media` — the selected-file pipeline (`MediaSession`): load, a cache-hit reselect (no
@@ -519,12 +525,12 @@ once made the next autofill mistake the name for a folder.
 - **Miss** → bumps `_thumb_token`; one worker runs `probe_media` first and
   delivers it early through `emit_progress` (the ~50ms probe settles the
   tabs' defaults long before the frame seeks finish), then
-  `extract_video_thumbnails(path, count=10)` — ten frames at the video's
-  *interior* (fractions 1/11 … 10/11, skipping a black first / end-credits
-  last frame): OpenCV first, and **ffmpeg if OpenCV produced nothing at all**
-  (see "A file that reads fine but decodes to no preview frames" below). A
-  result whose token is stale (the user picked another file mid-decode) is
-  dropped.
+  `extract_preview_frames(path, count=10, info=...)` — ten frames at the video's
+  *interior* (fractions 1/11 … 10/11 of the real length, skipping a black first /
+  end-credits last frame), with the seek that reached each (see "Preview frames are
+  keyframes" below). The probe result is passed in, so its length and `previewable`
+  aren't asked for again. A result whose token is stale (the user picked another file
+  mid-decode) is dropped.
 
 `_broadcast_media_info` calls each media tab's `on_media_info` and its
 carousel's `set_media_info`; `_broadcast_thumbnails` hands frames to each
@@ -546,19 +552,43 @@ HDR render for it is cancelled, and a "Couldn't Read This File" dialog
 explains why — rather than a tab silently showing zeroed-out fields for a
 file that was never actually usable.
 
+**Preview frames are keyframes** (`core/previews.py`, `extract_preview_frames`). Landing on an
+exact frame means decoding from the keyframe before it up to the target — hundreds of 4K frames per
+preview — and OpenCV did that in-process with a decoder thread per core (each holding its own
+frames). Now each preview is **the keyframe at or before its target**: one ffmpeg per frame with
+`-noaccurate_seek`, **one decoder thread each** (a frame threaded across every core only slows and
+bloats a single-frame decode), `preview_workers()` of them at once, as **rgb24** PPM over a pipe
+(`format=rgb24` is load-bearing: a 10-bit source otherwise gives a 16-bit PPM, ~100x slower for
+Pillow), shrunk in Python exactly as before (`_shrink`, `INTER_AREA`). ffmpeg's colour conversion
+honours the stream's tags, where OpenCV's used BT.601 on at least one BT.709 file. Measured on the
+user's files, probe + ten previews, time and the app's peak commit (old -> new): 4K AV1 15.8s 776MB
+-> 1.0s 345MB; 4K HDR AV1 10.8s 804MB -> 1.4s 305MB; 1080p AV1 6.2s 333MB -> 0.5s 137MB; 4K HDR HEVC
+4.5s 1174MB -> 1.5s 295MB; 4K H.264 1.6s 738MB -> 1.0s 350MB; 1080p H.264 0.42 -> 0.41s, 291 ->
+132MB. Tried and rejected: several OpenCV readers in parallel (+500-900MB each, and no faster at 4 or
+8 CPUs — the single reader already fills them), and capping OpenCV's decoder threads (saves memory
+on HEVC / H.264 only, and costs time on any machine with more than 8 cores). The rules, in order:
+- `previewable` False (audio, or a first video stream that is cover art) -> no frames, and no decode
+  at all. That also retired OpenCV's hang on an audio file (below).
+- **Keyframes** (`_extract_keyframes`) unless the sample gap (length / 11) is under
+  `_MIN_KEYFRAME_GAP` (2s — keyframes are rarely closer, so a clip under ~22s would share them). A
+  sample landing at or before the previous one's keyframe (ffmpeg's `showinfo` reports where it
+  landed) is redone at its **exact** frame; past `_MAX_EXACT_REDOS` (2) of those it stops early and
+  hands the file on.
+- **OpenCV** at exact frame indices, as before — the short clips and sparse-keyframe files (a 13s
+  Gladiator clip: 1.9s, unchanged).
+- **Exact ffmpeg grabs** (`_extract_exact`) as the last resort: a file OpenCV can't seek, e.g. the
+  late-start MKV below (its frame count comes from an end timestamp).
+
+Each frame comes with its **seek** — `(seconds from the file's start, exact)` — which `MediaSession`
+keeps (`_thumb_seeks`) and the HDR render repeats (see "HDR preview thumbnails"), so the two sets are
+the same frames by construction: repeating a keyframe seek gives the identical picture (checked on
+every file). Not the landed time: `showinfo` prints 6 significant digits, and an exact seek a hair
+before a keyframe starts from the previous one and decodes the whole gap (the HDR render ran 11.5s
+instead of 8s that way). The OpenCV route's seeks are its index / fps, as the HDR render always used.
+
 **A file that reads fine but decodes to no preview frames is kept, not rejected.**
-`extract_video_thumbnails` is OpenCV, then — only if that produced *zero* frames —
-`_extract_thumbnails_ffmpeg`: one short ffmpeg process per frame at the same fractions of
-the file's real length (`probe_duration`, corrected — see "A file's real length" below), as
-input-side `-ss` seeks (which count from the file's own start whatever its timestamps say),
-scaled to at most 1920 wide, as **rgb24** PPM over a pipe. `format=rgb24` is load-bearing: a
-10-bit source otherwise comes out as a 16-bit PPM, which Pillow needs ~1.4s a frame to read
-(0.01s as 8-bit; 21.7s for ten frames became 5.9s). It gives up after three misses in a row
-with none found, and skips a file whose first video stream is cover art
-(`_has_previewable_video`, `attached_pic`) so an audio file keeps its Wave Loop. OpenCV's own
-loop stops after three failed seeks in a row for the same reason (each failed seek was ~0.3s).
-Only if *both* come back empty does `_deliver_thumbnails` get an empty list for something that
-isn't audio-only (`_is_audio_only` — an audio file legitimately has no frames and gets the Wave
+Only if every route above comes back empty does `_deliver_thumbnails` get an empty list for
+something that isn't audio-only (`_is_audio_only` — an audio file legitimately has no frames and gets the Wave
 Loop instead). The file **stays selected and fully usable** — the previews failing says nothing
 about whether ffmpeg can mux/encode it — so nothing is undone: each media tab's
 `show_no_preview()` puts the drop box back over the carousel, now reading **"No Preview
@@ -636,19 +666,16 @@ into the `"<n>k"` ffmpeg wants.
 independent of whether its codec was recognised: `False` only once a probe
 genuinely ran and found none; `None` (unknown) must never read as absent.
 
-**Audio-only inputs.** `extract_video_thumbnails` returns `[]` for an audio
-file. `_is_audio_only(path)` (the probe says audio-but-no-video, or with no
+**Audio-only inputs.** `extract_preview_frames` returns `[]` for an audio
+file, without decoding anything. `_is_audio_only(path)` (the probe says audio-but-no-video, or with no
 probe the extension is in `formats.AUDIO_EXTENSIONS`) triggers
 `set_audio_only(True)` on every carousel — from the probe delivery, the
 cached-probe branch of `_load_thumbnails` (a re-selected audio file has no fresh probe
 to deliver it) and the empty frame delivery — which reveals the carousel and shows the Wave
 Loop visualiser with navigation disabled. Real frames arriving clear it again.
-**Do not wait on the frame decode for an audio file: OpenCV's `cap.read()` never returns on
-an audio-only file** (m4a, mp3 and flac all hang, 5/5 runs, with no frame count reported), so
-its worker thread is stuck for good and `_deliver_thumbnails` never fires — the Wave Loop
-comes from the probe, not from that decode. Harmless while the probe path reveals the
-carousel; it is why the cached path above must not rely on the decode, or the import spinner
-would spin forever. (Each audio import leaks one such daemon thread.)
+The Wave Loop still comes from the probe, not from the frame delivery. **Never hand an audio file to
+OpenCV: its `cap.read()` never returns there** (m4a, mp3 and flac all hung, 5/5 runs), which stranded
+a worker thread per audio import until previews checked `previewable` first.
 
 **HDR→SDR preview renders** (`start_hdr_render`, `_deliver_hdr`): one
 tone-mapped render per file (`extract_hdr_tonemapped_thumbnails`), cached on
@@ -2910,12 +2937,13 @@ picks the toast. **Only one ffmpeg runs at a time.**
     like. `core.previews.extract_hdr_tonemapped_thumbnails` instead runs one
     short-lived real ffmpeg + libplacebo process **per frame** (an input-side
     `-ss` approximate seek, then a single-frame decode through the identical
-    `libplacebo_tonemap_vf` filter the real encode uses), targeting the exact
-    same frame indices `extract_video_thumbnails`'s cv2 seek samples
-    (`_interior_sample_frames`, shared by both) so the two sets stay
-    index-for-index aligned. Ten short seeks measured well under the cost of
-    one full linear decode on a real multi-GB HDR10 source. **The frames render in parallel**
-    (`hdr_preview_workers`: 3 processes at once with 8 or more logical CPUs, else 2 — never 1),
+    `libplacebo_tonemap_vf` filter the real encode uses), **repeating the raw
+    set's seeks** (`seeks=`, from `extract_preview_frames` — see "Preview frames
+    are keyframes") so the two sets are the same frames; with no seeks it falls
+    back to OpenCV's frame indices (`_interior_sample_frames`). A keyframe seek
+    decodes one frame, so the render got faster too: 4K HDR AV1 8.2 -> 5.3s, 4K
+    HDR HEVC 9.8 -> 7.5s. **The frames render in parallel**
+    (`preview_workers`: 3 processes at once with 8 or more logical CPUs, else 2 — never 1),
     each at `-threads 4` (or the CPU count if lower) and **below-normal priority**, with a 90s
     per-frame timeout (a frame that times out is a hole in a set that must stay aligned with
     the raw one, and a frame sharing the machine with an encode takes far longer than the
@@ -2947,7 +2975,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     source; 0.73GB measured earlier on Beauty and the Beast) and the app's own peak commit reached
     ~2GB (the worker's transient PIL images beside the QImages), for the ~10s the render takes.
     **Frames are now stored no bigger than they can be drawn**: `_preview_max_size` (`ui/media_session.py`) is the
-    biggest screen in device pixels, and `extract_video_thumbnails` / `extract_hdr_tonemapped_thumbnails`
+    biggest screen in device pixels, and `extract_preview_frames` / `extract_hdr_tonemapped_thumbnails`
     take it as `max_size`, shrinking each frame as it is decoded (`previews._shrink`, `cv2.INTER_AREA`
     — 3.7ms per 4K frame against Pillow LANCZOS's 57ms); `pil_to_qimage` stores an image without alpha
     as `Format_RGB32` (Qt's native format; see below). A 4K frame on a 1440p screen is 14MB.

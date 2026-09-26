@@ -10,6 +10,7 @@ import time
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 import check_commands  # noqa: E402  (the stand-in yt-dlp format list)
+import harness  # noqa: E402
 from harness import WORK, check_golden, fixture, report  # noqa: E402
 
 from check_ui import settle, window  # noqa: E402
@@ -93,3 +94,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+    harness.finish()
