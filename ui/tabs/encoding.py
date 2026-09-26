@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSlider, QVBoxLayout, QWidget
 
 from core import formats
-from core.capabilities import av1_preset_range, libplacebo_problem_text, supports_libplacebo
+from core.capabilities import av1_preset_range, libplacebo_checked, libplacebo_problem_text, supports_libplacebo
 from ui import scale
 from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow
 from ui.widgets.controls import button, field_label, labeled, set_enabled
@@ -405,13 +405,16 @@ class EncodingTab(MediaTab):
         set_enabled(self.speed_menu, self.speed_label, video_live and bool(speeds))
         # HDR→SDR needs an HDR source and libplacebo; forced off (not just greyed) otherwise.
         hdr_source = video_live and info.get("hdr") is True
-        hdr_enabled = hdr_source and supports_libplacebo()
+        # Greyed until the (background) libplacebo check has answered: asking here would run it.
+        checked = libplacebo_checked()
+        hdr_enabled = hdr_source and checked and supports_libplacebo()
         if not hdr_enabled and self.hdr_switch.isChecked():
             self.hdr_switch.setChecked(False)
             self._apply_preview_frames()
         set_enabled(self.hdr_switch, self.hdr_label, hdr_enabled)
         # On a greyed HDR switch, say what's missing.
-        hdr_tip = f"{_HDR_TIP}\n\nUnavailable: {libplacebo_problem_text()}" if hdr_source and not hdr_enabled else _HDR_TIP
+        why = libplacebo_problem_text() if checked else "checking whether this PC can tone-map..."
+        hdr_tip = f"{_HDR_TIP}\n\nUnavailable: {why}" if hdr_source and not hdr_enabled else _HDR_TIP
         tip(self.hdr_label, hdr_tip)
         tip(self.hdr_switch, hdr_tip)
         # Live on an unresolved Select; off for codecs with no rate control.

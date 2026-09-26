@@ -87,8 +87,9 @@ def _libplacebo_runs():
 
 def libplacebo_problem():
     """Why HDR->SDR is unavailable — `LIBPLACEBO_MISSING` (not compiled in) or
-    `LIBPLACEBO_NO_VULKAN` (can't run here) — or None. Cached per process behind a lock; the
-    Vulkan probe takes about a second, so `MainWindow` warms it on a worker at startup."""
+    `LIBPLACEBO_NO_VULKAN` (can't run here) — or None. Cached per process behind a lock. The
+    Vulkan probe takes about a second and wakes the GPU, so it runs on a worker, and only once
+    an HDR file is imported (`MediaSession`); see `libplacebo_checked`."""
     global _libplacebo_problem
     with _libplacebo_lock:
         if _libplacebo_problem is _UNCHECKED:
@@ -100,6 +101,12 @@ def libplacebo_problem():
                 _libplacebo_problem = None
             llamalog.get("probe").info("libplacebo / Vulkan check: %s", _libplacebo_problem or "ok")
         return _libplacebo_problem
+
+
+def libplacebo_checked():
+    """Whether `libplacebo_problem()` already has its answer (asking before then runs the probe,
+    so the GUI thread only asks once this is True)."""
+    return _libplacebo_problem is not _UNCHECKED
 
 
 def libplacebo_problem_text():

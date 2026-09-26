@@ -10,6 +10,7 @@ import time
 from PySide6.QtGui import QGuiApplication
 
 from core import formats, llamalog
+from core.capabilities import libplacebo_checked, libplacebo_problem
 from core.previews import extract_hdr_tonemapped_thumbnails, extract_preview_frames
 from core.probe import probe_media
 from ui.widgets.dialogs import show_message
@@ -127,6 +128,7 @@ class MediaSession:
         cached_info = path == self.info_path
         if cached_info:
             self._broadcast_media_info()
+            self._check_hdr_support()
             # An audio file's Wave Loop comes from the probe, not from the (empty) frame decode.
             if self._is_audio_only(path):
                 self._broadcast_audio_only(True)
@@ -163,6 +165,13 @@ class MediaSession:
         self._broadcast_media_info()
         if self._is_audio_only(path):
             self._broadcast_audio_only(True)
+        self._check_hdr_support()
+
+    def _check_hdr_support(self):
+        """An HDR file: find out, once and off the GUI thread, whether this PC can tone-map it
+        (a Vulkan probe that wakes the GPU, so not at launch), then let the tabs re-sync."""
+        if self.info.get("hdr") is True and not libplacebo_checked():
+            run_async(libplacebo_problem, lambda _problem: [tab._sync_controls() for tab in self.tabs])
 
     def _reject_file(self, path):
         """Undo the selection entirely, back to the pristine drop box. Bumping the token makes

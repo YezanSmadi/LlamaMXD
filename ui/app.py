@@ -21,7 +21,6 @@ from shiboken6 import isValid
 
 from core import downloader, gpu, llamalog, power, window_mode, window_style
 from core.theme import load_settings
-from core.capabilities import libplacebo_problem
 from ui import scale
 from ui import theme as T
 from ui.keymap import KeyMap
@@ -280,8 +279,6 @@ class MainWindow(QWidget):
         T.theme.changed.connect(self._sync_titlebar)
 
         run_async(downloader.deno_path, self._deliver_deno_check)
-        # Warm the libplacebo/Vulkan probe (a real ffmpeg run) off the GUI thread.
-        run_async(libplacebo_problem, lambda _problem: None)
 
     # ------------------------------------------------------------------ #
     #  Tabs

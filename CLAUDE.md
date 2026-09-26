@@ -2897,8 +2897,12 @@ picks the toast. **Only one ffmpeg runs at a time.**
     one-frame probe of the real `libplacebo_tonemap_vf()` on an explicit
     `VULKAN_DEVICE_FLAGS` device actually runs (else `LIBPLACEBO_NO_VULKAN` —
     a build with the filter but no usable Vulkan driver). Cached per process
-    behind a lock; the probe is a real ffmpeg run (~0.7s here), so `MainWindow`
-    warms it on a worker at startup. Verified against a real failure by
+    behind a lock; the probe is a real ffmpeg run (~0.7s here, and it wakes the GPU), so it
+    runs on a worker **only once a file probes as HDR** (`MediaSession._check_hdr_support`,
+    which re-syncs the tabs when it answers) — never at launch or for an SDR file. Until it
+    has answered (`capabilities.libplacebo_checked()`), Encoding greys the switch with a
+    "checking" note rather than ask, since asking runs the probe on the GUI thread; measured:
+    enabled 0.58s after an HDR import, worst GUI stall 6ms. Verified against a real failure by
     pointing `VK_DRIVER_FILES` / `VK_ICD_FILENAMES` at a nonexistent driver
     (ffmpeg exits nonzero → `vulkan`; a crash or hang counts the same).
     `libplacebo_problem_text()` is the one wording used by the switch's
