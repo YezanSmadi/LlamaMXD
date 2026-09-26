@@ -1,0 +1,178 @@
+{
+ "ffmpeg bad folder": {
+  "events": [
+   [
+    "failed",
+    "Couldn't create the output folder: Cannot create a file when that file already exists"
+   ]
+  ],
+  "final_exists": false,
+  "final_size": null,
+  "had_progress": false,
+  "last_progress": null,
+  "left_in_folder": [
+   "a-file"
+  ],
+  "log": "ffmpeg-ffmpeg_bad_folder-failed.log",
+  "progress_monotonic": true
+ },
+ "ffmpeg ended": {
+  "events": [
+   [
+    "done"
+   ]
+  ],
+  "final_exists": true,
+  "final_size": 929848,
+  "had_progress": true,
+  "last_progress": 1.0,
+  "left_in_folder": [],
+  "log": null,
+  "priority_after_end": false,
+  "priority_before_start": false,
+  "progress_monotonic": true,
+  "resume_after_end": false,
+  "stop_after_end": false,
+  "suspend_after_end": false,
+  "suspend_before_start": false
+ },
+ "ffmpeg missing exe": {
+  "events": [
+   [
+    "failed",
+    "ffmpeg wasn't found. Reinstall LlamaMXD, or install ffmpeg and add it to your PATH."
+   ]
+  ],
+  "final_exists": false,
+  "final_size": null,
+  "had_progress": false,
+  "last_progress": null,
+  "left_in_folder": [],
+  "log": "ffmpeg-ffmpeg_missing_exe-failed.log",
+  "progress_monotonic": true
+ },
+ "ytdlp bad folder": {
+  "events": [
+   [
+    "failed",
+    "Couldn't create a working folder beside the output: The system cannot find the path specified"
+   ]
+  ],
+  "final_exists": false,
+  "final_size": null,
+  "had_progress": false,
+  "last_progress": null,
+  "left_in_folder": [],
+  "log": "ytdlp-ytdlp_bad_folder-failed.log",
+  "progress_monotonic": true
+ },
+ "ytdlp fail": {
+  "events": [
+   [
+    "stage",
+    "Preparing..."
+   ],
+   [
+    "failed",
+    "Video unavailable. This video is private"
+   ]
+  ],
+  "final_exists": false,
+  "final_size": null,
+  "had_progress": false,
+  "last_progress": null,
+  "left_in_folder": [],
+  "log": "ytdlp-ytdlp_fail-failed.log",
+  "progress_monotonic": true
+ },
+ "ytdlp missing exe": {
+  "events": [
+   [
+    "failed",
+    "yt-dlp wasn't found. Reinstall LlamaMXD."
+   ]
+  ],
+  "final_exists": false,
+  "final_size": null,
+  "had_progress": false,
+  "last_progress": null,
+  "left_in_folder": [],
+  "log": "ytdlp-ytdlp_missing_exe-failed.log",
+  "progress_monotonic": true
+ },
+ "ytdlp nofile": {
+  "events": [
+   [
+    "stage",
+    "Preparing..."
+   ],
+   [
+    "failed",
+    "yt-dlp finished but didn't produce a file."
+   ]
+  ],
+  "final_exists": false,
+  "final_size": null,
+  "had_progress": false,
+  "last_progress": null,
+  "left_in_folder": [],
+  "log": "ytdlp-ytdlp_nofile-failed.log",
+  "progress_monotonic": true
+ },
+ "ytdlp ok": {
+  "events": [
+   [
+    "stage",
+    "Preparing..."
+   ],
+   [
+    "stage",
+    "Downloading video..."
+   ],
+   [
+    "stage",
+    "Downloading audio..."
+   ],
+   [
+    "stage",
+    "Merging..."
+   ],
+   [
+    "stage",
+    "Finishing..."
+   ],
+   [
+    "done"
+   ]
+  ],
+  "final_exists": true,
+  "final_size": 1000000,
+  "had_progress": true,
+  "last_progress": 1.0,
+  "left_in_folder": [],
+  "log": "ytdlp-ytdlp_ok-done.log",
+  "progress_monotonic": true
+ },
+ "ytdlp stop": {
+  "child_alive_after_stop": false,
+  "child_alive_before_stop": true,
+  "events": [],
+  "events_after_stop": [],
+  "final_exists": false,
+  "final_size": null,
+  "frozen_while_paused": true,
+  "had_progress": false,
+  "last_progress": null,
+  "left_in_folder": [],
+  "log": "ytdlp-ytdlp_stop-stopped.log",
+  "moving_after_resume": true,
+  "no_progress_while_paused": true,
+  "priority_below_normal": true,
+  "progress_monotonic": true,
+  "resume": true,
+  "stop": true,
+  "suspend": true,
+  "suspend_after_stop": false,
+  "work_dir_left": false
+ }
+}

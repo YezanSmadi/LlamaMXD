@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Yezan Smadi
 """Real jobs: Mux and Encode settings run through ffmpeg_vars -> ffmpeg_build -> FfmpegJob on the
 fixture clips, and their outputs probed (golden). Also: stop() mid-run leaves nothing behind,
-and a job that can't run fails with a readable reason. (Downloads need the network: not here.)
+and a job that can't run fails with a readable reason. (Downloads: check_runners, offline.)
 
 
 `stream_starts` guards A/V sync: a trimmed Encode with a Passthru track once put the copied track

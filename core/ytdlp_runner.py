@@ -15,7 +15,6 @@ then from its output growing on disk). Never moves backward; paused time doesn't
 import collections
 import json
 import os
-import queue
 import shutil
 import subprocess
 import threading
@@ -24,13 +23,10 @@ import uuid
 
 from core import downloader, llamalog
 from core import priority as process_priority
-from core.ffmpeg_runner import _replace_output, _set_suspended
+from core.process_job import ProcessJob, replace_output, set_suspended
 
-# Created suspended so it can join the job before it runs; no console window.
+# Created suspended so it can join the job before it runs.
 _CREATE_SUSPENDED = 0x00000004
-_CREATION_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) | (
-    _CREATE_SUSPENDED if os.name == "nt" else 0
-)
 
 _OUTPUT_TAIL = 60
 # How often poll_events re-applies the priority level to the process tree.
@@ -104,32 +100,24 @@ def work_dir_for(final_path):
     return os.path.join(folder, _WORK_DIR_PREFIX + uuid.uuid4().hex[:8])
 
 
-class YtDlpJob:
+class YtDlpJob(ProcessJob):
     """One yt-dlp download plus the thread that watches it. `plan` is
     `core.downloader.resolve()`'s dict, as carried in the task's settings."""
 
+    AREA, TOOL = "ytdlp", "yt-dlp"
+    CREATION_FLAGS = ProcessJob.CREATION_FLAGS | (_CREATE_SUSPENDED if os.name == "nt" else 0)
+
     def __init__(self, url, plan, final_path, priority=process_priority.DEFAULT_LEVEL, label=None):
         self.url = url
-        self._priority = priority
+        final_path = os.path.abspath(final_path)
+        work_dir = work_dir_for(final_path)
+        super().__init__(downloader.build_download_args(plan, url, work_dir, verbose=llamalog.is_detailed()),
+                         final_path, priority, label)
+        self.work_dir = work_dir
         self._last_priority_sync = 0.0
         self.plan = plan
-        self.final_path = os.path.abspath(final_path)
-        self.work_dir = work_dir_for(self.final_path)
-        self.args = downloader.build_download_args(plan, url, self.work_dir, verbose=llamalog.is_detailed())
-        # The log's name for the job, its output ring buffer, and where it was written once
-        # ended.
-        self.label = label or os.path.basename(self.final_path)
-        self.output = llamalog.JobOutput()
-        self.log_path = None
-        self._recorded = False
-
-        self._proc = None
         self._job_handle = None
-        self._events = queue.Queue()
         self._tail = collections.deque(maxlen=_OUTPUT_TAIL)
-        self._lock = threading.Lock()
-        self._finished = False
-        self._stopped = False
 
         # Progress state: written by the reader thread, read by poll_events, under _lock.
         self._parts = [dict(part, done=0, finished=False) for part in plan.get("parts") or []]
@@ -161,95 +149,39 @@ class YtDlpJob:
             self._fail_early(f"Couldn't create a working folder beside the output: {exc.strerror or exc}")
             return
 
-        try:
-            self._proc = subprocess.Popen(
-                self.args,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                # One pipe: progress comes on stdout but post-processing and errors on stderr,
-                # and merged they keep their order.
-                stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace", bufsize=1,
-                creationflags=_CREATION_FLAGS | process_priority.creation_flag(self._priority),
-                env=downloader.subprocess_env(),
-            )
-        except FileNotFoundError:
-            self._fail_early("yt-dlp wasn't found. Reinstall LlamaMXD.")
-            return
-        except OSError as exc:
-            self._fail_early(f"Couldn't start yt-dlp: {exc.strerror or exc}")
+        # One pipe: progress comes on stdout but post-processing and errors on stderr, and
+        # merged they keep their order.
+        if not self._launch("yt-dlp wasn't found. Reinstall LlamaMXD.", stderr=subprocess.STDOUT,
+                            env=downloader.subprocess_env()):
             return
 
         self._job_handle = self._make_job(self._proc)
         if os.name == "nt":
-            _set_suspended(self._proc.pid, False)   # created suspended — let it run
+            set_suspended(self._proc.pid, False)   # created suspended — let it run
         self._started_at = time.monotonic()
-        llamalog.log_job_start("ytdlp", self.label, self.args)
+        llamalog.log_job_start(self.AREA, self.label, self.args)
         self._events.put(("stage", "Preparing..."))
         threading.Thread(target=self._watch, daemon=True).start()
-
-    def set_priority(self, level):
-        """Move the whole tree to a new priority level. Returns whether it worked."""
-        self._priority = level
-        return self._sync_priority()
 
     def _sync_priority(self):
         """Put every process in the tree at the chosen level. A child inherits only Low / Below
         Normal, so yt-dlp's later ffmpeg would run at Normal under a High parent; poll_events
         re-runs this about once a second. (A job-object limit refuses High for a normal user.)"""
         self._last_priority_sync = time.monotonic()
-        if self._proc is None or self._proc.poll() is not None:
-            return False
-        return all([process_priority.set_process_priority(pid, self._priority)
-                    for pid in self._tree_pids()])
+        return super()._sync_priority()
 
-    def suspend(self):
-        """Freezes every process in the tree. Returns whether it worked."""
-        if self._proc is None or self._proc.poll() is not None:
-            return False
-        ok = all([_set_suspended(pid, True) for pid in self._tree_pids()])
+    def _on_suspended(self, suspended):
+        """Paused time doesn't count toward the progress estimate."""
         with self._lock:
-            if self._paused_since is None:
+            if suspended and self._paused_since is None:
                 self._paused_since = time.monotonic()
-        return ok
-
-    def resume(self):
-        """Thaws every process in the tree. Returns whether it worked."""
-        if self._proc is None or self._proc.poll() is not None:
-            return False
-        ok = all([_set_suspended(pid, False) for pid in self._tree_pids()])
-        with self._lock:
-            if self._paused_since is not None:
+            elif not suspended and self._paused_since is not None:
                 self._paused_total += time.monotonic() - self._paused_since
                 self._paused_since = None
-        return ok
-
-    def stop(self):
-        """Kill the whole tree (suspended or not) and delete the work folder. False if the job
-        had already finished on its own."""
-        with self._lock:
-            if self._finished:
-                return False
-            self._stopped = True
-        self._kill_tree()
-        if self._proc is not None:
-            try:
-                self._proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                llamalog.get("ytdlp").warning('yt-dlp for "%s" was still running 10s after being killed', self.label)
-        self._close_job()
-        self._discard_work_dir()
-        self._record("stopped", self._proc.returncode if self._proc is not None else None)
-        return True
 
     def poll_events(self):
         """Every event since the last call, oldest first, plus a fresh progress estimate."""
-        events = []
-        while True:
-            try:
-                events.append(self._events.get_nowait())
-            except queue.Empty:
-                break
+        events = super().poll_events()
         if not any(e[0] in ("done", "failed") for e in events):
             if (self._priority != process_priority.DEFAULT_LEVEL
                     and time.monotonic() - self._last_priority_sync >= _PRIORITY_SYNC_SECS):
@@ -473,7 +405,7 @@ class YtDlpJob:
                 folder = os.path.dirname(self.final_path)
                 if folder:
                     os.makedirs(folder, exist_ok=True)
-                _replace_output(self._final_file, self.final_path)
+                replace_output(self._final_file, self.final_path)
                 outcome = ("done",)
             except OSError as exc:
                 outcome = ("failed", _replace_failure(exc))
@@ -514,7 +446,7 @@ class YtDlpJob:
             return None
         return handle
 
-    def _tree_pids(self):
+    def _pids(self):
         """Every process id in the job, or just yt-dlp's without one."""
         if self._job_handle is None:
             return [self._proc.pid]
@@ -529,7 +461,7 @@ class YtDlpJob:
         return [int.from_bytes(bytes(raw[8 + i * size:8 + (i + 1) * size]), "little")
                 for i in range(min(count, capacity))]
 
-    def _kill_tree(self):
+    def _kill(self):
         """Terminates everything in the job (or just yt-dlp without one)."""
         if self._job_handle is not None:
             _k32.TerminateJobObject(self._job_handle, 1)
@@ -551,23 +483,16 @@ class YtDlpJob:
                 return
             time.sleep(0.15)
 
-    def _fail_early(self, reason):
-        """Reports a job that never got as far as running yt-dlp."""
-        with self._lock:
-            self._finished = True
+    def _cleanup(self):
+        self._close_job()
         self._discard_work_dir()
-        self._record("failed", reason=reason)
-        self._events.put(("failed", reason))
 
-    def _record(self, outcome, returncode=None, reason=""):
-        """Write the job's end to the log, once: a summary line and its output file."""
-        with self._lock:
-            if self._recorded:
-                return
-            self._recorded = True
-        seconds = self._active_elapsed() if self._started_at else 0.0
-        self.log_path = llamalog.record_job("ytdlp", self.label, self.args, outcome, self.output,
-                                            returncode=returncode, reason=reason, seconds=seconds)
+    def _elapsed(self):
+        return self._active_elapsed()
+
+    def _fail_early(self, reason):
+        self._discard_work_dir()
+        super()._fail_early(reason)
 
 
 def _folder_bytes(folder):

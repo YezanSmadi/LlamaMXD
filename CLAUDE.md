@@ -118,6 +118,11 @@ own settings.json / presets.json, and fixture clips are generated there by the b
 - `check_media` — the selected-file pipeline (`MediaSession`): load, a cache-hit reselect (no
   second probe), the HDR pre-render landing and being dropped / cancelled on a file change, the
   Wave Loop for audio, an unreadable file rejected, "No Preview", and the shared scrub index.
+- `check_runners` — the runners' lifecycle offline: a real `YtDlpJob` (its job object included)
+  runs `tests/fake_ytdlp.py`, a stand-in speaking yt-dlp's marker lines — a merge, pause / resume,
+  priority, Stop killing the tree (a child process too) and removing the work folder, a failure,
+  no file, a missing exe, an unmakeable folder — plus `FfmpegJob`'s early failures and its
+  controls once ended.
 - `check_jobs` — real Mux / Encode jobs through `FfmpegJob`, their outputs probed (streams, languages,
   length, each stream's start time); stop() mid-run; a failing job's reason.
 
@@ -148,6 +153,8 @@ core/capabilities.py      what the bundled ffmpeg can do: -fps_mode, libplacebo/
 core/previews.py          preview frames (OpenCV, else ffmpeg) and the HDR tone-mapped set
 core/ffmpeg_vars.py       one queued job's settings -> a frozen JobVars of ffmpeg-ready values
 core/ffmpeg_build.py      builds a Mux or Encode job's ffmpeg-python Stream / full argv
+core/process_job.py       ProcessJob, the base of both runners: launch, pause/resume, priority, stop,
+                          events, the job log; set_suspended, replace_output
 core/ffmpeg_runner.py     runs one ffmpeg job off the GUI thread (progress, suspend/resume, stop)
 core/tools.py             resolves ffmpeg/ffprobe/yt-dlp/deno to absolute paths (bundled, then PATH)
 core/downloader.py        Downloader logic: fetch (-J), format model + option lists, resolve, argv
@@ -3122,13 +3129,13 @@ picks the toast. **Only one ffmpeg runs at a time.**
     suspended) and deletes the temp file.
   - **Output goes to `<stem>.partial<ext>` first** (`partial_path`) and is
     replaced onto the real path only when ffmpeg exits 0, via
-    `_replace_output` rather than a bare `os.replace`. **A bare
+    `process_job.replace_output` rather than a bare `os.replace`. **A bare
     `os.replace` can fail with a genuine, reproducible Windows "Access is
     denied" (WinError 5)** — confirmed two real causes directly (not just
     from a bug report): the destination file has the read-only attribute
     set, or something else (a media player, thumbnail/preview generation, an
     antivirus scan reacting to the just-closed temp file) has it open for a
-    moment. `_replace_output` clears the read-only bit first (best-effort)
+    moment. `replace_output` clears the read-only bit first (best-effort)
     and retries the rename for a few seconds before actually giving up —
     verified against both a transient lock (released mid-retry: the job
     still succeeds) and a permanent one (never released: the job still
@@ -3288,14 +3295,14 @@ without an app release; a frozen app has no `python -m yt_dlp` anyway.
   process is created `CREATE_SUSPENDED`, assigned to a kill-on-close job,
   then resumed, so nothing escapes. `stop()` = `TerminateJobObject`;
   `suspend()`/`resume()` enumerate the job's PIDs and `NtSuspendProcess`
-  each (reusing `ffmpeg_runner._set_suspended`). Verified: pause froze the
+  each (`process_job.set_suspended`). Verified: pause froze the
   byte count, ffmpeg appeared inside the job during a merge, Stop mid-
   download and mid-conversion left no process and no files, and killing the
   Python process outright took the tree with it (kill-on-close).
 - **Private work folder**: yt-dlp writes only into a hidden
   `.llamamxd-download-XXXXXXXX` beside the output (`-P`, `-o download.%(ext)s`);
   on exit 0 the file named by `--print after_move:filepath` is moved onto
-  `final_path` with `ffmpeg_runner._replace_output`'s retrying replace.
+  `final_path` with `process_job.replace_output`'s retrying replace.
   Stop/failure just deletes the folder — a user's existing file is never
   touched unless the download succeeded.
 - **One pipe** (`stderr=STDOUT`): yt-dlp prints download progress on stdout
