@@ -238,6 +238,8 @@ _STROKES = (
 )
 _TOLERANCE = 16   # how far off the blend line (in 0-255 colour units) still counts
 _LOADING = {}
+# Frames decoded ahead of the one playing (200ms): enough to stay ahead, not the whole loop.
+_LOADING_LOOKAHEAD = 12
 
 
 def _candidate_box():
@@ -345,8 +347,10 @@ def _request_frames(side, start=0):
     """Decode the frames for a spinner `side` px across on worker threads, unless that size is
     loaded or loading. They go in playing order from frame `start` (the one about to show), and
     each replaces the old size's frame the moment it is ready, so a spinner that grew is sharp
-    within a few frames rather than soft until the whole set is done. A newer size cancels the
-    frames not yet started."""
+    within a few frames rather than soft until the whole set is done. Only frames within
+    `_LOADING_LOOKAHEAD` of the one playing are started: frames are decoded as they're watched,
+    and with no spinner showing (the next starts at frame 0) just the first few, then it stops.
+    Frames already at this size are skipped; a newer size, or `_pause_frames`, cancels."""
     want = _frame_side(side)
     if _LOADING.get("failed") or _LOADING.get("want") == want:
         return
@@ -367,7 +371,9 @@ def _request_frames(side, start=0):
 
     def one(n):
         if _LOADING.get("gen") != gen:
-            return   # superseded by a newer size
+            return   # superseded by a newer size, or paused
+        if frames[n] is not None and frames[n][0].width() == want:
+            return   # decoded before a pause
         try:
             frame = _load_frame(n, want, scores)
         except Exception:
@@ -380,9 +386,25 @@ def _request_frames(side, start=0):
         # to half the CPUs, leaving the rest to the window meanwhile.
         with ThreadPoolExecutor(max_workers=max(1, min(3, (os.cpu_count() or 1) // 2))) as pool:
             for i in range(_LOADING_FRAMES):
-                pool.submit(one, (start + i) % _LOADING_FRAMES)
+                n = (start + i) % _LOADING_FRAMES
+                while (n - _LOADING.get("playhead", 0)) % _LOADING_FRAMES > _LOADING_LOOKAHEAD:
+                    if _LOADING.get("gen") != gen:
+                        return   # superseded
+                    if not LoadingSpinner._showing:
+                        _LOADING["want"] = None   # the first frames are enough; a show resumes
+                        return
+                    time.sleep(0.01)
+                pool.submit(one, n)
 
     workers.run_async(work, lambda _result: None)
+
+
+def _pause_frames():
+    """Stop decoding (no spinner is showing); what's done is kept, and the next request decodes
+    only what's missing. The next spinner shown starts at frame 0."""
+    _LOADING["gen"] = _LOADING.get("gen", 0) + 1
+    _LOADING["want"] = None
+    _LOADING["playhead"] = 0
 
 
 def _recolor(frame, rgb):
@@ -402,9 +424,11 @@ def _recolor(frame, rgb):
 
 class LoadingSpinner(QWidget):
     """The LlamaDisc spinner. Plays only while shown, lets mouse events through, and draws
-    nothing until (or unless) its frames are decoded."""
+    nothing until (or unless) its frames are decoded. Frames are decoded only while a spinner is
+    showing, as it plays (not at launch: most of a launch's CPU went on frames not yet needed)."""
 
     DEFAULT_SIZE = 64  # real px, until the host calls set_side()
+    _showing = set()   # spinners on screen; decoding pauses when none is
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -424,21 +448,30 @@ class LoadingSpinner(QWidget):
         T.theme.changed.connect(self.update)
 
     def _request_frames(self):
-        # Only for a host on screen: a never-shown tab's drop box is an unlaid-out 640x480.
+        # Hidden, only for a host on screen (a never-shown tab's drop box is an unlaid-out
+        # 640x480): that decodes the first few frames, ready for when it shows.
         host = self.parentWidget()
-        if host is None or host.isVisible():
-            # A couple of frames ahead of the one showing: that one is on screen before its
-            # replacement is decoded.
-            _request_frames(self.width() * (self.devicePixelRatioF() or 1.0), self._frame_index() + 2)
+        if not self.isVisible() and host is not None and not host.isVisible():
+            return
+        # From the frame showing (frame 0 for one not shown yet) if it has nothing to draw yet;
+        # else a couple ahead, since it is on screen at its old size before its replacement is.
+        start = self._frame_index() if self.isVisible() else 0
+        if (_LOADING.get("frames") or [None] * _LOADING_FRAMES)[start] is not None:
+            start += 2
+        _request_frames(self.width() * (self.devicePixelRatioF() or 1.0), start)
 
     def showEvent(self, e):
         self._t0 = time.monotonic()
+        LoadingSpinner._showing.add(id(self))
         self._size_timer.stop()
         self._request_frames()
         self._schedule()
 
     def hideEvent(self, e):
         self._timer.stop()
+        LoadingSpinner._showing.discard(id(self))
+        if not LoadingSpinner._showing:
+            _pause_frames()
 
     def set_side(self, side):
         """A `side` x `side` square in real px, from the host. A plain resize: this is a
@@ -470,7 +503,9 @@ class LoadingSpinner(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
-        frame = (_LOADING.get("frames") or [None] * _LOADING_FRAMES)[self._frame_index()]
+        index = self._frame_index()
+        _LOADING["playhead"] = index
+        frame = (_LOADING.get("frames") or [None] * _LOADING_FRAMES)[index]
         if frame is not None:
             primary = T.theme.color("primary")
             p.drawImage(self.rect(), _recolor(frame, (primary.red(), primary.green(), primary.blue())))
