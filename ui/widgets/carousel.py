@@ -1,21 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""The preview carousel — up to ten frames of the selected file, with hover
-chevrons, a sliding transition, a re-flowing dot row, the info badge + its
-tooltip, the mute badge, and the Wave Loop visualiser for stripped video /
-audio-only input.
+"""The preview carousel: up to ten frames of the selected file with hover chevrons, a sliding
+transition, a dot row, the info and mute badges, and the Wave Loop visualiser for stripped
+video / audio-only input.
 
-The chevron discs and dots are antialiased QPainter shapes, the hover fade
-is painter opacity, the slide draws two cached pixmaps at an offset, and the
-Wave Loop paints straight onto a widget.
-
-The dot row: the centre three dots are large and screen-stationary; beyond
-them two per side taper medium-then-small, and only frames that exist get a
-dot (7 wide in the interior, 5 at the ends). The current-frame highlight
-rides toward the cluster edge it's heading for and the row only scrolls once
-it's already there, so a direction change walks the highlight back across
-the middle slot first. The row re-flows on the same eased clock as the
-picture slide."""
+Dot row: the centre three dots are large and fixed; beyond them two per side taper, only for
+frames that exist. The highlight rides toward the edge it's heading for and the row scrolls
+only once it's there."""
 import json
 import math
 import os
@@ -43,7 +34,6 @@ from ui.scale import fpx, px
 from ui.widgets.controls import ScaledLabel
 from ui.widgets.panels import ASSETS, force_white_fills, local_paths
 
-# Dot indicators (see the module docstring for the design).
 _DOT_R_LARGE = 4.0
 _DOT_R_MED = 3.0
 _DOT_R_SMALL = 2.0
@@ -54,15 +44,14 @@ _DOT_ON = QColor(255, 255, 255, 235)
 _DOT_OFF = QColor(255, 255, 255, 90)
 
 _FADE_MS = 100
-# The chevrons and the expand icon grow to this size while the pointer is on them, eased over
-# _HOVER_MS, and ease back when it leaves.
+# Size the chevrons and expand icon grow to under the pointer.
 _HOVER_GROW = 1.2
 _HOVER_MS = 120
 _TIP_GRACE_MS = 50      # how long the info tip outlasts the pointer leaving the badge
 _SLIDE_MS = 115
 
-# Wave Loop: rendered by rlottie, dots flattened to white and tinted with the
-# primary→secondary gradient; the dot band is cropped and scaled to fill.
+# Wave Loop: rendered by rlottie, dots flattened to white, tinted primary -> secondary, the dot
+# band cropped and scaled to fill.
 _WAVE_BAND_LO = 0.42
 _WAVE_BAND_HI = 0.95
 _WAVE_FILL = 0.88
@@ -71,8 +60,7 @@ _CACHE = {}
 
 
 def _shift_layer_time(layer, delta):
-    """Moves a Lottie layer `delta` frames in comp time: its start time, its out point,
-    and every keyframe (`{"t": ..., "s": ...}`) anywhere inside it."""
+    """Move a Lottie layer `delta` frames: its start, out point and every keyframe inside it."""
     layer["st"] = layer.get("st", 0) + delta
     layer["op"] = layer.get("op", 0) + delta
 
@@ -91,25 +79,14 @@ def _shift_layer_time(layer, delta):
 
 
 def _close_wave_seam(data):
-    """Fixes the visible split down the middle of the Wave Loop, in the parsed JSON
-    (the file on disk is not touched).
-
-    The picture is a 1920px precomp of "Main Dot" columns, placed twice at 50% side by
-    side. Each column bobs up and down with a period of 238 frames and starts 10 frames
-    after its neighbour, so the wave's phase runs 0..240 across the width — but the
-    *last* column is the wrap-around twin of the first (exactly one comp width to its
-    right), so it has to be in the same phase as the first, and 240 is 2 frames past
-    the 238 that would be. Where the two copies meet, the twin columns each show half
-    of every dot, and those halves sat ~2px apart vertically: the split. Moving that
-    one column 2 frames (to 238) makes the halves join into whole dots.
-
-    Guarded on the structure it was found in — columns named "Main Dot …", the last one
-    exactly one comp width from the first, its start time not already a whole number of
-    periods — so a different animation is left alone."""
+    """Fix the split down the middle of the Wave Loop, in the parsed JSON. The picture is a
+    precomp of "Main Dot" columns placed twice side by side; the last column is the first's
+    wrap-around twin but starts at 240 where the 238-frame bob period needs 238, so the halves
+    of the centre dots met 2 frames out of phase. Moves that column 2 frames. Guarded on that
+    exact structure, so another animation is left alone."""
     every_layer = list(data.get("layers", [])) + [l for a in data.get("assets", []) for l in a.get("layers", [])]
     for asset in data.get("assets", []):
         columns = [l for l in asset.get("layers", []) if str(l.get("nm", "")).startswith("Main Dot")]
-        # A precomp asset has no size of its own; the layers that place it do.
         width = next((l["w"] for l in every_layer if l.get("refId") == asset.get("id") and l.get("w")), None)
         if len(columns) < 3 or not width:
             continue
@@ -130,16 +107,10 @@ def _close_wave_seam(data):
 
 
 def _loop_length(animation, total):
-    """How many of the file's `total` frames make one loop.
-
-    rlottie reports every frame from 0 to the out-point, but the artwork can end by
-    repeating its own start: Wave Loop.json has 240 frames of which 238 and 239 are
-    frames 0 and 1 again (measured: their pixel difference is 0.001 against a normal
-    adjacent step of 1.7). Playing all 240 shows ... 237, 0, 1, 0, 1, 2 ... — a small
-    step *backwards* at every restart, which read as a jitter in an otherwise
-    seamless loop. So: the shortest length near the end whose frame matches frame 0
-    (and whose next one matches frame 1). `total` if nothing repeats. Judged on a
-    tiny render of the alpha channel, so it costs a few milliseconds, once."""
+    """How many of `total` frames make one loop: Wave Loop.json's last two frames repeat
+    frames 0 and 1, and playing them stepped backwards at every restart. The shortest length
+    near the end whose frame matches frame 0 (and the next, frame 1); `total` if none. Judged on
+    a tiny alpha render, once."""
     width, height = 96, 54
 
     def alpha(index):
@@ -163,10 +134,8 @@ def _loop_length(animation, total):
 
 
 def _wave():
-    """`(animation, loop_frames, fps)` for Wave Loop.json, loaded once — or
-    `(None, 0, 30)` if rlottie isn't importable / the file won't parse.
-    `loop_frames` is the length of one seamless loop (`_loop_length`), which can be
-    shorter than the file's own frame count."""
+    """`(animation, loop_frames, fps)` for Wave Loop.json, loaded once, or `(None, 0, 30)` if
+    rlottie or the file is unavailable."""
     if "wave" not in _CACHE:
         _CACHE["wave"] = (None, 0, 30.0)
         try:
@@ -190,12 +159,8 @@ def _wave():
 
 
 def _svg_renderer(name, color=None):
-    """A cached `QSvgRenderer` for `assets/<name>`, optionally with every
-    `fill="currentColor"` in the file swapped for a literal `color` hex
-    string before parsing — how the info badge gets a runtime, appearance-
-    aware recolor without touching the SVG asset itself (see
-    `_paint_info_badge`). `color=None` renders the file exactly as authored
-    (the mute badge's own fixed red/white never changes with the theme)."""
+    """A cached `QSvgRenderer` for `assets/<name>`, with `fill="currentColor"` swapped for
+    `color` if given (else rendered as authored)."""
     key = f"svg:{name}:{color}"
     if key not in _CACHE:
         with open(os.path.join(ASSETS, name), "r", encoding="utf-8") as fh:
@@ -207,27 +172,10 @@ def _svg_renderer(name, color=None):
 
 
 def _paint_info_badge(painter, rect):
-    """The info badge, rendered from `assets/info.svg` rather than hand-drawn
-    primitives. That SVG is a single solid disc with the "i" glyph cut out
-    as a hole (confirmed by rendering it over a contrasting backdrop, where
-    the hole never reaches past ~70% of the circle's own radius) — so the
-    two-tone, appearance-aware look comes from painting a plain circle in
-    the glyph colour first and the SVG, recoloured to the disc colour, on
-    top of it: everywhere the SVG is solid it covers that circle with the
-    disc colour, and everywhere it's the letter-shaped hole, the glyph-
-    coloured circle underneath shows through as the "i". Dark mode gets a
-    dark disc with a white glyph, light mode a white disc with a dark glyph
-    — deliberately colour-neutral in every theme rather than the theme's own
-    accent colour, matching the artwork this replaces.
-
-    The backdrop circle is drawn noticeably smaller than `rect`, not the
-    same size — the SVG's own circle touches `rect`'s edge exactly, and a
-    same-size backdrop's antialiased edge doesn't quite land on the same
-    pixels as the SVG renderer's own, leaving a faint ring of the glyph
-    colour peeking past the disc's outer edge (confirmed: visible as a thin
-    white outline around the dark-mode disc). Shrinking it to 80% comfortably
-    clears the hole's ~70%-of-radius reach while staying well clear of that
-    seam."""
+    """The info badge from `assets/info.svg`, a disc with the "i" cut out as a hole: a circle in
+    the glyph colour first, then the SVG recoloured to the disc colour on top, so the glyph shows
+    through the hole. Dark disc / white glyph in dark mode, the reverse in light. The backdrop
+    circle is 80% size so its edge can't peek out past the disc's."""
     light = T.theme.resolved_mode() == "Light"
     disc_color = "#FFFFFF" if light else "#2B2B2B"
     glyph_color = "#2B2B2B" if light else "#FFFFFF"
@@ -242,16 +190,8 @@ def _paint_info_badge(painter, rect):
 
 
 def _paint_info_badge_faded(painter, rect, alpha, dpr=1.0):
-    """`_paint_info_badge`, fading as one flattened unit instead of each of
-    its two layers separately. The hole-punch trick above only reads
-    correctly (glyph showing only through the "i"-shaped hole) when the SVG
-    disc layer is fully opaque relative to the glyph circle beneath it —
-    applying a single `QPainter.setOpacity()` around both draw calls fades
-    the disc too, which lets the glyph colour bleed through the *entire*
-    disc rather than just the hole (confirmed: the two theme colours
-    visibly blend into each other partway through the fade instead of the
-    badge just dimming). Composited at full opacity onto an offscreen
-    buffer first, then that flattened result is drawn once at `alpha`."""
+    """`_paint_info_badge` faded as one flattened image: fading the two layers separately lets
+    the glyph colour bleed through the whole disc."""
     w, h = max(1, round(rect.width() * dpr)), max(1, round(rect.height() * dpr))
     buf = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
     buf.fill(Qt.transparent)
@@ -266,10 +206,8 @@ def _paint_info_badge_faded(painter, rect, alpha, dpr=1.0):
 
 
 class WaveLayer(QWidget):
-    """The Wave Loop visualiser. A child of the owning *tab* (not the
-    carousel) so it bleeds past the preview's inner margin to the tab frame's
-    edges; transparent to the mouse, so clicks and drops land on the carousel
-    beneath it."""
+    """The Wave Loop visualiser. A child of the tab, not the carousel, so it bleeds past the
+    preview's margin; transparent to the mouse, so clicks and drops reach the carousel."""
 
     def __init__(self, carousel, host):
         super().__init__(host)
@@ -279,9 +217,8 @@ class WaveLayer(QWidget):
         self._frame = None       # QImage — the current tinted frame
         self._frame_key = None   # (idx, w, h, dpr, theme)
         self._t0 = time.monotonic()
-        # Single-shot, re-armed for the moment the *next frame* is due (`_schedule`),
-        # not a fixed 16ms poll: the file is ~30fps, so polling at ~60Hz showed each
-        # frame for 2 or 3 ticks (measured 25–54ms per 33ms frame) — uneven pacing.
+        # Re-armed for when the next frame is due: a 16ms poll showed each ~33ms frame for an
+        # uneven 2 or 3 ticks.
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setSingleShot(True)
@@ -320,8 +257,7 @@ class WaveLayer(QWidget):
         self._schedule()
 
     def _schedule(self):
-        """Arms the timer for the instant the next frame is due (rounded up, so it can't
-        fire just before the boundary and have to wait another tick)."""
+        """Arm the timer for when the next frame is due (rounded up, never just before it)."""
         _animation, _frames, fps = _wave()
         elapsed = time.monotonic() - self._t0
         due = (int(elapsed * fps) + 1) / fps
@@ -369,17 +305,9 @@ class WaveLayer(QWidget):
 
 
 class _InfoTooltip(ScaledLabel):
-    """The info badge's hover tooltip — dark body, `subtab_active`-colored border
-    (primary, except Terminal's black-on-dark-frame swap to secondary — the same
-    accent a selected sub-tab uses, so the border doesn't vanish there either).
-
-    It takes the mouse (a real top-level window), so the pointer can move from the
-    badge onto it and keep it up: `entered` / `left` tell the carousel. Nothing here
-    hides it — the carousel decides, with a short grace period (see
-    `ThumbnailCarousel._hide_tooltip_soon`). It used to be made click-through so a tip
-    that landed under the cursor could not steal the mouse; that was the wrong fix for
-    the flicker (the tip was in the wrong place — it is now anchored above the badge)
-    and it made hovering the tip impossible."""
+    """The info badge's tooltip: dark body, bordered in `subtab_active`. A real window that
+    takes the mouse, so the pointer can move onto it and keep it up (`entered` / `left`); the
+    carousel decides when to hide it."""
 
     entered = Signal()
     left = Signal()
@@ -401,10 +329,7 @@ class _InfoTooltip(ScaledLabel):
         super().leaveEvent(e)
 
     def _restyle(self):
-        # Connected to `scale.changed`, which fires on every live-resize step
-        # regardless of which tab is showing (there's one of these per media
-        # tab, always alive): skip the setStyleSheet call when the text it
-        # would set hasn't actually changed.
+        # Runs on every live-resize step: skip setStyleSheet when the text is unchanged.
         css = (
             f"QLabel {{ background: {T.theme.hex('tooltip_bg')}; color: white;"
             f" border: {px(1)}px solid {T.theme.hex('subtab_active')}; padding: {px(8)}px {px(10)}px;"
@@ -443,8 +368,7 @@ class ThumbnailCarousel(QWidget):
         self._scaled = {}            # (index, w, h, dpr) -> QPixmap
         self._prev_press_central = False
         self._tooltip = None
-        # Mouse-driven hides wait a moment (`_hide_tooltip_soon`) so the pointer can
-        # cross the gap from the badge to the tip, and rest on the tip, without it going.
+        # Mouse-driven hides wait a moment, so the pointer can cross from the badge to the tip.
         self._tooltip_grace = QTimer(self)
         self._tooltip_grace.setSingleShot(True)
         self._tooltip_grace.setInterval(_TIP_GRACE_MS)
@@ -481,13 +405,8 @@ class ThumbnailCarousel(QWidget):
     #  Public API
     # ------------------------------------------------------------------ #
     def clear_preview(self):
-        """Drop the current frames immediately, so the previous file's
-        preview never lingers on screen while the newly-selected one is
-        still probing/decoding on a worker (`_frames` empty short-circuits
-        `paintEvent`, same as before anything was ever loaded). Called right
-        when the global file selection changes -- see `app.update_global_file`
-        -- so a cache-hit re-selection that rebroadcasts synchronously never
-        even shows the blank frame; only a genuine decode does."""
+        """Drop the frames at once, so the previous file's preview never lingers while a new one
+        decodes."""
         self._frames = []
         self._index = 0
         self._dot_start = 0
@@ -501,9 +420,8 @@ class ThumbnailCarousel(QWidget):
         self.update()
 
     def forget_populated(self):
-        """Back to "nothing imported yet": the next non-empty frame set (or audio-only
-        file) fires `populated` again. Without it a rejected import left the flag set,
-        so a later good file never revealed the carousel and the drop box stayed up."""
+        """Back to "nothing imported": the next frames (or audio-only file) fire `populated`
+        again, so the carousel is revealed."""
         self._populated = False
 
     def set_frames(self, frames):
@@ -582,10 +500,7 @@ class ThumbnailCarousel(QWidget):
 
     def _sync_wave(self):
         if self._wave_mode() and self.isVisible():
-            # The Wave Loop layer positions itself relative to the tab
-            # hosting this carousel (`_place_wave`'s `mapTo(host, ...)`),
-            # which is meaningless while detached into the expanded overlay
-            # -- drop back to the embedded view first.
+            # The wave layer is placed relative to the tab: collapse the expanded view first.
             self.force_collapse()
             self._place_wave()
             self.wave.start()
@@ -646,44 +561,24 @@ class ThumbnailCarousel(QWidget):
         return pix
 
     def _icon_scale(self):
-        """The mute badge's own scale — half size once expanded, mirroring
-        the expand icon's baseline. Moot in practice: the mute badge is
-        never painted while expanded at all (see `paint_badges`), kept here
-        only so the size stays sane if that ever changes."""
+        """The mute badge's scale: half once expanded (it isn't drawn then anyway)."""
         return 0.5 if self._expanded else 1.0
 
     def _info_badge_scale(self):
-        """The info badge, unlike the mute badge, stays visible while
-        expanded. It's already proportionally bigger in absolute terms
-        purely because the expanded frame itself is so much bigger — an
-        extra 2x multiplier on top of that read as comically huge, so this
-        stays at the same proportional size as the embedded preview's."""
+        """The info badge keeps its proportional size when expanded (2x on top read as huge)."""
         return 1.0
 
     def _expand_icon_scale(self):
-        """The expand/shrink icon's own multiplier on top of the plain
-        percentage-of-frame formula — one constant for both the embedded
-        expand icon and the expanded shrink icon, like the chevrons'
-        single 0.75, rather than two different multipliers fighting the
-        frame-size difference between them. 1.125 is the shrink icon's own
-        settled size; giving the embedded expand icon anything else made
-        the two feel inconsistent rather than like the same button."""
+        """The expand/shrink icon's multiplier, one value for both so they read as one button."""
         return 1.125
 
     def _dot_scale(self):
-        """The dot row grows instead of shrinking — it's the primary
-        at-a-glance cue for which frame you're on, and needs to stay
-        legible at a much bigger size rather than shrinking with everything
-        else. 1.5x embedded once expanded (25% smaller than a plain 2x,
-        which crowded the frame)."""
+        """The dot row grows 1.5x when expanded, to stay legible as the at-a-glance position."""
         return 1.5 if self._expanded else 1.0
 
     def _disc_centers(self, w, h):
-        """`(left_center, right_center, radius)` in frame-local pixels — None
-        for a chevron that isn't drawn. Shared by drawing and hit-testing.
-        Chevrons are 75% their old proportional size everywhere — both the
-        small embedded preview and the expanded one — unlike badges/the
-        expand icon, which only shrink once expanded."""
+        """`(left_center, right_center, radius)` in frame-local pixels, None for a chevron that
+        isn't drawn. Shared by drawing and hit-testing."""
         if w <= 0 or h <= 0:
             return None, None, 0.0
         disc_r = max(fpx(14.0), min(w, h) * 0.12)
@@ -765,8 +660,7 @@ class ThumbnailCarousel(QWidget):
             self._paint_chevrons(p, rect.width(), rect.height())
             p.restore()
 
-        # Not gated to len(frames) > 1 like the chevrons/dots above — even a
-        # single-frame preview can still be expanded.
+        # Even a single-frame preview can be expanded.
         if self._arrow_alpha > 0.01:
             self._paint_expand_icon(p, rect)
 
@@ -812,8 +706,7 @@ class ThumbnailCarousel(QWidget):
             if center is None:
                 continue
             disc_r = base_r * self._hover_scale(name)
-            # Grows about its centre, but never past the picture's edge: the margin
-            # the chevron sits in is smaller than the growth on a large preview.
+            # Grows about its centre but stays inside the picture on a large preview.
             cx, cy = min(max(center[0], disc_r), w - disc_r), center[1]
             p.setPen(Qt.NoPen)
             p.setBrush(disc)
@@ -849,9 +742,7 @@ class ThumbnailCarousel(QWidget):
         return QRectF(rect.right() - size - margin, rect.bottom() - size - margin, size, size)
 
     def _paint_expand_icon(self, p, rect):
-        """Bottom-right, hover-only like the chevrons — expand.svg while
-        embedded, shrink.svg once expanded, on the same secondary disc the
-        chevrons use."""
+        """Bottom-right, on hover like the chevrons: expand.svg embedded, shrink.svg expanded."""
         icon_rect = self._expand_icon_rect(rect)
         grown = icon_rect.width() * self._hover_scale("expand")
         icon_rect = QRectF(icon_rect.center().x() - grown / 2, icon_rect.center().y() - grown / 2, grown, grown)
@@ -867,17 +758,9 @@ class ThumbnailCarousel(QWidget):
         p.restore()
 
     def paint_badges(self, p, rect):
-        """Mute badge (top-left, while audio is stripped) and the info badge
-        (bottom-left, once a probe has landed) over `rect`. Shared with the
-        WaveLayer so both preview modes carry the same badges. The mute
-        badge is a status indicator and normally always stays on — except
-        in the expanded preview, where it's left off entirely rather than
-        competing with the big picture (the strip state is already visible
-        from the embedded preview it was expanded from). The info badge is
-        interactive chrome like the chevrons — unlike the small embedded
-        preview (always on, out of the way in a corner), an expanded
-        preview fades it in with the rest of the hover UI instead of
-        leaving it permanently competing with the big picture."""
+        """The mute badge (top-left, audio stripped; not in the expanded view) and the info
+        badge (bottom-left, once probed; fades in with the hover UI when expanded) over `rect`.
+        Shared with the WaveLayer."""
         p.setRenderHint(QPainter.Antialiasing)
         mute_size, _ = self._badge_sizes(rect)
         if self._strip_audio and not self._expanded:
@@ -913,8 +796,8 @@ class ThumbnailCarousel(QWidget):
         self.update()
 
     def _hover_to(self, name, target):
-        """Ease control `name` toward `target` (1 = grown, 0 = normal). A reversal partway
-        through takes only as long as the distance it has left to travel."""
+        """Ease control `name` toward `target` (1 grown, 0 normal); a reversal takes only as long
+        as the distance left."""
         anim = self._hover_anims[name]
         current = self._hover[name]
         if abs(current - target) < 1e-3 and anim.state() != QVariantAnimation.Running:
@@ -940,9 +823,8 @@ class ThumbnailCarousel(QWidget):
         return None
 
     def _sync_hover(self, pos=None):
-        """Grow the control under the pointer, ease every other one back. With no `pos`, the
-        pointer is read from the cursor — for a change the pointer didn't cause (stepping
-        moved or removed a chevron under it, the preview was expanded or replaced)."""
+        """Grow the control under the pointer and ease the rest back. With no `pos`, the cursor
+        is read (the controls moved under a still pointer)."""
         if pos is None:
             cursor = self.mapFromGlobal(QCursor.pos())
             pos = QPointF(cursor) if self.isVisible() and self.rect().contains(cursor) else None
@@ -951,7 +833,7 @@ class ThumbnailCarousel(QWidget):
             self._hover_to(name, 1.0 if name == target else 0.0)
 
     def _reset_hover(self):
-        """Everything back to normal size at once, no easing (the controls just moved or went)."""
+        """Everything back to normal size at once (the controls just moved or went)."""
         for name, anim in self._hover_anims.items():
             anim.stop()
             self._hover[name] = 0.0
@@ -981,8 +863,7 @@ class ThumbnailCarousel(QWidget):
             return
         direction = 1 if new_index > self._index else -1
         old_rect = self._frame_rect()
-        # The outgoing picture is whatever's on screen *right now* — mid-slide
-        # included, so a spam-click chains on from the partial position.
+        # The outgoing picture is what's on screen now, mid-slide included, so spam-clicks chain.
         old_pix = self._pixmap(self._index, old_rect) if not old_rect.isEmpty() else None
         prev_index, prev_start = self._index, self._dot_start
         self._slide.stop()
@@ -1007,8 +888,7 @@ class ThumbnailCarousel(QWidget):
     #  Input
     # ------------------------------------------------------------------ #
     def enterEvent(self, e):
-        # >= 1 frame, not > 1 — the expand icon (unlike the chevrons/dots)
-        # is still worth showing for a single-frame preview.
+        # >= 1 frame: the expand icon is worth showing on a single-frame preview.
         if self._frames and not self._wave_mode():
             self._fade_to(1.0)
 
@@ -1032,10 +912,7 @@ class ThumbnailCarousel(QWidget):
         return None
 
     def _in_chevron_band(self, x, w, h):
-        """Excludes a side from the "central" double-click-to-reselect area
-        only while that side's chevron is actually drawn there — on the
-        first frame (no left chevron) or the last (no right chevron), that
-        side is just dead space and should double-click like anywhere else."""
+        """Excludes a side from the central double-click area only while its chevron is drawn."""
         left, right, radius = self._disc_centers(w, h)
         reach = radius * 2.0 + fpx(16.0)
         return (left is not None and x < reach) or (right is not None and x > w - reach)
@@ -1058,9 +935,7 @@ class ThumbnailCarousel(QWidget):
         elif self._frames:
             central = True
         if central and repeat and self._prev_press_central and not self._expanded:
-            # Double-click-to-import is a small/embedded-preview affordance
-            # only — while looking at a big expanded picture, an accidental
-            # double-click shouldn't pop a file browser open over it.
+            # Not while expanded: an accidental double-click shouldn't open a file browser.
             self.reselect.emit()
         self._prev_press_central = central
 
@@ -1070,12 +945,7 @@ class ThumbnailCarousel(QWidget):
                 self._toggle_expand()
                 return
             if self._expanded and not self._within_frame(e.position()):
-                # The expanded carousel widget fills nearly the whole
-                # overlay, but the actual picture inside it is letterboxed
-                # — clicking the bars above/below (or beside) it should
-                # dismiss the expanded view exactly like clicking the thin
-                # scrim border around the carousel already does, not be
-                # swallowed as an on-picture click.
+                # A click on the letterbox bars dismisses the expanded view, like the scrim.
                 self.force_collapse()
                 return
             self._press(e.position(), repeat=False)
@@ -1091,8 +961,7 @@ class ThumbnailCarousel(QWidget):
     def mouseMoveEvent(self, e):
         self._sync_hover(e.position())
         if self._over_info_badge(e.position()):
-            # Already up: moving within the badge leaves it alone (re-showing it on
-            # every move made the popup window itself flicker).
+            # Already up: re-showing it on every move made the popup flicker.
             self._tooltip_grace.stop()
             if self._tooltip is None or not self._tooltip.isVisible():
                 self._show_tooltip()
@@ -1109,24 +978,13 @@ class ThumbnailCarousel(QWidget):
         return self._hit_disc(xy[0], xy[1], rect.width(), rect.height()) is not None
 
     def _within_frame(self, pos):
-        """Whether `pos` lands on the actual letterboxed picture, not just
-        somewhere in the carousel widget's own (much larger, once
-        expanded) bounds. The expand icon's own hit-test already stays
-        within this by construction (it's inset from the frame rect's own
-        corner), so callers don't need to check it separately."""
+        """Whether `pos` is on the letterboxed picture, not just the carousel's bounds."""
         rect = self._frame_rect()
         return not rect.isEmpty() and rect.contains(pos)
 
     def _hover_cursor(self, pos):
-        """The small embedded preview keeps a pointing-hand cursor
-        everywhere — a click almost anywhere on it does something (step a
-        chevron, double-click to reselect). The expanded preview is mostly
-        just a big picture to look at, so it stays a plain arrow except
-        over the info icon, the chevrons, or the shrink button — the only
-        spots that actually do anything there — and never lights up at all
-        outside the picture itself (the letterbox bars around it), since a
-        click there dismisses the expanded view rather than acting on
-        anything drawn under the cursor."""
+        """A pointing hand everywhere on the small preview; on the expanded one an arrow except
+        over the info badge, chevrons and shrink icon (and never outside the picture)."""
         if not self._expanded:
             return Qt.PointingHandCursor
         if not self._within_frame(pos):
@@ -1151,10 +1009,7 @@ class ThumbnailCarousel(QWidget):
         if not self._media_info:
             return False
         if self._wave_mode():
-            # The wave layer is a sibling of the carousel (both children of the tab), not
-            # an ancestor, so `mapTo(self.wave, ...)` — which walks *up* to `wave` — has
-            # nowhere to arrive and returned garbage: the badge never registered a hover
-            # while the video was stripped or for an audio-only file. Via screen coords.
+            # Via screen coordinates: the wave layer is a sibling, and `mapTo` only walks up.
             wave_pos = self.wave.mapFromGlobal(self.mapToGlobal(pos.toPoint()))
             badge = self._info_badge_rect(QRectF(self.wave.rect()))
             point = QPointF(wave_pos)
@@ -1169,8 +1024,7 @@ class ThumbnailCarousel(QWidget):
         return (point.x() - c.x()) ** 2 + (point.y() - c.y()) ** 2 <= radius ** 2
 
     def _over_expand_icon(self, pos):
-        """Not offered in wave mode — nothing there to usefully expand, same
-        scope as the chevrons/dots."""
+        """Not offered in wave mode, like the chevrons."""
         if self._wave_mode() or not self._frames:
             return False
         rect = self._frame_rect()
@@ -1185,10 +1039,7 @@ class ThumbnailCarousel(QWidget):
         self._expanded = not self._expanded
         self.update()
         self.expandToggled.emit(self._expanded)
-        # The listener reparents/resizes the carousel synchronously inside
-        # that emit, so the icon's on-screen position just moved out from
-        # under a mouse that hasn't — re-derive the cursor from the current
-        # global position rather than assuming it's still over anything.
+        # The carousel was just reparented and resized under a still mouse: re-read the cursor.
         self.setCursor(self._hover_cursor(self.mapFromGlobal(QCursor.pos())))
         self._reset_hover()     # the icon jumped to a new place; whatever is under the pointer now grows afresh
         self._sync_hover()
@@ -1202,10 +1053,7 @@ class ThumbnailCarousel(QWidget):
         return True
 
     def force_collapse(self):
-        """Shrink back from the expanded overlay if currently expanded —
-        used when the file being previewed is about to change out from
-        under it (a rejected import) rather than left stranded showing
-        something that's disappearing."""
+        """Shrink back if expanded (the previewed file is about to change)."""
         if self._expanded:
             self._toggle_expand()
 
@@ -1217,12 +1065,8 @@ class ThumbnailCarousel(QWidget):
         self._tooltip_grace.stop()
         self._tooltip.setText(self._info_text())
         self._tooltip.adjustSize()
-        # Anchored to the badge, above it and never over it. It used to hang off the
-        # carousel's own bottom-left corner at a fixed offset, which sat just above
-        # the badge in the small preview but *on top of it* in the expanded one (the
-        # badge there is bigger, and further from that corner) — the tooltip under the
-        # cursor, so the carousel lost the mouse, faded, hid the tooltip, and the
-        # loop flickered without ever showing the info.
+        # Anchored above the badge, never over it: a tip under the cursor stole the mouse, and
+        # the carousel hid it again in a flickering loop.
         badge = self._badge_global_rect()
         gap = max(px(12), round(badge.height() * 0.4))     # clears the badge's own hover margin
         x, y = badge.left(), badge.top() - self._tooltip.height() - gap
@@ -1278,8 +1122,7 @@ class ThumbnailCarousel(QWidget):
     @staticmethod
     def _mastering_text(info):
         max_nits = info.get("mastering_max_nits")
-        # A literal 0 MaxCLL/MaxFALL reads as absent — the SEI is present but
-        # unset, not a real measurement (no video has zero peak brightness).
+        # A zero MaxCLL/MaxFALL is unset, not a measurement.
         max_cll = info.get("max_cll") or None
         max_fall = info.get("max_fall") or None
         if max_nits is None and max_cll is None and max_fall is None:
@@ -1296,9 +1139,7 @@ class ThumbnailCarousel(QWidget):
         lines = []
         if info.get("container"):
             lines.append(f"Container: {info['container']}")
-        # The Wave Loop shows for stripped video and for audio-only input: there the
-        # badge speaks of the audio only — no Video line, no mastering line, not even
-        # "Video: none".
+        # Wave Loop showing (stripped video or audio-only): describe the audio only.
         if self._wave_mode():
             pass
         elif info.get("has_video") is False:
@@ -1349,32 +1190,10 @@ class ThumbnailCarousel(QWidget):
 
 
 class _ExpandedPreviewOverlay(QWidget):
-    """A translucent scrim that temporarily hosts a tab's `ThumbnailCarousel`
-    at a bigger, centred size while its expand icon is on — the same widget
-    instance is reparented in and back out, so every one of its own
-    behaviors (chevrons, dots, badges, drag/drop, the shrink icon, arrow-key
-    stepping) keeps working unchanged; nothing here duplicates any of that.
-
-    Sized to the *main window's own footprint*, not the monitor — filling
-    the whole screen as a separate top-level OS window was tried first and
-    reverted: becoming its own window stole window activation from the main
-    window, which is why the app-level Left/Right keybind (gated on
-    `window.isActiveWindow()`) silently stopped working while expanded.
-    Staying a plain child widget of the main window sidesteps that
-    entirely, and doubles as the "cover the app" dimming scrim behind the
-    carousel for free — it already sits above the sidebar and tab content
-    in z-order and blocks clicks from reaching them.
-
-    The carousel fills that whole area (minus `_MARGIN`) — a "carousel at
-    half size, centred" cut was tried and reverted: it read as the preview
-    having shrunk, not expanded. The margin alone still leaves a thin scrim
-    border to click for `mousePressEvent`'s click-outside-to-dismiss.
-    Positioned with plain `setGeometry()`, not a layout, since sizing needs
-    to be recomputed from `_MARGIN` on demand rather than baked into a
-    layout margin at construction time.
-
-    One instance per `MediaTab` (Muxing and Encoding each have their own,
-    since expanding one's preview has nothing to do with the other's)."""
+    """A translucent scrim over the main window hosting the tab's own carousel, reparented in
+    at a bigger size, so all its behaviour carries over. A child widget, not its own window: a
+    separate window stole activation, and the Left/Right keybind is gated on the main window
+    being active. Clicking the scrim shrinks back. One per MediaTab."""
 
     _SCRIM = QColor(0, 0, 0, 175)
     _MARGIN = 20
@@ -1403,23 +1222,16 @@ class _ExpandedPreviewOverlay(QWidget):
         self.setGeometry(self.parentWidget().rect())
         self._layout_carousel()
         self.show()
-        # QWidget.setParent() hides the widget as a side effect of
-        # reparenting, regardless of the new parent's own visibility —
-        # show() on the overlay alone leaves the carousel itself invisible
-        # (a blank overlay) without this.
+        # setParent() hides the widget, whatever the new parent's visibility.
         carousel.show()
         self.raise_()
 
     def release(self):
-        """Give the carousel back — the caller re-parents it into its
-        normal home immediately after calling this."""
+        """Give the carousel back; the caller re-parents it at once."""
         self._carousel = None
         self.hide()
 
     def mousePressEvent(self, e):
-        """Clicking the scrim (anywhere outside the carousel's own bounds,
-        the only other thing that can receive a click here) shrinks back —
-        a click actually on the carousel is delivered to it directly and
-        never reaches this handler."""
+        """A click on the scrim (outside the carousel) shrinks back."""
         if e.button() == Qt.LeftButton and self._carousel is not None:
             self._carousel.force_collapse()

@@ -2,15 +2,9 @@
 # Copyright (C) 2026 Yezan Smadi
 """Small themed controls, each painting itself from `ui.theme.theme`.
 
-Every widget paints in one QPainter pass into Qt's backing store and Qt
-presents the whole window at once, so a disabled control can simply *look*
-disabled and nothing fills in piece by piece. Animations run on
-`QVariantAnimation`, driven off one timer and repainted in step.
-
-**User-action signals fire only on user changes**: `Dropdown.picked`,
-`CheckBox.clicked`, `Switch.clicked`, `SegmentedButton.changed` never fire
-when code sets a value. That's what lets the tabs write a settings dict into
-the form without tripping their own handlers."""
+User-action signals (`Dropdown.picked`, `CheckBox.clicked`, `Switch.clicked`,
+`SegmentedButton.changed`) fire only on user changes, never when code sets a value, so a tab
+can write a settings dict into the form without tripping its own handlers."""
 import math
 import os
 import re
@@ -73,14 +67,8 @@ _BLACK_STROKE_RE = re.compile(r'stroke(=")#000(?:000)?"|stroke(:\s*)#000(?:000)?
 
 
 def _icon_svg(name, color):
-    """A cached, recolored `QSvgRenderer` for `assets/<name>` — every literal
-    black stroke swapped for `color` (a hex string) before parsing, the same
-    "recolor by string replace" trick `carousel._svg_renderer` uses for
-    `fill="currentColor"`. Covers both forms a stroke-drawn icon actually
-    ships in: an inline `stroke="#000000"` attribute (select-multiple.svg)
-    and a `stroke: #000;` CSS property inside a `<style>` block
-    (deselect-multiple.svg) — `QSvgRenderer` honors both, so the same
-    recolor has to reach whichever one a given asset uses."""
+    """A cached `QSvgRenderer` for `assets/<name>` with its black strokes (attribute or CSS
+    form) and `currentColor` fills recoloured to `color`."""
     key = (name, color)
     if key not in _SVG_CACHE:
         with open(os.path.join(_ASSETS, name), "r", encoding="utf-8") as fh:
@@ -95,58 +83,40 @@ def _icon_svg(name, color):
 
 
 def ui_font(size, bold=False, family=None):
-    """A font at `size` *reference* pixels — Roboto unless `family` is given.
-    For custom painters (which paint in design space, so the painter scales
-    the glyphs) and for measuring text in reference pixels; a real widget's
-    font goes through `set_font_px`."""
+    """A font at `size` reference pixels (Roboto unless `family`), for custom painters and for
+    measuring text in reference pixels. A real widget's font goes through `set_font_px`."""
     f = QFont()
     f.setFamilies([family] if family else ["Roboto", "Segoe UI"])
     f.setPixelSize(size)
     f.setBold(bold)
-    # Unhinted, so glyph advances are linear in the size: hinted ones snap per
-    # size (a 40-character line measures 227 / 236 / 262px at 12 / 13 / 14px,
-    # not 224 / 242 / 261), which made scaled text stutter and made a measured
-    # width disagree with the painted one.
+    # Unhinted: hinted advances snap per size, so scaled text stuttered and a measured width
+    # disagreed with the painted one.
     f.setHintingPreference(QFont.PreferNoHinting)
     return f
 
 
 def _unhinted(widget):
-    """Make `widget`'s font unhinted whatever the app font is: hinted glyphs are
-    placed on whole pixels, so text painted through a scaled painter comes out
-    with uneven letter and word gaps (0.4px spread against 0.07px unhinted),
-    and its measured width stops matching its painted width."""
+    """Make `widget`'s font unhinted: hinted glyphs sit on whole pixels, which makes uneven
+    gaps once painted through a scaled painter."""
     f = QFont(widget.font())
     f.setHintingPreference(QFont.PreferNoHinting)
     widget.setFont(f)
 
 
 def set_font_px(widget, size, bold=False, family=None):
-    """Give a real (stylesheet-laid-out) widget a font at `size` reference
-    pixels, re-applied whenever the scale changes."""
+    """A font at `size` reference pixels for a real widget, re-applied on every scale change."""
     scale.bind(widget, lambda: widget.setFont(ui_font(scale.font_px(size), bold, family)))
 
 
 class ScaledLabel(QLabel):
-    """A label whose text is painted through the scale-transformed painter
-    (`scale.begin`) instead of Qt's own text path.
-
-    Qt snaps a widget font to a whole pixel size — whatever the family,
-    engine or hinting — so a stylesheet-sized label hops between 12, 13, 14px
-    as the window is dragged, and a sentence's width jumps by 10-35px at each
-    hop (measured: a word's position wanders 5-6px rms, 14-19px worst, against
-    0.3px rms for text drawn through a scaled painter, which every custom
-    widget here already does). This label's font is therefore the *reference*
-    font — the stylesheet gives it reference pixels, not `font_px` — and Qt's
-    own metrics are at reference size; paint and size hints multiply by the
-    scale. The stylesheet's box (padding, border, background) is real pixels
-    and is left exactly as Qt lays it out, which is why hints are converted as
-    "text part x scale + chrome" rather than scaled whole."""
+    """A label whose text is painted through the scaled painter (`scale.begin`). Qt snaps a
+    widget font to whole pixel sizes, so stylesheet-sized text hopped between sizes during a
+    drag. Its font is the reference font; paint and size hints multiply by the scale, while the
+    stylesheet's box (padding, border) stays in real pixels."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         _unhinted(self)
-        # A scale change moves the hint without touching the label's own state.
         scale.bind(self, self.updateGeometry, "hint")
 
     def _chrome(self):
@@ -156,14 +126,9 @@ class ScaledLabel(QLabel):
         return r.width() - c.width(), r.height() - c.height()
 
     def _unwrapped_hint(self):
-        """The real-pixel size hint of an unwrapped label: the text measured with
-        the reference font (what the painter draws with) times the scale, plus
-        the stylesheet's box, which is already real pixels. It is measured here
-        rather than taken from Qt because Qt folds the real-pixel `min-height`
-        and `min-width` (a fixed-width label's *fixed width*) into its hint —
-        scaling that whole doubled them (a 26px caption box came out 104px at
-        2x, a fixed 872px label reported 1744) — and every consumer of the hint
-        then sat at the wrong size, invisibly at 1.0. The minimum height is
+        """The real-pixel hint of an unwrapped label: the reference-font text times the scale,
+        plus the stylesheet's box. Measured here because Qt folds the real-pixel `min-height`
+        and `min-width` into its hint, which scaling would then double. The minimum height is
         applied afterwards."""
         cw, ch = self._chrome()
         f = scale.factor()
@@ -180,9 +145,8 @@ class ScaledLabel(QLabel):
         return QSize(math.ceil(text_w * f + cw), max(math.ceil(text_h * f + ch), self.minimumHeight()))
 
     def _ref_text_height(self, ref_width):
-        """The text's height in reference pixels when wrapped at `ref_width`
-        (unwrapped labels: one line per newline), from the same font the
-        painter draws with."""
+        """The text's height in reference pixels wrapped at `ref_width` (unwrapped: one line
+        per newline), with the painter's font."""
         text = self.text()
         if self._is_rich():
             doc = QTextDocument()
@@ -197,14 +161,9 @@ class ScaledLabel(QLabel):
         return fm.boundingRect(QRectF(0, 0, ref_width, 1e6), int(Qt.TextWordWrap), text).height()
 
     def _wrap_widths(self):
-        """(ideal, narrowest) text widths, in reference pixels, of a
-        word-wrapped label. Qt picks a wrapped label's ideal width by aspect
-        ratio, but does it with reference-size text and real-pixel padding
-        mixed together, so its answer drifts with the scale (a 132px-wide
-        tooltip at 1x came out 220 at 1.9x — proportionally it is 250) — and
-        its minimum hint is the tall, narrowest wrapping, which a top-level
-        window enforces as a floor on its height. Both are computed here from
-        the reference font alone, so they scale exactly."""
+        """(ideal, narrowest) reference-pixel widths of a word-wrapped label, from the reference
+        font alone: Qt's own mixes reference text with real padding, so it drifts with the
+        scale, and its narrow minimum floors a top-level window's height."""
         fm = QFontMetricsF(self.font())
         if self._is_rich():
             doc = QTextDocument()
@@ -237,8 +196,7 @@ class ScaledLabel(QLabel):
         return QSize(math.ceil(narrow * f + cw), max(math.ceil(one_line * f + ch), self.minimumHeight()))
 
     def heightForWidth(self, width):
-        """Wrapped text's height at a real `width`: Qt wraps at the reference
-        width the real one corresponds to, and the result scales back up."""
+        """Wrapped text's height at a real `width` (wrapped at the matching reference width)."""
         cw, ch = self._chrome()
         f = scale.factor()
         return max(math.ceil(self._ref_text_height((width - cw) / f) * f + ch), self.minimumHeight())
@@ -280,11 +238,8 @@ class ScaledLabel(QLabel):
 
 
 class ScaledButton(QPushButton):
-    """A stylesheet-backed push button whose text is painted through the
-    scale-transformed painter, for the same reason as `ScaledLabel`: Qt snaps a
-    widget font to a whole pixel size, so button captions hopped between sizes
-    during a resize. The stylesheet still draws the box (fill, radius, hover,
-    pressed) and supplies the text colour per state; only the text moves."""
+    """A push button whose caption is painted through the scaled painter (see `ScaledLabel`).
+    The stylesheet still draws the box and gives the text colour per state."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -292,11 +247,8 @@ class ScaledButton(QPushButton):
         scale.bind(self, self.updateGeometry, "hint")
 
     def sizeHint(self):
-        # Measured from the text, not taken from Qt: Qt folds the real-pixel
-        # `min-height` (and a fixed width) into its hint, so scaling that whole
-        # scaled them twice (see `ScaledLabel._unwrapped_hint`). The stylesheet's
-        # padding is real pixels — the width of the box around the contents
-        # rect the text is painted into — and only the text scales.
+        # Measured from the text: Qt's hint folds in the real-pixel min-height and would scale
+        # twice. The padding is real pixels; only the text scales.
         opt = QStyleOptionButton()
         self.initStyleOption(opt)
         contents = self.style().subElementRect(QStyle.SE_PushButtonContents, opt, self)
@@ -325,18 +277,10 @@ class ScaledButton(QPushButton):
 
 
 class ScaledLineEdit(QLineEdit):
-    """A line edit whose text, selection and caret are painted through the
-    scale-transformed painter, for the same reason as `ScaledLabel`: Qt snaps a
-    widget font to a whole pixel size, so an entry's text hopped between sizes
-    while the window was dragged. `QLineEdit` paints itself through a painter it
-    opens internally, so nothing can be routed through it — this takes over the
-    two things that touch the font and leaves the rest to Qt: **painting** (the
-    stylesheet still draws the box, the focus border and the disabled state;
-    text, placeholder, selection and caret are drawn here from the reference
-    font) and **mouse-to-character mapping** (press, drag, double-click), which
-    has to use the same metrics as the painting or a click lands on the wrong
-    letter. Keys, undo, the clipboard, the selection model and every signal are
-    Qt's own."""
+    """A line edit whose text, selection and caret are painted through the scaled painter (see
+    `ScaledLabel`). QLineEdit paints through its own painter, so this takes over painting and
+    mouse-to-character mapping (which must use the same metrics); keys, undo, clipboard,
+    selection and signals stay Qt's."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -365,9 +309,8 @@ class ScaledLineEdit(QLineEdit):
         return QRectF(c.x() / f, c.y() / f, c.width() / f, c.height() / f)
 
     def _to_real(self, ref_w, ref_h):
-        """Qt's size hint folds the stylesheet's real-pixel `min-height` in, so
-        it can't be scaled whole (see `ScaledLabel._unwrapped_hint`): the text part
-        scales, the box around it doesn't, and the minimum is applied last."""
+        """A real size from reference text size: the text part scales, the stylesheet's box
+        doesn't, and the minimum is applied last."""
         c = self._contents()
         f = scale.factor()
         return QSize(math.ceil(ref_w * f) + self.width() - c.width(),
@@ -536,18 +479,15 @@ def labeled(label_text, widget, role="field", spacing=1, align=Qt.AlignLeft):
 
 
 def button_width_for(texts, padding=26, min_width=60):
-    """The width (reference pixels) that fits the widest of `texts` inside a themed button (the
-    QPushButton stylesheet's own 10px-per-side padding, plus a little slack)
-    — so a button never clips text a fixed guess didn't leave room for."""
+    """The width (reference pixels) fitting the widest of `texts` in a themed button."""
     fm = QFontMetricsF(ui_font(13))
     widest = max((fm.horizontalAdvance(t) for t in texts), default=0)
     return max(min_width, math.ceil(widest + padding))
 
 
 def button(text, role=None, width=None, height=None):
-    """A stylesheet-driven push button (secondary unless `role` says otherwise).
-    NoFocus, like every clickable here: no focus rings, and a focused button
-    would swallow the global Space keybind."""
+    """A stylesheet push button (secondary unless `role`). NoFocus, like every clickable: a
+    focused button would swallow the Space keybind."""
     btn = ScaledButton(text)
     if role:
         btn.setProperty("role", role)
@@ -558,16 +498,14 @@ def button(text, role=None, width=None, height=None):
 
 
 def restyle(widget):
-    """Re-applies the stylesheet after a dynamic property change (e.g. a
-    button's `role`)."""
+    """Re-apply the stylesheet after a dynamic property change (e.g. `role`)."""
     widget.style().unpolish(widget)
     widget.style().polish(widget)
     widget.update()
 
 
 def set_enabled(widget, label, enabled):
-    """Enables/disables a control and dims its caption to match, so a dead
-    option never looks live."""
+    """Enable/disable a control and dim its caption to match."""
     widget.setEnabled(bool(enabled))
     if label is not None:
         label.setEnabled(bool(enabled))
@@ -585,8 +523,7 @@ def anim(owner, duration, on_value, curve=QEasingCurve.OutCubic):
 
 
 def draw_cross(p, rect, color, width=1.6):
-    """A ✕ drawn as two strokes — never at the mercy of a font's glyphs.
-    `rect` and `width` are in the caller's (design-space) pixels."""
+    """A ✕ as two strokes (no font glyph). `rect` and `width` are design-space pixels."""
     c = rect.center()
     r = min(rect.width(), rect.height()) * 0.2
     pen = QPen(color, width)
@@ -603,19 +540,15 @@ _SVG_ICON_KINDS = {"select-multiple": "select-multiple.svg", "deselect-multiple"
                    "undo": "undo.svg", "redo": "redo.svg"}
 
 
-# How much of the button's shorter side an icon's square box takes, where the default
-# (72% compact / 56% otherwise) doesn't suit the artwork: undo/redo's arrow only fills
-# ~16x8 of its 24-unit viewBox, so it needs a box larger than the button to read.
+# An icon's box as a share of the button's shorter side, where the default (72% compact, 56%
+# otherwise) doesn't suit the art: undo/redo's arrow fills only ~16x8 of its 24-unit viewBox.
 _ICON_FRACTION = {"undo": 1.0, "redo": 1.0}
 
 
 class IconButton(QPushButton):
-    """A stylesheet-backed button whose glyph is painted: "close" (✕),
-    "up" (▲), "down" (▼), or an svg asset ("select-multiple" /
-    "deselect-multiple" / "undo" / "redo", recolored to match the button's own
-    text color via `_icon_svg` rather than shipped pre-tinted). `role="compact"`
-    is a shorter button (the stylesheet's own 28px minimum would otherwise
-    override any fixed height) whose glyph fills more of it."""
+    """A stylesheet button with a painted glyph: "close" (✕), "up" (▲), "down" (▼), or an SVG
+    asset ("select-multiple", "deselect-multiple", "undo", "redo") recoloured to its text colour.
+    `role="compact"` is the shorter variant."""
 
     def __init__(self, kind, role=None, width=None, height=None):
         super().__init__("")
@@ -640,11 +573,7 @@ class IconButton(QPushButton):
             draw_cross(p, rect, color)
             return
         if self._kind in _SVG_ICON_KINDS:
-            # Square and centered, sized off the shorter side only — the
-            # button itself is usually a wide rectangle, and `render(rect)`
-            # stretches a square-viewBox svg to fill whatever rect it's
-            # given rather than preserving its aspect ratio, so a plain
-            # inset on all four sides of a wide `rect` squashed the icon.
+            # A square box off the shorter side: `render(rect)` stretches to the rect.
             fraction = _ICON_FRACTION.get(self._kind, 0.72 if self.property("role") == "compact" else 0.56)
             side = min(rect.width(), rect.height()) * fraction
             icon_rect = QRectF(0, 0, side, side)
@@ -676,17 +605,10 @@ class ClickableLabel(ScaledLabel):
 #  Dropdown
 # --------------------------------------------------------------------------- #
 class Dropdown(QComboBox):
-    """A secondary-filled dropdown with a darker arrow section. Opens
-    straight down below the button (or straight up, when the list wouldn't fit
-    below and there's more room above), unrolls + fades in, and reports row hover through `hovered(str)` for live
-    previews.
-
-    `set(value)` does **not** require the value to be in the list — a value that isn't is shown as a display-only
-    override (Passthru uses this to mirror a source's real bitrate/channels,
-    which are rarely one of the offered options). `value()` reads it back.
-
-    The unroll animates a *mask* on the popup window rather than its geometry,
-    so nothing is resized or re-laid-out per frame — just clipped."""
+    """A secondary-filled dropdown with a darker arrow section. Opens straight down (or up, when
+    there's more room above), unrolling and fading in via a mask on the popup, and reports row
+    hover through `hovered(str)`. `set(value)` shows a value outside the list as a display-only
+    override (Passthru mirroring a source's real bitrate); read it with `value()`."""
 
     picked = Signal(str)
     hovered = Signal(str)
@@ -724,8 +646,7 @@ class Dropdown(QComboBox):
 
     @classmethod
     def width_for(cls, values, min_width=60):
-        """The width (reference pixels) that fits the longest of `values`, so
-        a dropdown never resizes when a longer option is picked."""
+        """The width (reference pixels) fitting the longest of `values`."""
         fm = QFontMetricsF(ui_font(13))
         widest = max((fm.horizontalAdvance(v) for v in values), default=0)
         return max(min_width, math.ceil(widest + 8 + 6 + cls._ARROW_W))
@@ -752,16 +673,9 @@ class Dropdown(QComboBox):
         self.update()
 
     def set_values(self, values):
-        """Replace the option list. No-op when unchanged *and* nothing is being
-        shown that isn't in it; keeps the current pick when it's still legal,
-        else snaps to the first entry. Never fires `picked` — the caller owns
-        any value change it causes.
-
-        A display override (`set` with a value outside the list — the `—` a
-        tab shows before a file is imported, or a Passthru mirror) is not a
-        legal pick, so an unchanged list no longer leaves it in place: it used
-        to, and Resolution kept showing `—` after a 2160p+ source was imported
-        (its list only changes for shorter ones), as FPS did for 120fps+."""
+        """Replace the option list. A no-op when unchanged and no override is showing; keeps a
+        still-legal pick, else snaps to the first. A display override is not a legal pick (a
+        no-file `—` once survived an unchanged list). Never fires `picked`."""
         values = list(values) or [NO_OPTION]
         if values == self.values() and self._override is None:
             return
@@ -789,8 +703,7 @@ class Dropdown(QComboBox):
             self.blockSignals(True)
             self.setCurrentIndex(idx)
             self.blockSignals(False)
-        # Invisible until it is placed: Qt shows the list at its own spot first, and a subclass
-        # that moves or widens it would otherwise be seen there for a moment.
+        # Invisible until placed: Qt shows the list at its own spot first.
         self._container.setWindowOpacity(0.0)
         super().showPopup()
         self._open = True
@@ -802,9 +715,7 @@ class Dropdown(QComboBox):
         area = (self.screen() or QApplication.primaryScreen()).availableGeometry()
         room_below = area.bottom() + 1 - (below.y() + gap)
         room_above = above_y - gap - area.top()
-        # Drops down unless the list would run off the screen (a tall list near the
-        # bottom, most obviously in fullscreen) — then it opens upward if that has
-        # more room, and rolls out from the button's edge either way.
+        # Opens upward only when the list won't fit below and there's more room above.
         self._up = c.height() > room_below and room_above > room_below
         if self._up:
             y = max(area.top(), above_y - gap - c.height())
@@ -817,15 +728,14 @@ class Dropdown(QComboBox):
         self._unroll.start()
 
     def _place_popup(self, container, x, y):
-        """Puts the open list at `x`, `y` (screen px, its top-left); a subclass may widen or shift it."""
+        """Put the open list at `x`, `y` (screen px, top-left); a subclass may widen or shift it."""
         container.move(x, y)
 
     def hidePopup(self):
         self._unroll.stop()
         super().hidePopup()
         self._container.clearMask()
-        # Qt also calls hidePopup on style changes (e.g. a live theme switch),
-        # so only a popup that was genuinely open counts as closing.
+        # Qt also calls hidePopup on style changes: only a genuinely open popup counts.
         if self._open:
             self._open = False
             if Dropdown.open_one is self:
@@ -833,8 +743,8 @@ class Dropdown(QComboBox):
             self.popupClosed.emit()
 
     def move_highlight(self, delta):
-        """Keyboard: move the open list's highlighted row by `delta` (clamped at the ends), as
-        hovering it would — `hovered` fires, so Settings' theme preview follows the arrow keys."""
+        """Keyboard: move the open list's highlight by `delta` (clamped); `hovered` fires, as
+        for the mouse."""
         view = self.view()
         row = view.currentIndex().row()
         row = self.currentIndex() if row < 0 else row
@@ -903,8 +813,7 @@ class Dropdown(QComboBox):
         text_rect = r.adjusted(8, 0, -self._ARROW_W - 4, 0)
         value = self.value()
         elided = p.fontMetrics().elidedText(value, Qt.ElideRight, int(text_rect.width()))
-        # The NO_OPTION placeholder ("—") reads as a centred "nothing here"
-        # mark rather than left-aligned like it's the start of real text.
+        # The NO_OPTION placeholder is centred; real text is left-aligned.
         h_align = Qt.AlignHCenter if value == NO_OPTION else Qt.AlignLeft
         p.drawText(text_rect, Qt.AlignVCenter | h_align, elided)
 
@@ -920,10 +829,8 @@ class Dropdown(QComboBox):
 #  CheckBox
 # --------------------------------------------------------------------------- #
 class CheckBox(QAbstractButton):
-    """A 24px rounded box, 3px border, filled + checkmark when on.
-    `color_key` picks the fill ("secondary", or "stop" for the destructive
-    Strip checkboxes). The fill fades rather than snapping, and disabled
-    greys the *box* too, not just the label."""
+    """A 24px rounded box, filled with a checkmark when on. `color_key` is "secondary" or
+    "stop" (the Strip boxes). The fill fades; disabled greys the box too."""
 
     def __init__(self, text="", color_key="secondary", checked=False, parent=None):
         super().__init__(parent)
@@ -962,8 +869,7 @@ class CheckBox(QAbstractButton):
         return self.sizeHint()
 
     def set_hover(self, hover):
-        """Drives the hover shade from outside — a caption-less checkbox whose
-        row (e.g. `TrackListBox`'s) is what the pointer is really over."""
+        """The hover shade driven from outside, by a row the checkbox sits in."""
         if hover != self._hover:
             self._hover = hover
             self.update()
@@ -1014,8 +920,7 @@ class CheckBox(QAbstractButton):
 #  Switch
 # --------------------------------------------------------------------------- #
 class Switch(QAbstractButton):
-    """The AnimatedSwitch: a pill track whose knob slides between off/on.
-    Disabled greys the knob and track."""
+    """A pill track whose knob slides between off and on. Disabled greys both."""
 
     def __init__(self, checked=False, parent=None):
         super().__init__(parent)
@@ -1068,8 +973,8 @@ class Switch(QAbstractButton):
 #  SegmentedButton
 # --------------------------------------------------------------------------- #
 class SegmentedButton(QWidget):
-    """A segmented selector whose selection pill *slides* between segments.
-    `changed` fires on a user click only; `set` is silent."""
+    """A segmented selector whose selection pill slides. `changed` fires on a user click only;
+    `set` is silent."""
 
     changed = Signal(str)
 
@@ -1135,7 +1040,7 @@ class SegmentedButton(QWidget):
         self.select(self._hit(scale.ref_pos(e.position()).x()))
 
     def select(self, i):
-        """Slide to segment `i` and report it (a user choice, from a click or the keyboard)."""
+        """Slide to segment `i` and report it (a user choice)."""
         if i >= 0 and i != self._index and self.isEnabled():
             self._from = self._pos
             self._index = i
@@ -1189,12 +1094,9 @@ class SegmentedButton(QWidget):
 #  TimeSpinner
 # --------------------------------------------------------------------------- #
 class _TimeField(QWidget):
-    """The HH:MM:SS field itself, fully self-painted. Internal state is a
-    6-digit list and `cursor_pos` indexes straight into it — the single source
-    of truth for the block cursor. Typing
-    overwrites the digit under the cursor and advances; Backspace steps back
-    then clears (typing in reverse); Delete clears in place. Minutes/seconds
-    clamp to 59."""
+    """The self-painted HH:MM:SS field. State is a 6-digit list indexed by `cursor_pos`: typing
+    overwrites and advances, Backspace steps back then clears, Delete clears in place. Minutes
+    and seconds clamp to 59."""
 
     edited = Signal()
 
@@ -1294,10 +1196,7 @@ class _TimeField(QWidget):
         p.drawPath(path)
 
         enabled = self.isEnabled()
-        # Muted like a placeholder while every digit's still 0 — a time
-        # that's never been touched (or was clicked back down to it) reads
-        # as "not set" rather than "00:00:00, the number zero". Only applies
-        # to fields opted into it (both trim fields: Start Time and Clip Duration).
+        # Muted while every digit is 0 (fields that opt in): an untouched time reads as unset.
         muted = self._mute_when_zero and all(d == "0" for d in self.digits)
         rects = self._char_rects()
         p.setFont(self._font)
@@ -1317,10 +1216,8 @@ class _TimeField(QWidget):
 
 
 class TimeSpinner(QWidget):
-    """HH:MM:SS field + a stacked ▲/▼ stepper to its right with an
-    accelerating auto-repeat (400ms → 30ms, ×0.85 per tick). `valueChanged`
-    fires on **every** change — typing, stepping, `set_seconds` — so a live
-    readout like the Overview rundown can follow as the user types."""
+    """HH:MM:SS field plus a ▲/▼ stepper with an accelerating auto-repeat (400ms -> 30ms).
+    `valueChanged` fires on every change, typing and `set_seconds` included."""
 
     valueChanged = Signal(int)
 
@@ -1393,21 +1290,10 @@ _MARQUEE_HOLD = 1.5     # seconds still at the start of each loop
 
 
 class MarqueeGroup:
-    """One shared loop and clock for several `MarqueeLabel`s (e.g.
-    `SummaryPanel`'s Video/Audio/Length rows, a track box's rows). Without it
-    each label wrapped back to its own start the moment *its own* text
-    finished sweeping, so labels of different lengths drifted in and out of
-    phase; in the group a label instead holds at its resting position once its
-    own sweep finishes, and every member restarts together only once the
-    slowest one has too.
-
-    **The group also owns the one timer, and reads the clock once per tick**
-    (`now`) — every label paints from that snapshot, and the labels are all
-    `update()`d in the same tick so Qt repaints them in one pass. Each label
-    used to run its own 16ms timer and read `time.perf_counter()` at its own
-    paint, so two rows that started together were painted a tick or a few
-    milliseconds apart and visibly crept relative to each other (0.04px per
-    ms at the marquee's speed, up to 0.7px for a late tick)."""
+    """One shared loop, clock and timer for several `MarqueeLabel`s. A label holds at rest once
+    its own sweep finishes and all restart together after the slowest, so rows of different
+    lengths stay in step. The clock is read once per tick and every member paints from it, so
+    rows can't creep apart."""
 
     def __init__(self):
         self.t0 = self.now = time.perf_counter()
@@ -1420,8 +1306,7 @@ class MarqueeGroup:
         self._period = None
 
     def unregister(self, label):
-        """Drops a label that's about to be destroyed (a removed track row),
-        so `period()` never touches a deleted widget."""
+        """Drop a label about to be destroyed, so `period()` never touches it."""
         if label in self._members:
             self._members.remove(label)
             self._period = None
@@ -1437,9 +1322,8 @@ class MarqueeGroup:
         self._period = None
 
     def period(self):
-        """The shared cycle length: `_MARQUEE_HOLD` plus the longest sweep
-        among members that are actually scrolling right now (cached — it is
-        read by every member on every frame)."""
+        """The shared cycle: `_MARQUEE_HOLD` plus the longest sweep among scrolling members
+        (cached; read by every member every frame)."""
         if self._period is None:
             sweeps = [m._sweep_seconds() for m in self._members if m._scrolling]
             self._period = _MARQUEE_HOLD + (max(sweeps) if sweeps else 0.0)
@@ -1477,15 +1361,8 @@ class MarqueeGroup:
 
 
 class MarqueeLabel(QWidget):
-    """Single-line text that scrolls smoothly (sub-pixel, time-based) when it
-    doesn't fit, and sits still when it does. It only animates while actually
-    shown — a page hidden in a QStackedWidget gets a real hideEvent, so
-    there's nothing to gate by hand.
-
-    Pass `group` (a `MarqueeGroup`) to keep several labels' loops in step —
-    see `MarqueeGroup`. Standalone labels (the default) get a group of their
-    own, so there is one code path: a group of one loops exactly as a lone
-    label always did."""
+    """Single-line text that scrolls smoothly when it doesn't fit and sits still when it does,
+    only while shown. `group` keeps several labels in step; a standalone label gets its own."""
 
     doubleClicked = Signal()
 
@@ -1523,8 +1400,7 @@ class MarqueeLabel(QWidget):
         return QFontMetricsF(self._font).horizontalAdvance(self._text) > scale.ref_size(self)[0]
 
     def _sweep_seconds(self):
-        """How long this label's own text takes to scroll through once —
-        excludes the resting hold at the start."""
+        """How long this label's text takes to scroll through once, excluding the hold."""
         fm = QFontMetricsF(self._font)
         span = fm.horizontalAdvance(self._text) + _MARQUEE_GAP
         return span / _MARQUEE_SPEED
@@ -1532,10 +1408,7 @@ class MarqueeLabel(QWidget):
     def _set_scrolling(self, scrolling):
         self._group.invalidate()
         if scrolling and not self._scrolling:
-            # A label that starts scrolling *now* (imported after its group
-            # was already looping, or just shown) restarts the shared loop
-            # instead of landing at some arbitrary phase of it — which could
-            # be past its own sweep, leaving it parked until the next wrap.
+            # Starting to scroll now restarts the shared loop, rather than joining it mid-cycle.
             self._group.reset()
         self._scrolling = scrolling
         self._group.sync()
@@ -1568,13 +1441,10 @@ class MarqueeLabel(QWidget):
             return
         span = tw + _MARQUEE_GAP
         sweep = span / _MARQUEE_SPEED
-        # The group's per-tick snapshot, not the clock: every label painted in
-        # this frame must show the same instant (see MarqueeGroup).
+        # The group's per-tick snapshot, so every label shows the same instant.
         cycle_t = self._group.phase()
-        # Holds at the resting position both before the sweep starts (everyone
-        # waits out `_MARQUEE_HOLD` together) and after this label's own sweep
-        # finishes (waiting for a slower groupmate) — travel pinned at `sweep`
-        # looks identical to 0 since the second drawn copy lands exactly at x=0.
+        # Holds at rest before the sweep and after it ends (waiting for a slower groupmate);
+        # travel pinned at `sweep` looks identical to 0.
         travel = max(0.0, min(cycle_t - _MARQUEE_HOLD, sweep)) * _MARQUEE_SPEED
         baseline = (rect.height() + fm.ascent() - fm.descent()) / 2
         p.drawText(QPointF(-travel, baseline), self._text)

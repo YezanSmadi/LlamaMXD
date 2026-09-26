@@ -59,12 +59,10 @@ def force_white_fills(node):
 #  SubTabBar
 # --------------------------------------------------------------------------- #
 class SubTabBar(QWidget):
-    """Overview / Video / Audio. Active = `primary` at full height, inactive =
-    `secondary` at 80% (swapped for a theme with `swap_subtabs`), bottom-aligned like tabs on a shelf, standing on a
-    thin line in the selected tab's colour that runs the whole length of the bar (the tabs' bottom
-    rounding is clipped away so each one sits flat on it). Height and fill
-    ease between states; hover shades fade too. `set_marked` cross-fades a
-    button to STOP_RED — a stream removed on a panel the user can't see."""
+    """Overview / Video / Audio: the active tab in `subtab_active` at full height, the others
+    in `subtab_inactive` at 80%, standing flat on a line in the active colour. Height and fill
+    ease between states. `set_marked` cross-fades a tab to STOP_RED (a stream removed on a panel
+    out of sight)."""
 
     changed = Signal(str)
 
@@ -121,7 +119,7 @@ class SubTabBar(QWidget):
         if name in self._marked:
             key = "stop"
         elif name == self._active:
-            key = "subtab_active"      # primary, or secondary for a theme that swaps them
+            key = "subtab_active"
         else:
             key = "subtab_inactive"
         fill = th.color(f"{key}_hover" if name == self._hover else key)
@@ -186,10 +184,8 @@ class SubTabBar(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         scale.begin(p)
         width, height = scale.ref_size(self)
-        # Where the tabs' feet meet the line, snapped to a whole device pixel:
-        # at a scale where 30 reference px lands mid-pixel, the clip cutting
-        # the tabs and the line's own edge each cover part of that row and the
-        # window colour shows through the rest — a thin seam under the tab.
+        # Snapped to a whole device pixel: mid-pixel, the tab clip and the line's edge each cover
+        # part of the row and a seam shows under the tab.
         foot = round(self._ACTIVE_H * scale.factor()) / scale.factor()
         edge = 0.0
         p.save()
@@ -197,8 +193,7 @@ class SubTabBar(QWidget):
         for n, w in zip(self._names, self._widths):
             fill, h, text = self._cur[n]
             rect = QRectF(edge, foot - h, w, h)
-            # Drawn a radius taller than visible: the clip above cuts off the
-            # bottom corners' rounding, leaving the tab's foot flat on the line.
+            # A radius taller than visible, so the clip cuts off the bottom rounding.
             path = QPainterPath()
             path.addRoundedRect(rect.adjusted(0, 0, 0, self._RADIUS), self._RADIUS, self._RADIUS)
             p.fillPath(path, fill)
@@ -207,33 +202,25 @@ class SubTabBar(QWidget):
             p.drawText(rect, Qt.AlignCenter, n)
             edge += w + self._GAP
         p.restore()
-        # Square-ended, not a rounded stroke. The selected tab's own colour, so the
-        # tab and the line under it read as one piece (primary, except in a theme
-        # that swaps the tabs — Terminal's is its green).
+        # In the selected tab's colour, so tab and line read as one piece.
         p.fillRect(QRectF(0, foot, width, height - foot), T.theme.color("subtab_active"))
 
 
 # --------------------------------------------------------------------------- #
 #  LoadingSpinner
 # --------------------------------------------------------------------------- #
-# assets/LlamaDiscLoading/000.png ... — a spinning CD-R (label "PAK-RW" / "LlamaDisc" flipping
-# to a rainbow underside), exported as a 640px PNG sequence. Full-colour branded art, so it is
-# drawn as it is, except for one themed element: the pink divider stroke and rim on the label
-# side, which is recoloured to the theme's primary (see `_recolor`).
+# A spinning CD-R (assets/LlamaDiscLoading, a PNG sequence), drawn as is except the pink stripe
+# and rim on the label side, which take the theme's primary (`_recolor`).
 _LOADING_DIR = os.path.join(ASSETS, "LlamaDiscLoading")
 _LOADING_FPS = 60.0
 _LOADING_FRAMES = 143
 _LOADING_SOURCE = 640   # the PNGs' own size
-# Colours as rendered into the PNGs (not the source art's exact hex values). Two things on the
-# label side are themed. The stroke: the divider stripe and the outer rim, pink. And the hub's
-# inner edge: the label's translucent hub overlay (#FAD39B at 50% alpha) lying over that same
-# pink, so its colour is `_OVERLAY_ALPHA * overlay + (1 - _OVERLAY_ALPHA) * pink` — which is
-# what a themed colour must be laid under, too (see `_ring_colour`).
+# Colours as rendered into the PNGs. Themed: the pink stripe and rim, and the hub's inner edge,
+# which is the translucent hub overlay over that pink (see `_ring_colour`).
 _STROKE_PINK = np.array([223, 97, 164], dtype=np.float32)
 _HUB_OVERLAY = np.array([250, 211, 155], dtype=np.float32)
 _OVERLAY_ALPHA = 0.5
-# What each of them is drawn against: the label's orange, the hub collar around the hole,
-# and the overlay itself. An edge pixel is a blend of a stroke colour and one of these.
+# What each is drawn against: an edge pixel is a blend of a stroke colour and one of these.
 _LABEL_ORANGE = np.array([255, 186, 84], dtype=np.float32)
 _HUB_COLLAR = np.array([214, 151, 67], dtype=np.float32)
 
@@ -243,7 +230,7 @@ def _ring_colour(base):
     return _OVERLAY_ALPHA * _HUB_OVERLAY + (1 - _OVERLAY_ALPHA) * base
 
 
-# (colour as rendered, colours it is blended with at its edges): stripe/rim, then hub inner edge.
+# (rendered colour, colours it blends with at its edges): stripe/rim, then the hub's inner edge.
 _STROKES = (
     (_STROKE_PINK, (_LABEL_ORANGE, _HUB_COLLAR)),
     (_ring_colour(_STROKE_PINK), (_HUB_COLLAR, _HUB_OVERLAY)),
@@ -253,9 +240,8 @@ _LOADING = {}
 
 
 def _share(rgb, colour, backgrounds):
-    """Each pixel's 0-1 share of `colour`, taking it as a blend of `colour` and whichever of
-    `backgrounds` it lies closest to: where it falls on that line, provided it is within `_TOLERANCE`
-    colour units of it (which keeps the rainbow's own pinks out)."""
+    """Each pixel's 0-1 share of `colour`, as a blend with the nearest of `backgrounds`, if
+    within `_TOLERANCE` of that line (which keeps the rainbow's own pinks out)."""
     best = np.zeros(len(rgb), dtype=np.float32)
     for background in backgrounds:
         line = colour - background
@@ -266,11 +252,9 @@ def _share(rgb, colour, backgrounds):
 
 
 def _stroke_weights(pixels):
-    """`(indices, weights, kinds)` of the themed pixels in one RGBA frame: `weights` is each
-    one's 0-1 share of its stroke colour and `kinds` which of `_STROKES` it belongs to (the
-    one it matches best). Pixels below 20% are ignored."""
-    # The art is flat colour, so a frame has far fewer distinct colours than pixels: score
-    # those once and look each pixel up (about 3x faster than scoring every pixel).
+    """`(indices, weights, kinds)` of a frame's themed pixels: each one's share of its stroke
+    colour and which of `_STROKES` it is. Pixels under 20% are ignored."""
+    # Flat-colour art: score each distinct colour once and look pixels up (~3x faster).
     flat = pixels.reshape(-1, 4)
     packed = (flat[:, 0].astype(np.int32) << 16) | (flat[:, 1].astype(np.int32) << 8) | flat[:, 2]
     colours, inverse = np.unique(packed, return_inverse=True)
@@ -279,8 +263,7 @@ def _stroke_weights(pixels):
     shares *= flat[:, 3] > 0
     kinds = shares.argmax(0)
     best = shares.max(0)
-    # The stripe/rim only exists on the label side; without it (the rainbow side and the
-    # edge-on frames) whatever matched is a look-alike, so nothing is themed.
+    # Without the stripe (the rainbow side, edge-on frames) any match is a look-alike.
     if ((kinds == 0) & (best > 0.6)).sum() < 100:
         empty = np.empty(0, dtype=np.intp)
         return empty, np.empty(0, dtype=np.float32), np.empty(0, dtype=np.intp)
@@ -289,20 +272,18 @@ def _stroke_weights(pixels):
 
 
 def _frame_side(side):
-    """The size frames are decoded at for a spinner `side` real px across: rounded up to a
-    multiple of 64 (so a window drag doesn't re-decode at every step), at most the PNGs' own."""
+    """The decode size for a spinner `side` px across: up to a multiple of 64 (so a drag
+    doesn't re-decode each step), at most the PNGs' own size."""
     return max(64, min(_LOADING_SOURCE, math.ceil(side / 64) * 64))
 
 
 def _load_frames(side):
-    """Decodes the sequence at `side` px (worker thread): `[(QImage, indices, deltas, original)]`,
-    or None if it can't be read. The image is premultiplied RGBA; `indices` are its themed
-    pixels, `deltas` (n x 2) how far each moves per unit of each stroke's colour change, and
-    `original` their premultiplied RGB. Weights are scored at full size and shrunk with the
-    same area filter as the image: recolouring is linear, so this equals recolouring at full
-    size and then scaling down (scoring the scaled frame leaves a pink fringe on the thin rim,
-    whose pixels blend three colours)."""
-    import cv2   # already loaded by core.utilities; only needed here, on the worker
+    """Decode the sequence at `side` px (worker thread): `[(QImage, indices, deltas, original)]`
+    or None. The image is premultiplied; `deltas` (n x 2) are each themed pixel's move per unit
+    of each stroke's change. Weights are scored at full size and shrunk with the image's area
+    filter: recolouring is linear, so this equals recolour-then-scale (scoring the shrunk frame
+    left a pink fringe on the thin rim)."""
+    import cv2   # only needed here, on the worker
     frames = []
     for n in range(_LOADING_FRAMES):
         image = QImage(os.path.join(_LOADING_DIR, f"{n:03d}.png"))
@@ -332,9 +313,8 @@ def _load_frames(side):
 
 
 def _request_frames(side):
-    """Decodes the sequence for a spinner `side` real px across, on a worker, unless frames of
-    that size are already loaded or loading. `_LOADING["frames"]` is replaced when done, so a
-    spinner keeps drawing the previous size (scaled) meanwhile; nothing before the first set."""
+    """Decode the frames for a spinner `side` px across on a worker, unless that size is loaded
+    or loading. A spinner keeps drawing the previous size meanwhile."""
     want = _frame_side(side)
     _LOADING["want"] = want
     if _LOADING.get("failed") or _LOADING.get("busy") or _LOADING.get("side") == want:
@@ -344,7 +324,7 @@ def _request_frames(side):
     def done(frames):
         _LOADING["busy"] = False
         if frames:
-            # Resized again while this one decoded: keep it only if there is nothing to draw yet.
+            # Resized again meanwhile: keep this only if there is nothing to draw yet.
             if _LOADING["want"] == want or not _LOADING.get("frames"):
                 _LOADING["frames"], _LOADING["side"] = frames, want
             if _LOADING["want"] != want:
@@ -365,9 +345,8 @@ def _request_frames(side):
 
 
 def _recolor(frame, rgb):
-    """A copy of one decoded frame with its themed pixels moved to `rgb` (0-255 ints): the
-    stripe and rim from the original pink to `rgb`, the hub's inner edge from `_ring_colour`
-    of the pink to `_ring_colour` of `rgb`, each pixel by its own share."""
+    """A copy of a frame with its themed pixels moved to `rgb`: the stripe and rim from the
+    pink to `rgb`, the hub's inner edge from `_ring_colour(pink)` to `_ring_colour(rgb)`."""
     image, idx, deltas, original = frame
     out = image.copy()
     if len(idx):
@@ -381,24 +360,22 @@ def _recolor(frame, rgb):
 
 
 class LoadingSpinner(QWidget):
-    """The PNG-sequence LlamaDisc spinner (see above). Plays only while it is on screen and
-    lets every mouse event through to whatever it sits on (the DropBox's double-click and
-    drops). It draws nothing until the frames are decoded, and nothing at all if they can't be."""
+    """The LlamaDisc spinner. Plays only while shown, lets mouse events through, and draws
+    nothing until (or unless) its frames are decoded."""
 
-    DEFAULT_SIZE = 64  # real px — only until the host sizes it via set_side()
+    DEFAULT_SIZE = 64  # real px, until the host calls set_side()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.resize(self.DEFAULT_SIZE, self.DEFAULT_SIZE)
         self._t0 = time.monotonic()
-        # Single-shot, re-armed for the moment the next frame is due, like the Wave Loop:
-        # a fixed 16ms poll shows each frame for an uneven 1 or 2 ticks.
+        # Re-armed for when the next frame is due (a 16ms poll gives uneven frames).
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._tick)
-        # Frames are decoded for the size the host settles on, not every size a drag passes.
+        # Decoded for the size the host settles on, not every size a drag passes.
         self._size_timer = QTimer(self)
         self._size_timer.setSingleShot(True)
         self._size_timer.setInterval(300)
@@ -406,7 +383,7 @@ class LoadingSpinner(QWidget):
         T.theme.changed.connect(self.update)
 
     def _request_frames(self):
-        # Only for a host on screen: a tab never shown yet has an unlaid-out 640x480 drop box.
+        # Only for a host on screen: a never-shown tab's drop box is an unlaid-out 640x480.
         host = self.parentWidget()
         if host is None or host.isVisible():
             _request_frames(self.width() * (self.devicePixelRatioF() or 1.0))
@@ -421,9 +398,8 @@ class LoadingSpinner(QWidget):
         self._timer.stop()
 
     def set_side(self, side):
-        """Resizes to a `side`x`side` square in real px — the host (DropBox) calls this
-        with however much height it has to give. A plain resize, not `setFixedSize`: this is
-        a floating overlay positioned by its host, not layout-managed."""
+        """A `side` x `side` square in real px, from the host. A plain resize: this is a
+        floating overlay, not layout-managed."""
         side = max(1, round(side))
         if side != self.width() or side != self.height():
             self.resize(side, side)
@@ -435,8 +411,7 @@ class LoadingSpinner(QWidget):
             self._schedule()
 
     def _schedule(self):
-        """Arms the timer for the instant the next frame is due (rounded up, so it can't
-        fire just before the boundary and have to wait another tick)."""
+        """Arm the timer for when the next frame is due (rounded up)."""
         elapsed = time.monotonic() - self._t0
         due = (int(elapsed * _LOADING_FPS) + 1) / _LOADING_FPS
         self._timer.start(max(1, math.ceil((due - elapsed) * 1000)))
@@ -456,17 +431,13 @@ class LoadingSpinner(QWidget):
 #  DropBox
 # --------------------------------------------------------------------------- #
 class DropBox(QWidget):
-    """The secondary-bordered drop target: drop a file, double-click, or Browse.
-    Drag-over lights it up. `collapse()` — once a file's been picked the
-    prompt, border and Browse go, leaving the loading spinner until the
-    preview carousel takes over."""
+    """The secondary-bordered drop target: drop a file, double-click, or Browse. Once a file
+    is picked, `collapse()` swaps the prompt, border and Browse for the loading spinner."""
 
     fileSelected = Signal(str)
 
     def __init__(self, prompt="Drag & Drop File Here", parent=None, start_dir=None):
-        """`start_dir` is an optional callable returning the folder Browse
-        should open in (else the OS's own default — which for an unset start
-        directory was this app's working folder)."""
+        """`start_dir`: an optional callable giving the folder Browse opens in."""
         super().__init__(parent)
         self._start_dir = start_dir
         self._prompt_text = prompt
@@ -478,24 +449,8 @@ class DropBox(QWidget):
         lay.setAlignment(Qt.AlignCenter)
         scale.spacing(lay, 14)
         self.prompt = ScaledLabel(prompt)
-        # A plain `.setFont()` (what `set_font_px` does) only sticks until the
-        # next `ensurePolished()`, which reapplies the class-wide `ScaledLabel
-        # { font-size: 13px }` rule and silently wins back over it — normally
-        # within the same frame, since a real widget gets polished the moment
-        # it's actually shown. But `ensurePolished()` isn't guaranteed to run
-        # again for a *hidden* widget: `set_font_px`'s own `scale.bind` still
-        # re-applies its raw `.setFont(14)` on every scale change regardless
-        # of visibility (see `MainWindow._on_scale_changed`), so a resize that
-        # happens while this box's tab is hidden behind another one can leave
-        # the 14px `.setFont()` value stuck, un-overridden, until the tab is
-        # shown again — a real, confirmed bug (Encoding's prompt measured
-        # ~7% wider than Muxing's identical text after exactly this). An
-        # *instance*-level stylesheet rule doesn't have this race: it's the
-        # most specific rule Qt's cascade can apply, so it wins over the
-        # class rule on every polish rather than only sometimes, and — being
-        # a plain reference-pixel value like the class rule itself, not a
-        # real-pixel `font_px()` one — never needs rebinding on a scale
-        # change at all.
+        # An instance-level rule, not `set_font_px`: a plain setFont is overridden by the
+        # class rule at the next polish, and a hidden tab missed that re-polish after a rescale.
         self.prompt.setStyleSheet("font-size: 14px;")
         self.prompt.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.prompt)
@@ -506,15 +461,8 @@ class DropBox(QWidget):
         self.browse_btn = button("Browse File", width=140)
         self.browse_btn.clicked.connect(self.browse)
         lay.addWidget(self.browse_btn, 0, Qt.AlignCenter)
-        # A floating overlay, like the Wave Loop layer or the tab pipe — *not* added to
-        # `lay`. It needs to grow to fill however much of the box's own height is going,
-        # which means its size can't be allowed to feed back into that height: a
-        # layout-managed widget's `setFixedSize` becomes part of its parent's own
-        # minimumSizeHint, so once grown it would floor the box (and the whole window)
-        # from ever shrinking back below that size — confirmed directly (a shrink to a
-        # smaller host stayed pinned at the last-set spinner size). Already parented here
-        # at construction, so it's never the parentless-widget-becomes-its-own-window trap
-        # that rule is about; hidden until `collapse()`.
+        # A floating overlay, not in `lay`: a layout-managed spinner's size would floor the
+        # box's minimum, so it could never shrink again. Hidden until `collapse()`.
         self.spinner = LoadingSpinner(self)
         self.spinner.hide()
         T.theme.changed.connect(self.update)
@@ -526,10 +474,8 @@ class DropBox(QWidget):
         restyle(self.prompt)
 
     def _resize_spinner(self):
-        """Fills the box's own height with the spinner, minus a small margin, and centres
-        it — no border is drawn while collapsed (see `paintEvent`), so there's nothing else
-        in the frame to leave room for. Height, not width: this box is normally landscape,
-        and a square animation sized to the wider dimension would run off the top/bottom."""
+        """Fill the box's height with the spinner (less a margin), centred; height, since the
+        box is normally landscape."""
         margin = scale.px(8)
         side = max(1, min(self.height(), self.width()) - margin * 2)
         self.spinner.set_side(side)
@@ -540,8 +486,7 @@ class DropBox(QWidget):
         self._resize_spinner()
 
     def collapse(self):
-        """A file was picked and its previews are still loading: the border, prompt and
-        Browse give way to the loading spinner."""
+        """A file was picked and its previews are loading: show the spinner instead."""
         self._collapsed = True
         self._set_prompt(self._prompt_text)
         self.prompt.hide()
@@ -553,9 +498,8 @@ class DropBox(QWidget):
         self.update()
 
     def show_no_preview(self):
-        """A file was picked and is in use, but no preview frames could be made
-        for it: the box stays up with its border, saying so in red where the
-        drag/drop prompt was ("— or —" goes), and Browse stays."""
+        """A file is in use but has no preview frames: the border and Browse stay, the prompt
+        says so in red."""
         self._collapsed = False
         self._set_prompt("No Preview Available", "error")
         self.prompt.show()
@@ -565,9 +509,7 @@ class DropBox(QWidget):
         self.update()
 
     def reset(self):
-        """Undo `collapse()` — back to the full drag/drop + Browse prompt,
-        exactly as before any file was ever picked (a rejected/unreadable
-        import never leaves the box looking like one was)."""
+        """Undo `collapse()`: back to the pristine drag/drop prompt (a rejected import)."""
         self._collapsed = False
         self._set_prompt(self._prompt_text)
         self.prompt.show()
@@ -619,9 +561,8 @@ class DropBox(QWidget):
 
 
 class BorderedFrame(QWidget):
-    """The DropBox's rounded border without its drop behaviour — the
-    Downloader tab's preview box (primary) and Muxing's track box (which
-    passes `color_key="secondary"`, matching DropBox's own secondary border)."""
+    """The DropBox's rounded border without the drop behaviour (the Downloader preview,
+    Muxing's track box)."""
 
     def __init__(self, parent=None, color_key="primary"):
         super().__init__(parent)
@@ -642,9 +583,7 @@ class BorderedFrame(QWidget):
 #  SummaryPanel
 # --------------------------------------------------------------------------- #
 class SummaryPanel(QWidget):
-    """The Overview rundown: `label  value` rows, values marquee when long.
-    The one place every cross-panel consequence is visible at once (a removed
-    stream shows `— removed —` in STOP_RED)."""
+    """The Overview rundown: `label  value` rows whose values marquee when long."""
 
     def __init__(self, labels, parent=None):
         super().__init__(parent)
@@ -652,9 +591,7 @@ class SummaryPanel(QWidget):
         grid.setContentsMargins(0, 0, 0, 0)
         scale.grid_spacing(grid, 0, 12)
         self._values = []
-        # One shared clock for all rows: whichever value is shortest finishes
-        # its scroll first and holds at rest until the slowest one catches
-        # up, so all rows sweep and restart in step instead of drifting.
+        # One group, so every row sweeps and restarts in step.
         marquee_group = MarqueeGroup()
         for row, text in enumerate(labels):
             lab = ScaledLabel(text)
@@ -675,9 +612,7 @@ class SummaryPanel(QWidget):
 
 
 class _AccentBar(QWidget):
-    """A thin accent-coloured bar — the sidebar title's underline, in the
-    theme's secondary colour (e.g. Lemon's blue) rather than a text-level
-    underline."""
+    """A thin secondary-coloured bar: the sidebar title's underline."""
 
     def __init__(self, width, height=4, parent=None):
         super().__init__(parent)
@@ -699,8 +634,7 @@ class _AccentBar(QWidget):
 #  Sidebar + active-tab pipe
 # --------------------------------------------------------------------------- #
 class Sidebar(QWidget):
-    """Title, logo, the four nav buttons, then Settings + footer pinned to the
-    bottom via a layout stretch."""
+    """Title, logo, the four nav buttons, then Settings and the footer at the bottom."""
 
     navigate = Signal(str)
     WIDTH = 200
@@ -746,9 +680,7 @@ class Sidebar(QWidget):
         scale.changed.connect(self._load_logo)
         T.theme.changed.connect(self.update)
 
-    NAV_BUTTON_WIDTH = 110  # narrower than the sidebar itself, so the pipe's
-    # own gap runs wider on both sides — enough to see the RCA cable's black
-    # lead trailing out from behind the button before it plugs in.
+    NAV_BUTTON_WIDTH = 110  # narrower than the sidebar, so the cable's lead shows behind it
 
     def _add_nav(self, lay, name):
         btn = button(name)
@@ -761,12 +693,8 @@ class Sidebar(QWidget):
     _logo_renderer = None  # the parsed SVG, loaded once and reused by every Sidebar instance
 
     def _load_logo(self):
-        """Re-render the tinted logo pixmap — but only when the thing it's
-        keyed on (the real-pixel box size, the tint colour) actually changed.
-        Connected to both `scale.changed` and `T.theme.changed`, this used to
-        re-parse the SVG from disk and re-render+re-tint it on *every* live
-        resize step, even though `px()` rounds to whole pixels and a small
-        drag step very often lands on the same box size as the last one."""
+        """Re-render the tinted logo, only when its pixel size or tint changed (it is called
+        on every live-resize step)."""
         box = px(self.LOGO_SIZE) * self._LOGO_OVERSAMPLE
         color = T.theme.color("sidebar_text")
         key = (box, color.rgba())
@@ -789,12 +717,7 @@ class Sidebar(QWidget):
         renderer.render(p, QRectF(x, y, w, h))
         p.end()
 
-        # Tint the rendered ink to the sidebar's text colour — the same one the
-        # title text uses (`sidebar_text`: readable-on-primary, unless the theme
-        # names its own) — so the logo goes white on a dark primary (Noir,
-        # Vaporwave) or on Funk exactly like the title does, and stays black
-        # elsewhere. SourceIn keeps the source's alpha (the art's own
-        # anti-aliased shape) and replaces only its RGB.
+        # Tinted like the title (`sidebar_text`); SourceIn keeps the art's alpha.
         tint = QPainter(img)
         tint.setCompositionMode(QPainter.CompositionMode_SourceIn)
         tint.fillRect(img.rect(), color)
@@ -815,11 +738,8 @@ _cable_pixmap_cache = {}
 
 
 def _cable_base_image():
-    """The RCA cable art rendered once at high resolution and cropped to
-    its own drawn content — the SVG's declared viewBox (509 wide) is
-    nearly 3x wider than the plug it actually draws (~172 units, the rest
-    blank margin), which would otherwise squash the rotated art into one
-    end of its frame instead of filling it edge to edge."""
+    """The RCA cable art rendered once at high resolution, cropped to what it draws (its
+    viewBox is ~3x wider than the plug)."""
     cached = _cable_base_cache.get("img")
     if cached is not None:
         return cached
@@ -849,13 +769,8 @@ def _cable_base_image():
 
 
 def _cable_pixmap(height):
-    """The cropped cable art (above), rotated 90° clockwise so the grey
-    plug collar — the top of the source art, at low y — lands on the
-    *right* (toward the tab frame it plugs into) and the trailing cable —
-    the bottom, at high y — lands on the *left* (toward the sidebar button
-    it slides out of). Rasterized `height` px tall (oversampled the same
-    way the sidebar logo is) and cached by that height, since every nav
-    button's pipe wants the same size."""
+    """The cropped cable rotated 90° clockwise (collar toward the tab frame, cable toward the
+    button), `height` px tall, cached per height."""
     cached = _cable_pixmap_cache.get(height)
     if cached is not None:
         return cached
@@ -872,27 +787,12 @@ def _cable_pixmap(height):
 
 
 class _TabPipe(QWidget):
-    """One nav button's own pipe: the RCA cable art sliding out of the
-    button and toward the tab frame. *extension* (0 = hidden, flush with
-    the button's own edge; 1 = plugged in) slides the cable horizontally —
-    at 1 it's pushed in just far enough that the long thin grey pin (the
-    plug's actual contact, see `_cable_pixmap`) lands entirely past the
-    frame's edge, hidden behind it the way a real plug's pin disappears
-    into a jack — but *not* the wider grey base collar right behind it,
-    which stays visible sitting proud of the frame along with the yellow
-    shell and the cable trailing back off toward the button. Independent
-    per button so an outgoing and an incoming pipe can animate at once
-    instead of one bar jumping between button positions.
+    """One nav button's RCA cable, sliding from the button toward the tab frame. `extension`
+    0 is hidden (flush with the button's edge); at 1 the thin pin has gone past the frame's
+    edge, like a pin into a jack, while the collar and shell stay visible. One per button, so
+    the outgoing and incoming cables animate at once."""
 
-    Replaces an earlier abstract pill-plus-pin shape meant to *suggest* a
-    jack plug in the round-rectangle language the rest of the UI uses —
-    dropped once a real cable graphic (`assets/RCA Cable Yellow.svg`) made
-    that abstraction unnecessary."""
-
-    # The art's own long thin pin (`assets/RCA Cable Yellow.svg`'s first
-    # grey path) runs tip-to-142.23 out of the full 825.37 length; its
-    # wider base collar (the second grey path, 146.9-171.22) is deliberately
-    # excluded here so insertion stops with the base still showing.
+    # Share of the art's length taken by the thin pin (its wider base collar excluded).
     _PIN_FRAC = 142.23 / 825.37
     _MARGIN = 6  # vertical breathing room within the button's own row height
 
@@ -929,11 +829,8 @@ class _TabPipe(QWidget):
         dpr = pix.devicePixelRatio()
         img_w, img_h = pix.width() / dpr, pix.height() / dpr
 
-        # Hidden: the tip sits flush with local x=0 (the button's own
-        # edge), so nothing is visible. Shown: the tip has crossed past
-        # this widget's own right edge (the frame's edge) by exactly the
-        # long pin's own width — the base collar right behind it stops
-        # short of the edge and stays visible.
+        # Hidden: the tip flush with x=0 (the button's edge). Shown: the tip past the frame's
+        # edge by exactly the pin's width.
         hidden_x = -img_w
         shown_x = self.width() - img_w * (1 - self._PIN_FRAC)
         x = hidden_x + (shown_x - hidden_x) * self._extension
@@ -945,14 +842,8 @@ class _TabPipe(QWidget):
 
 
 class TabIndicator(QWidget):
-    """Owns one independently-animated `_TabPipe` per nav button. Selecting
-    a tab grows that button's own pipe out of it and into the tab frame
-    while, at the same time, the previously-selected button's pipe shrinks
-    back into its own button — two motions at once, rather than one shared
-    bar jumping between button positions like the pipe used to. No longer
-    paints anything of its own — an earlier version also drew a static
-    `primary` notch per button, always visible regardless of selection, but
-    that's being replaced with a different idea."""
+    """Owns one `_TabPipe` per nav button: selecting a tab plugs its cable in while the
+    previous one pulls out. Paints nothing itself."""
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -964,10 +855,8 @@ class TabIndicator(QWidget):
         T.theme.changed.connect(self.update)
 
     def set_active(self, name, buttons, frame_left, animate=True):
-        """(Re)lays out every button's pipe geometry — cheap, and needed
-        since a button's position is only final once the window's actually
-        shown — then animates the outgoing pipe shut and the incoming one
-        open together."""
+        """Re-lay every pipe (a button's position is final only once shown), then animate the
+        outgoing pipe out and the incoming one in."""
         self._buttons = buttons
         self._frame_left = frame_left
         parent = self.parentWidget()
@@ -978,9 +867,7 @@ class TabIndicator(QWidget):
             pipe = self._pipes.get(btn_name)
             if pipe is None:
                 pipe = _TabPipe(self)
-                # A widget created after its parent is already shown doesn't
-                # inherit that visibility automatically — without this it
-                # silently never paints at all, notch or full pipe alike.
+                # Created after its parent was shown, so it must be shown explicitly.
                 pipe.show()
                 self._pipes[btn_name] = pipe
             pipe.setGeometry(x, top_left.y(), max(1, frame_left - x), btn.height())
