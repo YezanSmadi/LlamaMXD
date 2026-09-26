@@ -1,0 +1,266 @@
+{
+ "enc_downscale_retime.mp4": {
+  "outcome": {
+   "end": "done",
+   "reached_100": true
+  },
+  "output": {
+   "audio_streams": [
+    [
+     "AAC",
+     "Stereo",
+     "48000 Hz",
+     "und"
+    ]
+   ],
+   "container": ".mp4",
+   "duration": 2.0,
+   "fps": 12.0,
+   "hdr": false,
+   "profile": "Constrained Baseline",
+   "size": [
+    640,
+    360
+   ],
+   "stream_starts": [
+    "h264@0.0",
+    "aac@0.0"
+   ],
+   "video": "H.264",
+   "video_streams": [
+    [
+     "H.264",
+     "8-bit 4:2:0",
+     "SDR"
+    ]
+   ]
+  },
+  "partial_left": false
+ },
+ "enc_h264_trim.mp4": {
+  "outcome": {
+   "end": "done",
+   "reached_100": true
+  },
+  "output": {
+   "audio_streams": [
+    [
+     "AAC",
+     "Stereo",
+     "48000 Hz",
+     "und"
+    ]
+   ],
+   "container": ".mp4",
+   "duration": 2.0,
+   "fps": 24.0,
+   "hdr": false,
+   "profile": "Constrained Baseline",
+   "size": [
+    640,
+    360
+   ],
+   "stream_starts": [
+    "h264@0.0",
+    "aac@0.0"
+   ],
+   "video": "H.264",
+   "video_streams": [
+    [
+     "H.264",
+     "8-bit 4:2:0",
+     "SDR"
+    ]
+   ]
+  },
+  "partial_left": false
+ },
+ "enc_hdr_to_sdr.mp4": {
+  "outcome": {
+   "end": "done",
+   "reached_100": true
+  },
+  "output": {
+   "audio_streams": [],
+   "container": ".mp4",
+   "duration": 2.0,
+   "fps": 24.0,
+   "hdr": false,
+   "profile": "Main",
+   "size": [
+    640,
+    360
+   ],
+   "stream_starts": [
+    "hevc@0.0"
+   ],
+   "video": "H.265",
+   "video_streams": [
+    [
+     "H.265",
+     "8-bit 4:2:0",
+     "SDR"
+    ]
+   ]
+  },
+  "partial_left": false
+ },
+ "enc_multi_audio.mkv": {
+  "outcome": {
+   "end": "done",
+   "reached_100": true
+  },
+  "output": {
+   "audio_streams": [
+    [
+     "Opus",
+     "Mono",
+     "48000 Hz",
+     "jpn"
+    ],
+    [
+     "MP3",
+     "Mono",
+     "44100 Hz",
+     "eng"
+    ]
+   ],
+   "container": ".mkv",
+   "duration": 3.0,
+   "fps": 24.0,
+   "hdr": false,
+   "profile": "Constrained Baseline",
+   "size": [
+    640,
+    360
+   ],
+   "stream_starts": [
+    "h264@0.98",
+    "opus@0.0",
+    "mp3@0.98"
+   ],
+   "video": "H.264",
+   "video_streams": [
+    [
+     "H.264",
+     "8-bit 4:2:0",
+     "SDR"
+    ]
+   ]
+  },
+  "partial_left": false
+ },
+ "enc_vp9_opus.webm": {
+  "outcome": {
+   "end": "done",
+   "reached_100": true
+  },
+  "output": {
+   "audio_streams": [
+    [
+     "Opus",
+     "Stereo",
+     "48000 Hz",
+     null
+    ]
+   ],
+   "container": ".webm",
+   "duration": 2.0,
+   "fps": 24.0,
+   "hdr": false,
+   "profile": "Profile 0",
+   "size": [
+    640,
+    360
+   ],
+   "stream_starts": [
+    "vp9@0.0",
+    "opus@0.0"
+   ],
+   "video": "VP9",
+   "video_streams": [
+    [
+     "VP9",
+     "8-bit 4:2:0",
+     "SDR"
+    ]
+   ]
+  },
+  "partial_left": false
+ },
+ "mux_reordered.mkv": {
+  "outcome": {
+   "end": "done",
+   "reached_100": true
+  },
+  "output": {
+   "audio_streams": [
+    [
+     "Opus",
+     "Mono",
+     "48000 Hz",
+     "jpn"
+    ],
+    [
+     "AAC",
+     "Stereo",
+     "48000 Hz",
+     "eng"
+    ]
+   ],
+   "container": ".mkv",
+   "duration": 4.0,
+   "fps": 24.0,
+   "hdr": false,
+   "profile": "Constrained Baseline",
+   "size": [
+    640,
+    360
+   ],
+   "stream_starts": [
+    "h264@0.0",
+    "opus@0.0",
+    "aac@0.0"
+   ],
+   "video": "H.264",
+   "video_streams": [
+    [
+     "H.264",
+     "8-bit 4:2:0",
+     "SDR"
+    ]
+   ]
+  },
+  "partial_left": false
+ },
+ "mux_strip_audio.mp4": {
+  "outcome": {
+   "end": "done",
+   "reached_100": true
+  },
+  "output": {
+   "audio_streams": [],
+   "container": ".mp4",
+   "duration": 4.0,
+   "fps": 24.0,
+   "hdr": false,
+   "profile": "Constrained Baseline",
+   "size": [
+    640,
+    360
+   ],
+   "stream_starts": [
+    "h264@0.0"
+   ],
+   "video": "H.264",
+   "video_streams": [
+    [
+     "H.264",
+     "8-bit 4:2:0",
+     "SDR"
+    ]
+   ]
+  },
+  "partial_left": false
+ }
+}

@@ -1,0 +1,472 @@
+{
+ "audio.m4a": {
+  "duration": 4.0,
+  "frames": [],
+  "previewable": false,
+  "probe": {
+   "audio": "AAC",
+   "audio_bitrate": "96 kbps",
+   "audio_channels": "Mono",
+   "audio_sample_rate": "48000 Hz",
+   "audio_streams": [
+    {
+     "bitrate_display": "96 kbps",
+     "channels": 1,
+     "channels_display": "Mono",
+     "codec": "AAC",
+     "index": 0,
+     "language": "und",
+     "lossless": false,
+     "sample_rate": 48000,
+     "sample_rate_display": "48000 Hz"
+    }
+   ],
+   "chapters": null,
+   "container": ".m4a",
+   "creation_time": null,
+   "duration": 4.0,
+   "fps": null,
+   "has_audio": true,
+   "has_video": false,
+   "hdr": null,
+   "height": null,
+   "mastering_max_nits": null,
+   "mastering_min_nits": null,
+   "max_cll": null,
+   "max_fall": null,
+   "title": null,
+   "video": null,
+   "video_level": null,
+   "video_profile": null,
+   "video_streams": [],
+   "width": null
+  }
+ },
+ "hdr.mkv": {
+  "duration": 3.999,
+  "frames": [
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ]
+  ],
+  "previewable": true,
+  "probe": {
+   "audio": null,
+   "audio_bitrate": null,
+   "audio_channels": null,
+   "audio_sample_rate": null,
+   "audio_streams": [],
+   "chapters": null,
+   "container": ".mkv",
+   "creation_time": null,
+   "duration": 3.999,
+   "fps": 24.0,
+   "has_audio": false,
+   "has_video": true,
+   "hdr": true,
+   "height": 360,
+   "mastering_max_nits": 1000.0,
+   "mastering_min_nits": 0.0001,
+   "max_cll": 1000,
+   "max_fall": 400,
+   "title": null,
+   "video": "H.265",
+   "video_level": "2.1",
+   "video_profile": "Main 10",
+   "video_streams": [
+    {
+     "bitrate_display": null,
+     "codec": "H.265",
+     "codec_name": "HEVC",
+     "color_format": "10-bit 4:2:0",
+     "fps": 24.0,
+     "fps_display": "24",
+     "hdr": true,
+     "hdr_display": "HDR10",
+     "index": 0,
+     "language": null,
+     "level": "2.1",
+     "profile": "Main 10",
+     "resolution_display": "640x360"
+    }
+   ],
+   "width": 640
+  },
+  "verify_sdr_tag": false
+ },
+ "missing": {
+  "audio": null,
+  "audio_bitrate": null,
+  "audio_channels": null,
+  "audio_sample_rate": null,
+  "audio_streams": [],
+  "chapters": null,
+  "container": null,
+  "creation_time": null,
+  "duration": null,
+  "fps": null,
+  "has_audio": null,
+  "has_video": null,
+  "hdr": null,
+  "height": null,
+  "mastering_max_nits": null,
+  "mastering_min_nits": null,
+  "max_cll": null,
+  "max_fall": null,
+  "title": null,
+  "video": null,
+  "video_level": null,
+  "video_profile": null,
+  "video_streams": [],
+  "width": null
+ },
+ "multi.mkv": {
+  "duration": 4.021,
+  "frames": [
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ]
+  ],
+  "previewable": true,
+  "probe": {
+   "audio": "AAC",
+   "audio_bitrate": null,
+   "audio_channels": "Stereo",
+   "audio_sample_rate": "48000 Hz",
+   "audio_streams": [
+    {
+     "bitrate_display": null,
+     "channels": 2,
+     "channels_display": "Stereo",
+     "codec": "AAC",
+     "index": 0,
+     "language": "eng",
+     "lossless": false,
+     "sample_rate": 48000,
+     "sample_rate_display": "48000 Hz"
+    },
+    {
+     "bitrate_display": null,
+     "channels": 1,
+     "channels_display": "Mono",
+     "codec": "Opus",
+     "index": 1,
+     "language": "jpn",
+     "lossless": false,
+     "sample_rate": 48000,
+     "sample_rate_display": "48000 Hz"
+    }
+   ],
+   "chapters": null,
+   "container": ".mkv",
+   "creation_time": null,
+   "duration": 4.021,
+   "fps": 24.0,
+   "has_audio": true,
+   "has_video": true,
+   "hdr": false,
+   "height": 360,
+   "mastering_max_nits": null,
+   "mastering_min_nits": null,
+   "max_cll": null,
+   "max_fall": null,
+   "title": null,
+   "video": "H.264",
+   "video_level": "3.0",
+   "video_profile": "Constrained Baseline",
+   "video_streams": [
+    {
+     "bitrate_display": null,
+     "codec": "H.264",
+     "codec_name": "H264",
+     "color_format": "8-bit 4:2:0",
+     "fps": 24.0,
+     "fps_display": "24",
+     "hdr": false,
+     "hdr_display": "SDR",
+     "index": 0,
+     "language": null,
+     "level": "3.0",
+     "profile": "Constrained Baseline",
+     "resolution_display": "640x360"
+    }
+   ],
+   "width": 640
+  }
+ },
+ "sdr.mp4": {
+  "duration": 4.0,
+  "frames": [
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ]
+  ],
+  "previewable": true,
+  "probe": {
+   "audio": "AAC",
+   "audio_bitrate": "128 kbps",
+   "audio_channels": "Stereo",
+   "audio_sample_rate": "48000 Hz",
+   "audio_streams": [
+    {
+     "bitrate_display": "128 kbps",
+     "channels": 2,
+     "channels_display": "Stereo",
+     "codec": "AAC",
+     "index": 0,
+     "language": "und",
+     "lossless": false,
+     "sample_rate": 48000,
+     "sample_rate_display": "48000 Hz"
+    }
+   ],
+   "chapters": null,
+   "container": ".mp4",
+   "creation_time": null,
+   "duration": 4.0,
+   "fps": 24.0,
+   "has_audio": true,
+   "has_video": true,
+   "hdr": false,
+   "height": 360,
+   "mastering_max_nits": null,
+   "mastering_min_nits": null,
+   "max_cll": null,
+   "max_fall": null,
+   "title": "Fixture Clip",
+   "video": "H.264",
+   "video_level": "3.0",
+   "video_profile": "Constrained Baseline",
+   "video_streams": [
+    {
+     "bitrate_display": "1.7 Mbps",
+     "codec": "H.264",
+     "codec_name": "H264",
+     "color_format": "8-bit 4:2:0",
+     "fps": 24.0,
+     "fps_display": "24",
+     "hdr": false,
+     "hdr_display": "SDR",
+     "index": 0,
+     "language": "und",
+     "level": "3.0",
+     "profile": "Constrained Baseline",
+     "resolution_display": "640x360"
+    }
+   ],
+   "width": 640
+  },
+  "verify_sdr_tag": true
+ },
+ "vp9.webm": {
+  "duration": 4.008,
+  "frames": [
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ],
+   [
+    320,
+    180
+   ]
+  ],
+  "previewable": true,
+  "probe": {
+   "audio": "Opus",
+   "audio_bitrate": null,
+   "audio_channels": "Mono",
+   "audio_sample_rate": "48000 Hz",
+   "audio_streams": [
+    {
+     "bitrate_display": null,
+     "channels": 1,
+     "channels_display": "Mono",
+     "codec": "Opus",
+     "index": 0,
+     "language": null,
+     "lossless": false,
+     "sample_rate": 48000,
+     "sample_rate_display": "48000 Hz"
+    }
+   ],
+   "chapters": null,
+   "container": ".webm",
+   "creation_time": null,
+   "duration": 4.008,
+   "fps": 24.0,
+   "has_audio": true,
+   "has_video": true,
+   "hdr": false,
+   "height": 360,
+   "mastering_max_nits": null,
+   "mastering_min_nits": null,
+   "max_cll": null,
+   "max_fall": null,
+   "title": null,
+   "video": "VP9",
+   "video_level": null,
+   "video_profile": "Profile 0",
+   "video_streams": [
+    {
+     "bitrate_display": null,
+     "codec": "VP9",
+     "codec_name": "VP9",
+     "color_format": "8-bit 4:2:0",
+     "fps": 24.0,
+     "fps_display": "24",
+     "hdr": false,
+     "hdr_display": "SDR",
+     "index": 0,
+     "language": null,
+     "level": null,
+     "profile": "Profile 0",
+     "resolution_display": "640x360"
+    }
+   ],
+   "width": 640
+  }
+ }
+}

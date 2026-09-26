@@ -98,6 +98,31 @@ than the rest of the page) trailing under the License section's own notice box a
 under everything else, not a fourth row alongside GitHub/Issue Tracker/License. A build with
 `--enable-nonfree` must never be bundled.
 
+## Tests
+
+```bash
+python tests/run_all.py
+```
+
+**Run it before and after any change that isn't comment-only** (~30s; `--update` re-records the
+goldens after an *intended* change; `python tests/run_all.py ui jobs` runs a subset). Each check runs
+in its own process against a sandbox: the log goes to `%TEMP%\llamamxd-tests`, the UI check uses its
+own settings.json / presets.json, and fixture clips are generated there by the bundled ffmpeg.
+- `check_commands` — golden ffmpeg argv for 25 Encode + 6 Mux settings, and the yt-dlp plan + argv for
+  all 259 Downloader dropdown combinations on a stand-in YouTube format list. `-fps_mode`,
+  libplacebo, the GPU (NVIDIA / NVENC) and tool paths are pinned, so the goldens hold on any machine.
+- `check_core` — goldens of `formats` (the whole cascade), `naming`, `keybinds`, and `probe_media` /
+  `probe_duration` / preview frames on the fixtures (SDR, multi-audio, HDR10, audio-only, VP9).
+- `check_ui` — the real `MainWindow` offscreen: every visible widget's rect on 13 pages (plus the
+  no-file state) at 1.0 / 1.5 / 2.0x, the squeeze scan, and the Muxing / Encoding preview invariant.
+- `check_jobs` — real Mux / Encode jobs through `FfmpegJob`, their outputs probed (streams, languages,
+  length, each stream's start time); stop() mid-run; a failing job's reason.
+
+Each check was shown to fail on a deliberate one-line break. **Known issues** the goldens record as
+they are today: the About license box is 1px squeezed at 1.5x (reported as KNOWN), and an Encode with a
+trim *and* a Passthru audio track puts the copied track ~1s ahead of the re-encoded streams
+(`jobs.json`, `enc_multi_audio.mkv`'s `stream_starts`).
+
 ## Architecture
 
 ```

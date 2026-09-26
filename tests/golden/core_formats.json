@@ -1,0 +1,1069 @@
+{
+ "audio_bitrates_for": {
+  "AAC": [
+   "Select",
+   "96 kbps",
+   "128 kbps",
+   "192 kbps",
+   "256 kbps",
+   "320 kbps",
+   "384 kbps",
+   "448 kbps",
+   "512 kbps",
+   "640 kbps",
+   "768 kbps",
+   "1 Mbps",
+   "1.5 Mbps"
+  ],
+  "AC3": [
+   "Select",
+   "96 kbps",
+   "128 kbps",
+   "192 kbps",
+   "256 kbps",
+   "320 kbps",
+   "384 kbps",
+   "448 kbps",
+   "512 kbps",
+   "640 kbps",
+   "768 kbps",
+   "1 Mbps",
+   "1.5 Mbps"
+  ],
+  "ALAC": [],
+  "E-AC-3": [
+   "Select",
+   "96 kbps",
+   "128 kbps",
+   "192 kbps",
+   "256 kbps",
+   "320 kbps",
+   "384 kbps",
+   "448 kbps",
+   "512 kbps",
+   "640 kbps",
+   "768 kbps",
+   "1 Mbps",
+   "1.5 Mbps"
+  ],
+  "FLAC": [],
+  "MP3": [
+   "Select",
+   "96 kbps",
+   "128 kbps",
+   "192 kbps",
+   "256 kbps",
+   "320 kbps",
+   "384 kbps",
+   "448 kbps",
+   "512 kbps",
+   "640 kbps",
+   "768 kbps",
+   "1 Mbps",
+   "1.5 Mbps"
+  ],
+  "Opus": [
+   "Select",
+   "96 kbps",
+   "128 kbps",
+   "192 kbps",
+   "256 kbps",
+   "320 kbps",
+   "384 kbps",
+   "448 kbps",
+   "512 kbps",
+   "640 kbps",
+   "768 kbps",
+   "1 Mbps",
+   "1.5 Mbps"
+  ],
+  "PCM": [],
+  "Select": [],
+  "Vorbis": [
+   "Select",
+   "96 kbps",
+   "128 kbps",
+   "192 kbps",
+   "256 kbps",
+   "320 kbps",
+   "384 kbps",
+   "448 kbps",
+   "512 kbps",
+   "640 kbps",
+   "768 kbps",
+   "1 Mbps",
+   "1.5 Mbps"
+  ]
+ },
+ "bitrate_display_for": {
+  "0": null,
+  "128000": "128 kbps",
+  "1400000": "1.5 Mbps",
+  "160000": "128 kbps",
+  "231000": "256 kbps",
+  "5000000": "1.5 Mbps",
+  "64000": "96 kbps",
+  "700000": "640 kbps",
+  "None": null
+ },
+ "channels": {
+  "0": null,
+  "1": "Mono",
+  "10": "9.1",
+  "11": null,
+  "2": "Stereo",
+  "3": null,
+  "4": null,
+  "5": null,
+  "6": "5.1",
+  "7": "5.2",
+  "8": "7.1",
+  "9": "7.2"
+ },
+ "containers": [
+  ".mp4",
+  ".mkv",
+  ".mov",
+  ".webm"
+ ],
+ "containers_for": {
+  "AV1+AAC": [
+   ".mp4",
+   ".mkv"
+  ],
+  "AV1+AC3": [
+   ".mp4",
+   ".mkv"
+  ],
+  "AV1+DTS": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "AV1+Dolby TrueHD": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "AV1+FLAC": [
+   ".mkv"
+  ],
+  "AV1+None": [
+   ".mp4",
+   ".mkv",
+   ".webm"
+  ],
+  "AV1+Opus": [
+   ".mkv",
+   ".webm"
+  ],
+  "AV1+PCM": [
+   ".mkv"
+  ],
+  "H.264+AAC": [
+   ".mp4",
+   ".mkv",
+   ".mov"
+  ],
+  "H.264+AC3": [
+   ".mp4",
+   ".mkv",
+   ".mov"
+  ],
+  "H.264+DTS": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "H.264+Dolby TrueHD": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "H.264+FLAC": [
+   ".mkv"
+  ],
+  "H.264+None": [
+   ".mp4",
+   ".mkv",
+   ".mov"
+  ],
+  "H.264+Opus": [
+   ".mkv"
+  ],
+  "H.264+PCM": [
+   ".mkv",
+   ".mov"
+  ],
+  "H.265+AAC": [
+   ".mp4",
+   ".mkv",
+   ".mov"
+  ],
+  "H.265+AC3": [
+   ".mp4",
+   ".mkv",
+   ".mov"
+  ],
+  "H.265+DTS": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "H.265+Dolby TrueHD": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "H.265+FLAC": [
+   ".mkv"
+  ],
+  "H.265+None": [
+   ".mp4",
+   ".mkv",
+   ".mov"
+  ],
+  "H.265+Opus": [
+   ".mkv"
+  ],
+  "H.265+PCM": [
+   ".mkv",
+   ".mov"
+  ],
+  "MPEG-2+AAC": [
+   ".mp4",
+   ".mkv"
+  ],
+  "MPEG-2+AC3": [
+   ".mp4",
+   ".mkv"
+  ],
+  "MPEG-2+DTS": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "MPEG-2+Dolby TrueHD": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "MPEG-2+FLAC": [
+   ".mkv"
+  ],
+  "MPEG-2+None": [
+   ".mp4",
+   ".mkv"
+  ],
+  "MPEG-2+Opus": [
+   ".mkv"
+  ],
+  "MPEG-2+PCM": [
+   ".mkv"
+  ],
+  "None+AAC": [
+   ".mp4",
+   ".mkv",
+   ".mov"
+  ],
+  "None+AC3": [
+   ".mp4",
+   ".mkv",
+   ".mov"
+  ],
+  "None+DTS": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "None+Dolby TrueHD": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "None+FLAC": [
+   ".mkv"
+  ],
+  "None+None": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "None+Opus": [
+   ".mkv",
+   ".webm"
+  ],
+  "None+PCM": [
+   ".mkv",
+   ".mov"
+  ],
+  "ProRes+AAC": [
+   ".mkv",
+   ".mov"
+  ],
+  "ProRes+AC3": [
+   ".mkv",
+   ".mov"
+  ],
+  "ProRes+DTS": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "ProRes+Dolby TrueHD": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "ProRes+FLAC": [
+   ".mkv"
+  ],
+  "ProRes+None": [
+   ".mkv",
+   ".mov"
+  ],
+  "ProRes+Opus": [
+   ".mkv"
+  ],
+  "ProRes+PCM": [
+   ".mkv",
+   ".mov"
+  ],
+  "VP9+AAC": [
+   ".mkv"
+  ],
+  "VP9+AC3": [
+   ".mkv"
+  ],
+  "VP9+DTS": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "VP9+Dolby TrueHD": [
+   ".mp4",
+   ".mkv",
+   ".mov",
+   ".webm"
+  ],
+  "VP9+FLAC": [
+   ".mkv"
+  ],
+  "VP9+None": [
+   ".mkv",
+   ".webm"
+  ],
+  "VP9+Opus": [
+   ".mkv",
+   ".webm"
+  ],
+  "VP9+PCM": [
+   ".mkv"
+  ]
+ },
+ "fps_args": {
+  "12": [
+   "12",
+   12.0
+  ],
+  "120": [
+   "120",
+   120.0
+  ],
+  "23.976": [
+   "24000/1001",
+   23.976023976023978
+  ],
+  "24": [
+   "24",
+   24.0
+  ],
+  "25": [
+   "25",
+   25.0
+  ],
+  "29.97": [
+   "30000/1001",
+   29.97002997002997
+  ],
+  "30": [
+   "30",
+   30.0
+  ],
+  "48": [
+   "48",
+   48.0
+  ],
+  "50": [
+   "50",
+   50.0
+  ],
+  "59.94": [
+   "60000/1001",
+   59.94005994005994
+  ],
+  "60": [
+   "60",
+   60.0
+  ],
+  "8": [
+   "8",
+   8.0
+  ],
+  "Source": [
+   null,
+   null
+  ]
+ },
+ "fps_values_for": {
+  "144": [
+   "Source",
+   "120",
+   "60",
+   "59.94",
+   "50",
+   "48",
+   "30",
+   "29.97",
+   "25",
+   "24",
+   "23.976",
+   "12",
+   "8"
+  ],
+  "23.976": [
+   "Source",
+   "24",
+   "23.976",
+   "12",
+   "8"
+  ],
+  "24": [
+   "Source",
+   "24",
+   "23.976",
+   "12",
+   "8"
+  ],
+  "29.97": [
+   "Source",
+   "30",
+   "29.97",
+   "25",
+   "24",
+   "23.976",
+   "12",
+   "8"
+  ],
+  "30": [
+   "Source",
+   "30",
+   "29.97",
+   "25",
+   "24",
+   "23.976",
+   "12",
+   "8"
+  ],
+  "59.94": [
+   "Source",
+   "60",
+   "59.94",
+   "50",
+   "48",
+   "30",
+   "29.97",
+   "25",
+   "24",
+   "23.976",
+   "12",
+   "8"
+  ],
+  "60": [
+   "Source",
+   "60",
+   "59.94",
+   "50",
+   "48",
+   "30",
+   "29.97",
+   "25",
+   "24",
+   "23.976",
+   "12",
+   "8"
+  ],
+  "8": [
+   "Source",
+   "8"
+  ],
+  "None": [
+   "Source",
+   "120",
+   "60",
+   "59.94",
+   "50",
+   "48",
+   "30",
+   "29.97",
+   "25",
+   "24",
+   "23.976",
+   "12",
+   "8"
+  ]
+ },
+ "lossless": {
+  "aac/LC": false,
+  "dts/DTS": false,
+  "dts/DTS-HD HRA": false,
+  "dts/DTS-HD MA": true,
+  "dts/DTS-HD MA + DTS:X": true,
+  "flac/None": true,
+  "mlp/None": true,
+  "pcm_s24le/None": true,
+  "truehd/None": true
+ },
+ "passthru_only": {
+  "AAC": false,
+  "DTS": true,
+  "Dolby TrueHD": true
+ },
+ "per_container": {
+  ".avi": {
+   "audio": [
+    "Select",
+    "AAC",
+    "AC3",
+    "E-AC-3",
+    "MP3",
+    "FLAC",
+    "Opus",
+    "Vorbis",
+    "ALAC",
+    "PCM"
+   ],
+   "video": [
+    "Select",
+    "H.264",
+    "H.265",
+    "MPEG-4",
+    "MPEG-2",
+    "VP8",
+    "VP9",
+    "AV1",
+    "ProRes",
+    "DNxHR",
+    "FFV1",
+    "CineForm"
+   ]
+  },
+  ".mkv": {
+   "audio": [
+    "Select",
+    "AAC",
+    "AC3",
+    "E-AC-3",
+    "MP3",
+    "FLAC",
+    "Opus",
+    "Vorbis",
+    "ALAC",
+    "PCM"
+   ],
+   "video": [
+    "Select",
+    "H.264",
+    "H.265",
+    "MPEG-4",
+    "MPEG-2",
+    "VP8",
+    "VP9",
+    "AV1",
+    "ProRes",
+    "DNxHR",
+    "FFV1",
+    "CineForm"
+   ]
+  },
+  ".mov": {
+   "audio": [
+    "Select",
+    "AAC",
+    "AC3",
+    "E-AC-3",
+    "ALAC",
+    "PCM"
+   ],
+   "video": [
+    "Select",
+    "H.264",
+    "H.265",
+    "MPEG-4",
+    "ProRes",
+    "DNxHR",
+    "CineForm"
+   ]
+  },
+  ".mp4": {
+   "audio": [
+    "Select",
+    "AAC",
+    "AC3",
+    "E-AC-3",
+    "MP3",
+    "ALAC"
+   ],
+   "video": [
+    "Select",
+    "H.264",
+    "H.265",
+    "MPEG-4",
+    "MPEG-2",
+    "AV1"
+   ]
+  },
+  ".webm": {
+   "audio": [
+    "Select",
+    "Opus",
+    "Vorbis"
+   ],
+   "video": [
+    "Select",
+    "VP8",
+    "VP9",
+    "AV1"
+   ]
+  }
+ },
+ "per_encoder": {
+  "AV1": {
+   "levels": [
+    "4.0",
+    "5.0",
+    "5.1",
+    "6.0"
+   ],
+   "profiles": [
+    "Main",
+    "High",
+    "Professional"
+   ],
+   "quality": {
+    "default": 35,
+    "hi": 63,
+    "high": "Placebo",
+    "kind": "crf",
+    "label": "Quality (CRF)",
+    "lo": 0,
+    "low": "Low"
+   },
+   "speed": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8"
+   ],
+   "speed_av1_range": [
+    "-2",
+    "-1",
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+    "13"
+   ],
+   "speed_default": "8",
+   "speed_kind": "preset"
+  },
+  "CineForm": {
+   "levels": [],
+   "profiles": [
+    "Low",
+    "Low+",
+    "Medium",
+    "Medium+",
+    "High",
+    "High+",
+    "Film 1",
+    "Film 1+",
+    "Film 1.5",
+    "Film 2",
+    "Film 2+",
+    "Film 3",
+    "Film 3+"
+   ],
+   "quality": null,
+   "speed": [],
+   "speed_av1_range": [],
+   "speed_default": null,
+   "speed_kind": null
+  },
+  "DNxHR": {
+   "levels": [],
+   "profiles": [
+    "LQ",
+    "SQ",
+    "HQ",
+    "HQX",
+    "444"
+   ],
+   "quality": null,
+   "speed": [],
+   "speed_av1_range": [],
+   "speed_default": null,
+   "speed_kind": null
+  },
+  "FFV1": {
+   "levels": [],
+   "profiles": [],
+   "quality": null,
+   "speed": [],
+   "speed_av1_range": [],
+   "speed_default": null,
+   "speed_kind": null
+  },
+  "H.264": {
+   "levels": [
+    "3.0",
+    "3.1",
+    "4.0",
+    "4.1",
+    "4.2",
+    "5.0",
+    "5.1",
+    "5.2"
+   ],
+   "profiles": [
+    "High",
+    "Main",
+    "Baseline",
+    "High 10"
+   ],
+   "quality": {
+    "default": 22,
+    "hi": 51,
+    "high": "Placebo",
+    "kind": "crf",
+    "label": "Quality (CRF)",
+    "lo": 0,
+    "low": "Low"
+   },
+   "speed": [
+    "ultrafast",
+    "superfast",
+    "veryfast",
+    "faster",
+    "fast",
+    "medium",
+    "slow",
+    "slower",
+    "veryslow",
+    "placebo"
+   ],
+   "speed_av1_range": [
+    "ultrafast",
+    "superfast",
+    "veryfast",
+    "faster",
+    "fast",
+    "medium",
+    "slow",
+    "slower",
+    "veryslow",
+    "placebo"
+   ],
+   "speed_default": "fast",
+   "speed_kind": "preset"
+  },
+  "H.265": {
+   "levels": [
+    "3.1",
+    "4.0",
+    "4.1",
+    "5.0",
+    "5.1",
+    "5.2",
+    "6.0"
+   ],
+   "profiles": [
+    "Main",
+    "Main 10",
+    "Main 12"
+   ],
+   "quality": {
+    "default": 28,
+    "hi": 51,
+    "high": "Placebo",
+    "kind": "crf",
+    "label": "Quality (CRF)",
+    "lo": 0,
+    "low": "Low"
+   },
+   "speed": [
+    "ultrafast",
+    "superfast",
+    "veryfast",
+    "faster",
+    "fast",
+    "medium",
+    "slow",
+    "slower",
+    "veryslow",
+    "placebo"
+   ],
+   "speed_av1_range": [
+    "ultrafast",
+    "superfast",
+    "veryfast",
+    "faster",
+    "fast",
+    "medium",
+    "slow",
+    "slower",
+    "veryslow",
+    "placebo"
+   ],
+   "speed_default": "fast",
+   "speed_kind": "preset"
+  },
+  "MPEG-2": {
+   "levels": [
+    "Low",
+    "Main",
+    "High-1440",
+    "High"
+   ],
+   "profiles": [
+    "Simple",
+    "Main",
+    "High"
+   ],
+   "quality": {
+    "default": 5,
+    "hi": 31,
+    "high": "High",
+    "kind": "qscale",
+    "label": "Quality (qscale)",
+    "lo": 1,
+    "low": "Low"
+   },
+   "speed": [],
+   "speed_av1_range": [],
+   "speed_default": null,
+   "speed_kind": null
+  },
+  "MPEG-4": {
+   "levels": [],
+   "profiles": [
+    "Simple",
+    "Advanced Simple"
+   ],
+   "quality": {
+    "default": 5,
+    "hi": 31,
+    "high": "High",
+    "kind": "qscale",
+    "label": "Quality (qscale)",
+    "lo": 1,
+    "low": "Low"
+   },
+   "speed": [],
+   "speed_av1_range": [],
+   "speed_default": null,
+   "speed_kind": null
+  },
+  "ProRes": {
+   "levels": [],
+   "profiles": [
+    "Proxy",
+    "LT",
+    "422",
+    "422 HQ",
+    "4444",
+    "4444 XQ"
+   ],
+   "quality": null,
+   "speed": [],
+   "speed_av1_range": [],
+   "speed_default": null,
+   "speed_kind": null
+  },
+  "Select": {
+   "levels": [],
+   "profiles": [],
+   "quality": null,
+   "speed": [],
+   "speed_av1_range": [],
+   "speed_default": null,
+   "speed_kind": null
+  },
+  "VP8": {
+   "levels": [],
+   "profiles": [],
+   "quality": {
+    "default": 30,
+    "hi": 63,
+    "high": "Placebo",
+    "kind": "crf",
+    "label": "Quality (CRF)",
+    "lo": 0,
+    "low": "Low"
+   },
+   "speed": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "speed_av1_range": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "speed_default": "4",
+   "speed_kind": "cpu-used"
+  },
+  "VP9": {
+   "levels": [],
+   "profiles": [
+    "0",
+    "1",
+    "2",
+    "3"
+   ],
+   "quality": {
+    "default": 31,
+    "hi": 63,
+    "high": "Placebo",
+    "kind": "crf",
+    "label": "Quality (CRF)",
+    "lo": 0,
+    "low": "Low"
+   },
+   "speed": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8"
+   ],
+   "speed_av1_range": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8"
+   ],
+   "speed_default": "4",
+   "speed_kind": "cpu-used"
+  }
+ },
+ "resolutions_for": {
+  "1080": [
+   "Source",
+   "1080p",
+   "720p",
+   "480p",
+   "360p"
+  ],
+  "1440": [
+   "Source",
+   "1440p",
+   "1080p",
+   "720p",
+   "480p",
+   "360p"
+  ],
+  "2160": [
+   "Source",
+   "2160p",
+   "1440p",
+   "1080p",
+   "720p",
+   "480p",
+   "360p"
+  ],
+  "360": [
+   "Source",
+   "360p"
+  ],
+  "4320": [
+   "Source",
+   "2160p",
+   "1440p",
+   "1080p",
+   "720p",
+   "480p",
+   "360p"
+  ],
+  "719": [
+   "Source",
+   "480p",
+   "360p"
+  ],
+  "720": [
+   "Source",
+   "720p",
+   "480p",
+   "360p"
+  ],
+  "None": [
+   "Source",
+   "2160p",
+   "1440p",
+   "1080p",
+   "720p",
+   "480p",
+   "360p"
+  ]
+ },
+ "sample_rates": {
+  "22050": null,
+  "44100": "44100 Hz",
+  "48000": "48000 Hz",
+  "96000": "96000 Hz"
+ }
+}
