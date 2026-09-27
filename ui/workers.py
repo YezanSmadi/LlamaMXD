@@ -1,14 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Off-thread work with results delivered back on the GUI thread.
-
-A signal emitted from a worker thread is delivered as a *queued* call on the
-receiver's thread, so each background job (thumbnails, probes, HDR renders,
-yt-dlp fetches, the Deno check) is just "run this, then call that" — no poll
-loop, no pending count.
-
-Worker functions must never touch a widget; everything they return crosses
-back through `run_async`'s callback."""
+"""Off-thread work with results delivered on the GUI thread: a signal emitted from a worker
+arrives as a queued call, so each background job is "run this, then call that". Worker
+functions never touch a widget."""
 import threading
 
 from PySide6.QtCore import QObject, Signal
@@ -62,6 +56,12 @@ def pil_to_qimage(image):
     unlike QPixmap, QImage isn't tied to the GUI thread)."""
     if image is None:
         return None
+    if image.mode not in ("RGBA", "LA", "PA", "P") and "transparency" not in image.info:
+        # No alpha: RGB32, Qt's native format. It scales ~10x faster than RGB888 or RGBA8888
+        # (the carousel rescales on every resize step) and becomes a QPixmap without conversion.
+        rgb = image.convert("RGB")
+        return QImage(rgb.tobytes("raw", "BGRX"), rgb.width, rgb.height, rgb.width * 4,
+                      QImage.Format_RGB32).copy()
     rgba = image.convert("RGBA")
     data = rgba.tobytes("raw", "RGBA")
     return QImage(data, rgba.width, rgba.height, rgba.width * 4, QImage.Format_RGBA8888).copy()

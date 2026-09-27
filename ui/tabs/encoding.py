@@ -1,44 +1,36 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Encoding: the superset tab — Overview (container, trim, presets, rundown),
-Video (encoder / profile / level / preset, quality, HDR→SDR, Strip Video) and
-Audio (multi-stream: track, codec, passthru, bitrate, channels, sample rate,
-Strip Audio).
+"""Encoding: Overview (container, trim, presets, rundown), Video (encoder, profile, level,
+preset, resolution, FPS, quality, HDR→SDR, Strip), multi-stream Audio, Subtitles (copied or
+converted, language, Default / Forced, one burned into the picture) and Chapters. Never a silent
+copy of video or audio: `Select` resolves to the source's codec once probed, and a stream left on
+it blocks the job."""
+import os
 
-Every derived control state is decided by one function, `_sync_controls`.
-Encoding never falls back to a silent stream copy: `Select` auto-resolves to
-the source's own codec once probed, and `_validate_specific` blocks a
-present-or-unknown stream left on `Select`."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSlider, QVBoxLayout, QWidget
 
 from core import formats
-from core.utilities import av1_preset_range, libplacebo_problem_text, supports_libplacebo
+from core.capabilities import av1_preset_range, libplacebo_checked, libplacebo_problem_text, supports_libplacebo
 from ui import scale
-from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow
-from ui.widgets.controls import (
-    NO_OPTION,
-    CheckBox,
-    ClickableLabel,
-    Dropdown,
-    ScaledLabel,
-    Switch,
-    button,
-    field_label,
-    labeled,
-    set_enabled,
-)
-from ui.widgets.dialogs import choose_audio_streams, show_message
+from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow, set_line_text
+from ui.widgets.controls import button, field_label, IconButton, labeled, set_enabled
+from ui.widgets.dropdown import Dropdown, NO_OPTION
+from ui.widgets.text import ClickableLabel, ScaledLabel
+from ui.widgets.toggles import CheckBox, StripButton, Switch
+from ui.widgets.dialogs import choose_streams, show_message
 from ui.widgets.tooltip import tip
 from ui.tips import (
     AUDIO_CODEC_TIPS,
+    DEFAULT_TIP,
+    FORCED_TIP,
+    LANGUAGE_TIP,
     SELECT_AUDIO_CODEC_TIP,
     SELECT_VIDEO_CODEC_TIP,
     VIDEO_CODEC_TIPS,
 )
 
-# The quality slider's range when the encoder has no spec of its own
-# (`Select`) — it stays usable rather than freezing on a stale range.
+# The slider's range with no encoder spec (`Select`), so it stays usable.
 _FALLBACK_QUALITY = {
     "kind": "crf", "label": "Quality (CRF)", "lo": 0, "hi": 51,
     "default": 22, "low": "Low", "high": "Placebo",
@@ -61,6 +53,20 @@ _RESOLUTION_TIP = ("Downscales the video, keeping its aspect ratio — the width
                     "only rungs at or below the source's own height are offered.")
 _FPS_TIP = ("Retimes the video to a lower frame rate, duplicating or dropping frames as "
             "needed. Never speeds up: only rates at or below the source's own are offered.")
+_SUBTITLE_TRACK_TIP = "The subtitle track the settings below edit."
+_CHOOSE_SUBTITLES_TIP = ("Pick which subtitle tracks the output includes and in what order (drag to reorder), "
+                         "and add tracks from other files (.srt, .ass, .vtt, .sup...).")
+_BURN_TIP = ("Paints this track into the picture, so it shows on every player and can't be turned off. "
+             "Only one track can be burned in; it isn't also kept as a separate track.")
+_UNDO_TIP = "Undoes the last change here — Choose Stream(s), or Strip/Return."
+_REDO_TIP = "Redoes what Undo just took back."
+_HISTORY_LIMIT = 50
+# The list a kind's Choose Stream(s) edits (Video has none — just its own Strip/Return) and the
+# widgets `_on_strip_clicked`/`_sync_controls` reach by kind.
+_STRIP_INCLUDED_ATTR = {"audio": "_audio_included", "subtitle": "_sub_included"}
+_STRIP_CHECK_ATTR = {"video": "strip_video_check", "audio": "strip_audio_check", "subtitle": "strip_subtitles_check"}
+_UNDO_BTN_ATTR = {"video": "video_undo_btn", "audio": "audio_undo_btn", "subtitle": "subtitle_undo_btn"}
+_REDO_BTN_ATTR = {"video": "video_redo_btn", "audio": "audio_redo_btn", "subtitle": "subtitle_redo_btn"}
 
 
 class EncodingTab(MediaTab):
@@ -76,52 +82,72 @@ class EncodingTab(MediaTab):
         self._quality_spec = None
         # The auto-picked Encoder (None once the user picks one themselves).
         self._auto_encoder = formats.SELECT
-        # Multi-stream audio. `_audio_list` is every audio stream on offer, in the
-        # order the Choose Stream(s) popup shows them (which is the output's order):
-        # the source file's own (seeded from the probe) then any added from other
-        # files, each `{"id": "src:0" | "ext:ab12cd34", "source": "primary" |
-        # "external", "file": path | None, "index": N (0-based among that file's own
-        # audio streams — what `-map` addresses), "stream": the probe's description
-        # of it, "name": the other file's name | None}` — the same shape Muxing's
-        # track lists use. `_audio_included` is the ids that go into the output, the
-        # active one is what the four shared controls are editing, and every
-        # stream's own settings are kept by id (so switching tracks never loses an
-        # edit). `_audio_track_ids` maps the Audio Track dropdown's labels back.
+        # Multi-stream audio. `_audio_list`: every stream on offer in the Choose Stream(s)
+        # order (= the output's), each shaped like Muxing's track entries. `_audio_included`:
+        # the ids that go into the output. Each stream's settings are kept by id, so switching
+        # tracks never loses an edit; `_audio_track_ids` maps the dropdown's labels back.
         self._audio_list = []
         self._audio_included = set()
         self._active_audio_id = None
         self._audio_stream_settings = {}
         self._audio_track_ids = {}
         self._audio_streams_source = None
-        # HDR→SDR preview: which file this tab is showing and its raw frames
-        # (the tone-mapped cache lives on the app).
+        # Subtitles, as audio: the list on offer, the included ids, the one the controls show,
+        # each one's {"language", "default", "forced"} by id, and the one burned in (or None).
+        self._sub_list = []
+        self._sub_included = set()
+        self._active_sub_id = None
+        self._sub_settings = {}
+        self._sub_track_ids = {}
+        self._burn_id = None
+        self._subs_source = None
+        # Undo/redo, per panel: Video's own Strip/Return, Audio's and Subtitles' Choose
+        # Stream(s) edits (add, remove, reorder, re-tick) and their own Strip/Return. Cleared
+        # whenever the file changes (a new file's streams aren't what an old step describes).
+        self._history = {kind: {"undo": [], "redo": []} for kind in ("video", "audio", "subtitle")}
+        self._video_history_source = None
+        # HDR→SDR preview: the file shown and its raw frames (the tone-mapped set is the app's).
         self._preview_path = None
         self._raw_frames = []
 
     # ------------------------------------------------------------------ #
     #  Panels
     # ------------------------------------------------------------------ #
+    def _strip_column(self, kind, label):
+        """Undo/Redo above the Strip/Return toggle, right-aligned — the shape the Video, Audio
+        and Subtitles panels' right column all end on (see `_on_strip_clicked`, `_undo`/`_redo`)."""
+        strip_btn = StripButton(label)
+        strip_btn.clicked.connect(lambda: self._on_strip_clicked(kind))
+        tip(strip_btn, STRIP_TIP)
+        half = (strip_btn.ref_width - 4) // 2
+        history_row, hl = hrow(spacing=4, align_bottom=False)
+        hl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        undo_btn = IconButton("undo", role="compact", width=half, height=24)
+        undo_btn.clicked.connect(lambda: self._undo(kind))
+        tip(undo_btn, _UNDO_TIP)
+        redo_btn = IconButton("redo", role="compact", width=half, height=24)
+        redo_btn.clicked.connect(lambda: self._redo(kind))
+        tip(redo_btn, _REDO_TIP)
+        hl.addWidget(undo_btn)
+        hl.addWidget(redo_btn)
+        column = QWidget()
+        cl = QVBoxLayout(column)
+        cl.setContentsMargins(0, 0, 0, 0)
+        scale.spacing(cl, 4)
+        cl.addWidget(history_row, 0, Qt.AlignRight)
+        cl.addWidget(strip_btn, 0, Qt.AlignRight)
+        return column, strip_btn, undo_btn, redo_btn
+
     def build_video(self):
-        """Encoder / Profile / Level / Encoder Preset / Resolution on one row
-        (Resolution's own column stacking FPS directly beneath it), with the
-        quality slider spanning the row beneath; the right column holds
-        HDR→SDR (top) then Strip Video (bottom), right-aligned."""
+        """Encoder / Profile / Level / Encoder Preset / Resolution on one row, captions and then
+        the quality slider with FPS beneath; HDR→SDR over Strip Video on the right."""
         page, left, right = self.stream_page()
         scale.spacing(left, 0)   # replaces stream_page()'s own 6
-        # This page has no width to spare: the dropdown row needs 527 reference
-        # pixels and the HDR column 112, in a 656px page. It was laid out to fit
-        # with 6px over when text was measured hinted; unhinted text (which is
-        # what is actually painted) measures ~1-3% wider — the dropdowns 6px
-        # more in all, the HDR label 3px — which left it 3px short, so Qt
-        # squeezed the Profile box under its own dropdown and cut its arrow off
-        # (at every scale, since the shortfall scales too). The gutter between
-        # the columns (replacing stream_page()'s 20) and the HDR label/switch
-        # gap (below) give the 9px back.
+        # No width to spare: the dropdown row (527) and HDR column (112) share 656px, so the
+        # column gutter and the HDR label gap are tight. Re-run the squeeze scan after changes.
         scale.spacing(page.layout(), 14)
         row, rl = hrow(spacing=8)
-        # Each dropdown is sized to the longest entry it could ever show,
-        # across every encoder — not just whatever's legal right now — so
-        # picking a longer value never clips or resizes the box.
+        # Each dropdown fits the longest entry it could ever show, across every encoder.
         encoder_universe = [formats.SELECT] + list(formats.VIDEO_ENCODERS)
         profile_universe = [NO_OPTION] + [
             p for enc in formats.VIDEO_ENCODERS for p in formats.profiles_for(enc)
@@ -135,10 +161,7 @@ class EncodingTab(MediaTab):
         encoder_width = Dropdown.width_for(encoder_universe)
         self.encoder_menu = Dropdown([formats.SELECT], width=encoder_width)
         self.encoder_menu.picked.connect(self._on_encoder_change)
-        # MPEG-4's "Advanced Simple" is far longer than every other codec's
-        # widest profile ("Professional") — sizing for it would make every
-        # encoder's Profile box noticeably wider than Encoder/Level/Encoder
-        # Preset just to cover one rare legacy value, which elides instead.
+        # Except MPEG-4's long "Advanced Simple", which elides rather than widening every box.
         profile_width = Dropdown.width_for([p for p in profile_universe if p != "Advanced Simple"])
         self.profile_menu = Dropdown([NO_OPTION], width=profile_width)
         level_width = Dropdown.width_for(level_universe)
@@ -172,13 +195,8 @@ class EncodingTab(MediaTab):
         self.crf_label = field_label("Quality")
         self.crf_label.setAlignment(Qt.AlignCenter)
         tip(self.fps_menu, _FPS_TIP)
-        # "FPS:" sits on its own caption row beside "Quality (CRF): NN"
-        # (below) rather than stacked directly on top of the FPS dropdown
-        # in a `labeled()` box — keeping the dropdown itself a direct,
-        # un-wrapped sibling of `slider_row` in `quality_row` (below) is
-        # what keeps their vertical alignment identical to before this
-        # caption existed at all, rather than fighting to re-centre the
-        # slider against a taller box.
+        # "FPS:" sits in the caption row, so the dropdown stays a direct sibling of the slider
+        # and they align like two plain controls.
         self.fps_label = field_label("FPS:")
         scale.fixed(self.fps_label, w=fps_width)
         caption_row, cpl = hrow(spacing=8, align_bottom=False)
@@ -191,8 +209,7 @@ class EncodingTab(MediaTab):
         self.crf_high_label = ScaledLabel("Placebo")
         self.crf_high_label.setProperty("role", "muted")
         self.crf_high_label.setStyleSheet("font-size: 12px;")
-        # Inverted so worst quality sits left and best right, whichever scale
-        # (CRF or qscale — both count *down* toward better) is active.
+        # Inverted: CRF and qscale both count down toward better, so best sits on the right.
         self.crf_slider = QSlider(Qt.Horizontal)
         self.crf_slider.setInvertedAppearance(True)
         self.crf_slider.setFocusPolicy(Qt.NoFocus)
@@ -203,30 +220,17 @@ class EncodingTab(MediaTab):
         sr.addWidget(self.crf_low_label)
         sr.addWidget(self.crf_slider, 1)
         sr.addWidget(self.crf_high_label)
-        # Fixed to exactly span Encoder..Encoder Preset (not Resolution's own
-        # column to the right) — width alone, since its own row would
-        # otherwise stretch it to fill the full available width by default —
-        # so "Placebo" ends flush with Encoder Preset's own right edge
-        # rather than trailing off under a column the slider has nothing to
-        # do with. `crf_label` gets the identical width for the same reason,
-        # so "Quality (CRF): 22" centres over the slider itself rather than
-        # the wider Encoder..Resolution span `left`'s own column spans.
+        # Spans exactly Encoder..Encoder Preset, so "Placebo" ends under Encoder Preset;
+        # the caption gets the same width to centre over it.
         quality_width = encoder_width + profile_width + level_width + speed_width + 8 * 3
         scale.fixed(slider_row, w=quality_width)
         scale.fixed(self.crf_label, w=quality_width)
-        # FPS sits beside the slider, in the space its fixed width leaves
-        # under Resolution's own column — same 8px gap the row above uses
-        # before Resolution, and (Resolution's and FPS's value lists both
-        # happening to size to the same width) it lands exactly under
-        # Resolution's dropdown. Added as a direct, un-wrapped sibling of
-        # `slider_row` — not inside a `labeled()` box with its own caption
-        # — so the two vertically align exactly the way they did before FPS
-        # had a caption at all (the caption itself lives in `caption_row`
-        # above, not here).
+        # FPS beside the slider lands under Resolution (same width, same 8px gap).
         quality_row, ql = hrow(spacing=8, align_bottom=True)
         ql.addWidget(slider_row)
         ql.addWidget(self.fps_menu)
         left.addWidget(quality_row)
+        scale.spacer(left, 2)
 
         hdr_row, hl = hrow(spacing=5, align_bottom=False)
         self.hdr_label = ClickableLabel("HDRtoSDR")
@@ -238,20 +242,17 @@ class EncodingTab(MediaTab):
         tip(self.hdr_switch, _HDR_TIP)
         hl.addWidget(self.hdr_label)
         hl.addWidget(self.hdr_switch)
-        self.strip_video_check = CheckBox("Strip Video", color_key="stop")
-        self.strip_video_check.clicked.connect(self._on_control_change)
-        tip(self.strip_video_check, STRIP_TIP)
+        strip_column, self.strip_video_check, self.video_undo_btn, self.video_redo_btn = \
+            self._strip_column("video", "Video")
         scale.spacer(right, 26)   # aligns HDR with the dropdown row's top
         right.addWidget(hdr_row, 0, Qt.AlignRight)
         right.addStretch(1)
-        right.addWidget(self.strip_video_check, 0, Qt.AlignRight | Qt.AlignBottom)
+        right.addWidget(strip_column, 0, Qt.AlignRight)
         return page
 
     def build_audio(self):
-        """Audio Track + Choose Stream(s) + Passthru on one row; then Codec /
-        Bitrate / Channels / Sample Rate for whichever stream Track shows;
-        Strip Audio alone on the right. Each dropdown is sized to its longest
-        possible entry."""
+        """Audio Track + Choose Stream(s) + Passthru; then Codec / Bitrate / Channels / Sample
+        Rate for the stream Track shows; Strip Audio on the right."""
         page, left, right = self.stream_page()
         row1, r1 = hrow(spacing=8)
         track_universe = [f"Track 9 ({c})" for c in
@@ -265,9 +266,7 @@ class EncodingTab(MediaTab):
         tip(self.choose_streams_btn, _CHOOSE_STREAMS_TIP)
         r1.addWidget(self.choose_streams_btn, 0, Qt.AlignBottom)
 
-        # Passthru: its own caption above the checkbox, both centred, next
-        # to the stream picker it most directly relates to. On by default —
-        # a probed stream defaults to a plain copy, not a re-encode.
+        # Passthru, captioned, beside the stream picker. On by default: a stream starts as a copy.
         passthru = QWidget()
         pl = QVBoxLayout(passthru)
         scale.margins(pl, 0, 0, 0, 2)
@@ -308,13 +307,136 @@ class EncodingTab(MediaTab):
         left.addWidget(row2)
         scale.spacer(left, 2)
 
-        self.strip_audio_check = CheckBox("Strip Audio", color_key="stop")
-        self.strip_audio_check.clicked.connect(self._on_control_change)
-        tip(self.strip_audio_check, STRIP_TIP)
+        strip_column, self.strip_audio_check, self.audio_undo_btn, self.audio_redo_btn = \
+            self._strip_column("audio", "Audio")
         right.addStretch(1)
-        right.addWidget(self.strip_audio_check, 0, Qt.AlignRight)
-        scale.spacer(right, 4)
+        right.addWidget(strip_column, 0, Qt.AlignRight)
         return page
+
+    def build_subtitles(self):
+        """Subtitle Track + Choose Stream(s); then Language, Default, Forced and Burn In for the
+        track shown; Strip Subtitles on the right."""
+        page, left, right = self.stream_page()
+        row1, r1 = hrow(spacing=8)
+        self.sub_track_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(
+            [f"Track 9 ({c})" for c in formats.FFPROBE_SUBTITLE.values()]))
+        self.sub_track_menu.picked.connect(self._on_sub_track_change)
+        tip(self.sub_track_menu, _SUBTITLE_TRACK_TIP)
+        box, self.sub_track_label = labeled("Subtitle Track:", self.sub_track_menu)
+        r1.addWidget(box)
+        self.choose_subs_btn = button("Choose Stream(s)", width=130)
+        self.choose_subs_btn.clicked.connect(self._open_sub_picker)
+        tip(self.choose_subs_btn, _CHOOSE_SUBTITLES_TIP)
+        r1.addWidget(self.choose_subs_btn, 0, Qt.AlignBottom)
+        left.addWidget(row1)
+
+        row2, r2 = hrow(spacing=14)
+        self.sub_language_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(
+            list(formats.SUBTITLE_LANGUAGES.values())))
+        self.sub_language_menu.picked.connect(self._on_sub_setting_change)
+        tip(self.sub_language_menu, LANGUAGE_TIP)
+        box, self.sub_language_label = labeled("Language:", self.sub_language_menu)
+        r2.addWidget(box)
+        self.sub_default_check = CheckBox("Default")
+        self.sub_default_check.clicked.connect(lambda: self._on_sub_setting_change(flag="default"))
+        tip(self.sub_default_check, DEFAULT_TIP)
+        r2.addWidget(self.sub_default_check, 0, Qt.AlignBottom)
+        self.sub_forced_check = CheckBox("Forced")
+        self.sub_forced_check.clicked.connect(self._on_sub_setting_change)
+        tip(self.sub_forced_check, FORCED_TIP)
+        r2.addWidget(self.sub_forced_check, 0, Qt.AlignBottom)
+        self.sub_burn_check = CheckBox("Burn In")
+        self.sub_burn_check.clicked.connect(self._on_burn_toggle)
+        tip(self.sub_burn_check, _BURN_TIP)
+        r2.addWidget(self.sub_burn_check, 0, Qt.AlignBottom)
+        left.addWidget(row2)
+        scale.spacer(left, 2)
+
+        strip_column, self.strip_subtitles_check, self.subtitle_undo_btn, self.subtitle_redo_btn = \
+            self._strip_column("subtitle", "Subtitles")
+        right.addStretch(1)
+        right.addWidget(strip_column, 0, Qt.AlignRight)
+        return page
+
+    # ------------------------------------------------------------------ #
+    #  Undo / redo, per panel (Video's own Strip/Return; Audio's and Subtitles' Choose
+    #  Stream(s) edits and their own Strip/Return)
+    # ------------------------------------------------------------------ #
+    def _snapshot(self, kind):
+        """This panel's state now, for one undo/redo step."""
+        if kind == "video":
+            return {"strip": self.strip_video_check.isChecked()}
+        if kind == "audio":
+            return {"list": list(self._audio_list), "included": set(self._audio_included),
+                    "active": self._active_audio_id,
+                    "settings": {i: dict(v) for i, v in self._audio_stream_settings.items()},
+                    "strip": self.strip_audio_check.isChecked()}
+        return {"list": list(self._sub_list), "included": set(self._sub_included),
+                "active": self._active_sub_id,
+                "settings": {i: dict(v) for i, v in self._sub_settings.items()},
+                "burn_id": self._burn_id, "strip": self.strip_subtitles_check.isChecked()}
+
+    def _restore(self, kind, snap):
+        """A snapshot from `_snapshot` becomes the panel's state again."""
+        if kind == "video":
+            self.strip_video_check.setChecked(snap["strip"])
+        elif kind == "audio":
+            self._audio_list = list(snap["list"])
+            self._audio_included = set(snap["included"])
+            self._active_audio_id = snap["active"]
+            self._audio_stream_settings = {i: dict(v) for i, v in snap["settings"].items()}
+            self.strip_audio_check.setChecked(snap["strip"])
+            self._reactivate_audio_stream()
+            self._load_active_audio_stream()
+        else:
+            self._sub_list = list(snap["list"])
+            self._sub_included = set(snap["included"])
+            self._active_sub_id = snap["active"]
+            self._sub_settings = {i: dict(v) for i, v in snap["settings"].items()}
+            self._burn_id = snap["burn_id"]
+            self.strip_subtitles_check.setChecked(snap["strip"])
+        self._sync_controls()
+
+    def _push_history(self, kind, snapshot=None):
+        """Keep `snapshot` (default: the panel now) as the next undo step; clears redo."""
+        history = self._history[kind]
+        history["undo"].append(snapshot if snapshot is not None else self._snapshot(kind))
+        del history["undo"][:-_HISTORY_LIMIT]
+        history["redo"].clear()
+
+    def _undo(self, kind):
+        self._travel(kind, "undo", "redo")
+
+    def _redo(self, kind):
+        self._travel(kind, "redo", "undo")
+
+    def _travel(self, kind, take, keep):
+        history = self._history[kind]
+        if not history[take]:
+            return
+        history[keep].append(self._snapshot(kind))
+        self._restore(kind, history[take].pop())
+
+    def _on_strip_clicked(self, kind):
+        """Strip/Return was clicked. Returning from a Choose Stream(s) edit that left nothing
+        included plays back as an undo instead of a bare toggle — un-stripping an empty
+        selection would otherwise bring nothing back — and the Undo button visibly takes the
+        click."""
+        check = getattr(self, _STRIP_CHECK_ATTR[kind])
+        included_attr = _STRIP_INCLUDED_ATTR.get(kind)
+        emptied = included_attr is not None and not getattr(self, included_attr)
+        history = self._history[kind]
+        if not check.isChecked() and emptied and history["undo"]:
+            # The click already flipped `check` to False; put it back before undo's own snapshot
+            # of "now" is taken, so the state Redo would bring back is the stripped-empty one,
+            # not this click's own half-finished toggle.
+            check.setChecked(True)
+            getattr(self, _UNDO_BTN_ATTR[kind]).animateClick()
+            return
+        prior = self._snapshot(kind)
+        prior["strip"] = not check.isChecked()
+        self._push_history(kind, prior)
+        self._on_control_change()
 
     # ------------------------------------------------------------------ #
     #  Change handlers
@@ -340,72 +462,66 @@ class EncodingTab(MediaTab):
     def _on_hdr_toggle(self, *_):
         self._sync_controls()
         self._apply_preview_frames()
-        if self.hdr_switch.isChecked() and self.app.hdr_frames_path != self._preview_path:
-            self.app.start_hdr_render(self._preview_path)
+        self._follow_hdr_switch()
+
+    def _follow_hdr_switch(self):
+        """On: the whole tone-mapped set, the frame on screen first. Off: back to the background
+        pace (the view and the next two)."""
+        if self.hdr_switch.isChecked():
+            self.app.media.start_hdr_render(self._preview_path)
+        else:
+            self.app.media.hdr_idle()
 
     def reset_hdr_preview(self):
-        """A new file is coming in (`MainWindow.update_global_file`): HDR→SDR
-        starts back off, so the app never renders a tone-mapped preview
-        nobody's asked for on the file replacing this one — the app
-        separately interrupts any render already in flight for the outgoing
-        file. Skips the raw/tone-mapped frame swap `_on_hdr_toggle` would do:
-        the carousel's about to be cleared for the new file anyway, so
-        re-showing the outgoing file's raw frames here would just flash."""
+        """A new file is coming: the old raw frames go, and HDR→SDR goes back off without
+        swapping frames (the carousel is about to be cleared anyway)."""
+        self._raw_frames = []
         if not self.hdr_switch.isChecked():
             return
         self.hdr_switch.setChecked(False)
         self._sync_controls()
 
     def on_thumbnails(self, frames):
-        """Wraps the app's raw frame broadcast so HDR→SDR can show a
-        tone-mapped set in its place."""
-        self._preview_path = self.app.current_file_path
+        """The app's raw frames, which HDR→SDR can replace with the tone-mapped set."""
+        self._preview_path = self.app.media.current_file_path
         self._raw_frames = frames
         self._apply_preview_frames()
-        if self.hdr_switch.isChecked() and self.app.hdr_frames_path != self._preview_path:
-            self.app.start_hdr_render(self._preview_path)
+        if self.hdr_switch.isChecked():
+            self.app.media.start_hdr_render(self._preview_path)
 
-    def on_hdr_frames_ready(self, path, _frames):
-        """The render finished. With the switch off there is nothing to change — the render
-        starts on import, so it usually lands while the raw previews are being scrubbed, and
-        re-applying them would reset the carousel under the user's cursor."""
+    def on_hdr_frames_ready(self, path, _index):
+        """A tone-mapped frame landed. Shown at once with the switch on; off, it waits (swapping
+        frames would disturb the carousel for nothing)."""
         if path == self._preview_path and self.hdr_switch.isChecked():
             self._apply_preview_frames()
 
     def _apply_preview_frames(self):
-        """The cached tone-mapped set when it's on, ready and for this file;
-        the raw set otherwise — keeping the scrub position across the swap."""
-        show_hdr = (
-            self.hdr_switch.isChecked()
-            and self.app.hdr_frames is not None
-            and self.app.hdr_frames_path == self._preview_path
-        )
-        frames = self.app.hdr_frames if show_hdr else self._raw_frames
-        if not frames:
-            return
-        index = self.carousel.current_index()
-        self.carousel.set_frames(frames)
-        self.carousel.sync_index(index)
+        """With the switch on, each frame's tone-mapped version where it's rendered (the raw one
+        until then), else the raw set; the scrub position carries over."""
+        frames = self._raw_frames
+        hdr = self.app.media.hdr_frames
+        if (self.hdr_switch.isChecked() and hdr and self.app.media.hdr_frames_path == self._preview_path
+                and len(hdr) == len(frames)):
+            frames = [tone_mapped or raw for tone_mapped, raw in zip(hdr, frames)]
+        if frames:
+            self.carousel.replace_frames(frames)
 
     # ------------------------------------------------------------------ #
     #  The single constraint pass
     # ------------------------------------------------------------------ #
     def _sync_controls(self, *_):
-        """**The only place derived UI state is decided.** Idempotent.
-          1. stream presence (strip / absent) — red tabs, locked strips
-          2. container → legal video/audio codec lists
-          3. video codec → profile / level / speed / quality kind and range;
-             source height → the Resolution ladder (never offers an upscale)
-          4. audio codec → whether a bitrate is ours to set (Passthru mirrors
-             the source instead)
-          5. enabled state for everything a removed, absent or unresolved
-             stream makes meaningless (HDR→SDR forced off when unavailable)
+        """The only place derived UI state is decided. Idempotent.
+          1. stream presence (strip / absent)
+          2. container -> legal codec lists
+          3. video codec -> profile / level / speed / quality; source height / fps -> ladders
+          4. audio codec -> bitrate (Passthru mirrors the source)
+          5. enabled state (HDR→SDR forced off when unavailable)
           6. the Overview rundown"""
         container = self.format_menu.value()
         self._update_format_tip()
         stripping_video = self.strip_video_check.isChecked()
         stripping_audio = self.strip_audio_check.isChecked()
-        info = self.app.media_info
+        info = self.app.media.info
         video_absent = info.get("has_video") is False
         audio_absent = info.get("has_audio") is False
 
@@ -415,8 +531,14 @@ class EncodingTab(MediaTab):
         self.sub_tab_bar.set_marked("Video", stripping_video or video_absent)
         self.sub_tab_bar.set_marked("Audio", stripping_audio or audio_absent)
         self.carousel.set_strip_state(stripping_video, stripping_audio or audio_absent)
+        self.video_undo_btn.setEnabled(bool(self._history["video"]["undo"]))
+        self.video_redo_btn.setEnabled(bool(self._history["video"]["redo"]))
+        self.audio_undo_btn.setEnabled(bool(self._history["audio"]["undo"]))
+        self.audio_redo_btn.setEnabled(bool(self._history["audio"]["redo"]))
 
-        # 2. A probe-only passthru codec (DTS / TrueHD) is never snapped away.
+        # 2. A picture subtitle track narrows the containers to Matroska. A probe-only passthru
+        # codec (DTS / TrueHD) is never snapped away.
+        container = self._retarget_format()
         self._retarget(self.encoder_menu, formats.video_codecs_for(container), "Encoder")
         encoder = self.encoder_menu.value()
         tip(self.encoder_menu, VIDEO_CODEC_TIPS.get(encoder, SELECT_VIDEO_CODEC_TIP))
@@ -453,8 +575,7 @@ class EncodingTab(MediaTab):
         passthru = self.passthru_check.isChecked()
         bitrates = [] if passthru else formats.audio_bitrates_for(audio_codec)
         if not passthru:
-            # A lossless codec has no bitrate to set — it says so, rather than
-            # the "—" of "nothing to pick yet" (the control stays disabled).
+            # A lossless codec says "Lossless" rather than the "—" of nothing picked.
             lossless = [formats.LOSSLESS] if formats.is_lossless_audio(audio_codec) else []
             self._retarget(self.audio_bitrate_menu, bitrates or lossless)
         else:
@@ -474,22 +595,21 @@ class EncodingTab(MediaTab):
         set_enabled(self.profile_menu, self.profile_label, video_live and bool(profiles))
         set_enabled(self.level_menu, self.level_label, video_live and bool(levels))
         set_enabled(self.speed_menu, self.speed_label, video_live and bool(speeds))
-        # BT.2390 via libplacebo is the only tone-mapping this app uses, and
-        # only for a source actually detected as HDR. Forced *off* (not just
-        # greyed) once unavailable, so nothing silently keeps tone-mapping.
+        # HDR→SDR needs an HDR source and libplacebo; forced off (not just greyed) otherwise.
         hdr_source = video_live and info.get("hdr") is True
-        hdr_enabled = hdr_source and supports_libplacebo()
+        # Greyed until the (background) libplacebo check has answered: asking here would run it.
+        checked = libplacebo_checked()
+        hdr_enabled = hdr_source and checked and supports_libplacebo()
         if not hdr_enabled and self.hdr_switch.isChecked():
             self.hdr_switch.setChecked(False)
             self._apply_preview_frames()
         set_enabled(self.hdr_switch, self.hdr_label, hdr_enabled)
-        # A greyed switch on an HDR file is exactly when "why" matters: say
-        # what's missing (ffmpeg build vs. Vulkan), not just the generic blurb.
-        hdr_tip = f"{_HDR_TIP}\n\nUnavailable: {libplacebo_problem_text()}" if hdr_source and not hdr_enabled else _HDR_TIP
+        # On a greyed HDR switch, say what's missing.
+        why = libplacebo_problem_text() if checked else "checking whether this PC can tone-map..."
+        hdr_tip = f"{_HDR_TIP}\n\nUnavailable: {why}" if hdr_source and not hdr_enabled else _HDR_TIP
         tip(self.hdr_label, hdr_tip)
         tip(self.hdr_switch, hdr_tip)
-        # Quality stays live on an unresolved Select; a codec with no rate
-        # control at all (ProRes / DNxHR / CineForm / FFV1) disables it.
+        # Live on an unresolved Select; off for codecs with no rate control.
         quality_live = video_live and (encoder == formats.SELECT or self._quality_spec is not None)
         for widget in (self.crf_slider, self.crf_label, self.crf_low_label, self.crf_high_label):
             widget.setEnabled(quality_live)
@@ -506,6 +626,9 @@ class EncodingTab(MediaTab):
         set_enabled(self.audio_samplerate_menu, self.audio_samplerate_label,
                     audio_live and not passthru and not audio_unresolved)
 
+        self._sync_subtitles(video_live)
+        self._sync_chapters()
+
         # 6.
         self._refresh_summary()
         self._apply_import_gate(extra=(
@@ -517,59 +640,60 @@ class EncodingTab(MediaTab):
             (self.audio_bitrate_menu, self.audio_bitrate_label),
             (self.audio_channels_menu, self.audio_channels_label),
             (self.audio_samplerate_menu, self.audio_samplerate_label),
+            (self.sub_track_menu, self.sub_track_label),
+            (self.sub_language_menu, self.sub_language_label),
         ))
-        # The non-dropdown controls, same no-file rule. Every one's enabled
-        # state was already recomputed fresh above, so — like `extra`'s
-        # dropdowns — only the no-file side needs forcing here.
-        if not self.app.current_file_path:
+        # The no-file side only: each enabled state was recomputed above.
+        if not self.app.media.current_file_path:
             for widget in (self.crf_slider, self.crf_label, self.crf_low_label, self.crf_high_label,
                            self.strip_video_check, self.strip_audio_check,
-                           self.choose_streams_btn, self.passthru_check, self.passthru_label):
+                           self.choose_streams_btn, self.passthru_check, self.passthru_label,
+                           self.choose_subs_btn, self.strip_subtitles_check, self.sub_default_check,
+                           self.sub_forced_check, self.sub_burn_check,
+                           self.video_undo_btn, self.video_redo_btn, self.audio_undo_btn,
+                           self.audio_redo_btn, self.subtitle_undo_btn, self.subtitle_redo_btn):
                 widget.setEnabled(False)
 
+    def _retarget_format(self):
+        """Offer only the containers that can carry every soft subtitle track, toasting a snap."""
+        codecs = [] if self.strip_subtitles_check.isChecked() else [
+            entry["stream"].get("codec_name") for entry in self._soft_subs()]
+        lost = self.format_menu.retarget(formats.containers_for_subtitles(codecs))
+        if lost:
+            stem, extension = os.path.splitext(self.save_entry.text().strip())
+            if extension:
+                set_line_text(self.save_entry, stem + self.format_menu.value())
+            blocking = next((entry["stream"].get("codec") for entry in self._soft_subs()
+                             if not formats.subtitle_codec_arg(lost, entry["stream"].get("codec_name"))), None)
+            if self._ready and blocking:
+                self.app.notify(f"Output Format switched to {self.format_menu.value()} — {lost} can't carry "
+                                f"{blocking} subtitles.", go_to_queue=False)
+        return self.format_menu.value()
+
     def _retarget(self, menu, values, what=None):
-        """Point a derived dropdown at a fresh list, toasting a forced snap —
-        silently swapping a codec out from under the user feels haunted."""
-        before = menu.value()
-        menu.set_values(values or [NO_OPTION])
-        after = menu.value()
-        if what and self._ready and before != after and before != NO_OPTION:
+        """Point a derived dropdown at a fresh list, toasting a forced snap."""
+        lost = menu.retarget(values or [NO_OPTION])
+        if what and self._ready and lost:
             self.app.notify(
-                f"{what} switched to {after} — {self.format_menu.value()} can't carry {before}.",
+                f"{what} switched to {menu.value()} — {self.format_menu.value()} can't carry {lost}.",
                 go_to_queue=False,
             )
-        return after
+        return menu.value()
 
     def _retarget_resolution(self, source_height):
-        """Caps the Resolution list to the current file's own height —
-        separate from `_retarget` since the reason a pick stops fitting is
-        the source's height, not the container, so the toast needs its own
-        wording."""
-        before = self.resolution_menu.value()
-        self.resolution_menu.set_values(formats.resolutions_for(source_height))
-        after = self.resolution_menu.value()
-        # before == NO_OPTION means the dropdown was just showing the
-        # no-file-imported placeholder (_apply_import_gate) a moment ago,
-        # not a real prior pick — recovering from that isn't a snap worth
-        # toasting about, same guard `_retarget` already has.
-        if self._ready and before != after and before != NO_OPTION:
+        """Cap the Resolution list to the file's height, with its own toast wording."""
+        if self.resolution_menu.retarget(formats.resolutions_for(source_height)) and self._ready:
             self.app.notify(
-                f"Resolution reset to {after} — this file is only {source_height}p tall.",
+                f"Resolution reset to {self.resolution_menu.value()} — this file is only {source_height}p tall.",
                 go_to_queue=False,
             )
 
     def _retarget_fps(self, source_fps):
-        """Caps the FPS list to the current file's own frame rate — separate
-        from `_retarget` since the reason a pick stops fitting is the
-        source's rate, not the container, so the toast needs its own
-        wording."""
-        before = self.fps_menu.value()
-        self.fps_menu.set_values(formats.fps_values_for(source_fps))
-        after = self.fps_menu.value()
-        if self._ready and before != after and before != NO_OPTION:
+        """Cap the FPS list to the file's frame rate, with its own toast wording."""
+        if self.fps_menu.retarget(formats.fps_values_for(source_fps)) and self._ready:
             rate = f"{source_fps:.2f}" if source_fps else "?"
             self.app.notify(
-                f"FPS reset to {after} — this file is only {rate}fps.",
+                f"FPS reset to {self.fps_menu.value()} — this file is only {rate}fps.",
                 go_to_queue=False,
             )
 
@@ -579,8 +703,7 @@ class EncodingTab(MediaTab):
         return formats.speed_values_for(encoder, av1_range)
 
     def _apply_speed(self, encoder):
-        """A Speed retarget snaps to the encoder's own recommended default,
-        not the list's first (most extreme) entry."""
+        """Re-target Speed, snapping to the encoder's recommended default."""
         values = self._speed_values(encoder) or [NO_OPTION]
         before = self.speed_menu.value()
         self.speed_menu.set_values(values)
@@ -590,8 +713,7 @@ class EncodingTab(MediaTab):
                 self.speed_menu.set(default)
 
     def _apply_quality(self):
-        """Re-range the slider for the current encoder, keeping the value
-        when it still fits, else the codec's default."""
+        """Re-range the slider for the encoder, keeping the value if it fits, else the default."""
         spec = self._quality_spec or _FALLBACK_QUALITY
         value = self.crf_slider.value()
         low, high = spec["lo"], spec["hi"]
@@ -619,8 +741,8 @@ class EncodingTab(MediaTab):
         return [entry for entry in self._audio_list if entry["id"] in self._audio_included]
 
     def _audio_track_values(self):
-        """The Audio Track dropdown's labels — the included streams, numbered by their place in
-        the Choose Stream(s) list — and, as a side effect, the label -> id map behind them."""
+        """The Audio Track labels (included streams, numbered by list position), filling the
+        label -> id map as a side effect."""
         self._audio_track_ids = {}
         labels = []
         for number, entry in enumerate(self._audio_list, start=1):
@@ -652,10 +774,8 @@ class EncodingTab(MediaTab):
         return None
 
     def _apply_passthru_values(self):
-        """Passthru: Bitrate / Channels / Sample Rate mirror the source's own
-        real values (rarely one of the offered options — set as overrides). A
-        lossless source — FLAC, or a probed TrueHD / DTS-HD MA — says so in Bitrate
-        instead of a number (or, for TrueHD, which reports none, a bare `Select`)."""
+        """Passthru: Bitrate / Channels / Sample Rate mirror the source's values as overrides; a
+        lossless source (FLAC, TrueHD, DTS-HD MA) shows "Lossless"."""
         stream = self._active_stream_info() or {}
         if stream.get("lossless") or formats.is_lossless_audio(stream.get("codec")):
             self.audio_bitrate_menu.set(formats.LOSSLESS)
@@ -665,8 +785,7 @@ class EncodingTab(MediaTab):
         self.audio_samplerate_menu.set(stream.get("sample_rate_display") or formats.SELECT)
 
     def _load_active_audio_stream(self):
-        """Write the active track's stored settings into the shared controls
-        (muted — this is the form being written into, not a user change)."""
+        """Write the active track's settings into the shared controls (muted)."""
         settings = (self._audio_stream_settings.get(self._active_audio_id, {})
                     if self._active_audio_id is not None else {})
         was_ready, self._ready = self._ready, False
@@ -695,33 +814,44 @@ class EncodingTab(MediaTab):
         self._sync_controls()
 
     def _open_stream_picker(self):
-        """Choose Stream(s): the popup edits a copy of the list (ticks, order, tracks added
-        from other files or removed); OK swaps the result in, Cancel changes nothing."""
-        result = choose_audio_streams(self.app, self._audio_list, self._audio_included,
+        """Choose Stream(s): the popup edits a copy; OK swaps it in (one undo step), Cancel
+        changes nothing."""
+        result = choose_streams(self.app, "audio", self._audio_list, self._audio_included,
                                      self._output_directory())
         if result is None:
             return
         entries, chosen = result
-        self._save_active_audio_stream()
         present = {entry["id"] for entry in entries}
+        new_included = chosen & present
+        if entries == self._audio_list and new_included == self._audio_included:
+            return
+        self._save_active_audio_stream()
+        prior = self._snapshot("audio")
         for entry in entries:
             self._audio_stream_settings.setdefault(entry["id"], self._default_audio_settings(entry["stream"]))
         self._audio_stream_settings = {i: v for i, v in self._audio_stream_settings.items() if i in present}
         self._audio_list = entries
-        self._audio_included = chosen & present
+        self._audio_included = new_included
         self._reactivate_audio_stream()
         self._load_active_audio_stream()
+        # Every track removed, or simply none left ticked — either way nothing plays as audio,
+        # the same outcome as Strip Audio, so the button reflects it (matches Muxing's
+        # empty-box == stripped rule); Return Audio undoes back to this same step (see
+        # `_on_strip_clicked`).
+        if not new_included:
+            self.strip_audio_check.setChecked(True)
+        self._push_history("audio", prior)
         self._sync_controls()
 
     def _reactivate_audio_stream(self):
-        """Keeps the active track one that is still included (else the first included)."""
+        """Keep the active track an included one (else the first included)."""
         if self._active_audio_id not in self._audio_included:
             included = self._included_audio()
             self._active_audio_id = included[0]["id"] if included else None
 
     def _default_audio_settings(self, stream):
-        """A stream's starting settings: its own probed codec/params where this app offers
-        them (DTS / TrueHD are named and forced to Passthru), as a plain copy."""
+        """A stream's starting settings: its own codec/params where offered (DTS / TrueHD forced
+        to Passthru), as a copy."""
         codec = stream.get("codec")
         legal_codecs = formats.audio_codecs_for(self.format_menu.value())
         return {
@@ -733,17 +863,13 @@ class EncodingTab(MediaTab):
         }
 
     def _auto_select_audio_streams(self, info):
-        """(Re)initialise the source's own audio once per file: every stream
-        defaults to its own probed codec/params where this app offers them,
-        DTS / TrueHD are named and forced to Passthru, and — Passthru
-        defaulting on — every stream starts as a plain copy until the user
-        picks a re-encode. Every stream is included. Streams added
-        from other files stay (with their settings and whether they were
-        included), as Muxing's do. Guarded per path so a re-delivery of the
-        same probe never discards the user's edits."""
-        if self.app.current_file_path == self._audio_streams_source:
+        """Seed the source's audio once per file (`_default_audio_settings`), all included;
+        streams added from other files stay. Guarded by path, so a re-delivered probe can't
+        discard edits."""
+        if self.app.media.current_file_path == self._audio_streams_source:
             return
-        self._audio_streams_source = self.app.current_file_path
+        self._audio_streams_source = self.app.media.current_file_path
+        self._history["audio"] = {"undo": [], "redo": []}
         primary = [{"id": f"src:{stream['index']}", "source": "primary", "file": None,
                     "index": stream["index"], "stream": stream, "name": None}
                    for stream in info.get("audio_streams") or []]
@@ -761,11 +887,176 @@ class EncodingTab(MediaTab):
         self._load_active_audio_stream()
 
     # ------------------------------------------------------------------ #
+    #  Subtitles
+    # ------------------------------------------------------------------ #
+    def _included_subs(self):
+        """The included subtitle entries, in list (= output) order."""
+        return [entry for entry in self._sub_list if entry["id"] in self._sub_included]
+
+    def _burn_entry(self):
+        """The track burned into the picture, if it's included and the video is kept."""
+        if self._burn_id is None or self.strip_video_check.isChecked():
+            return None
+        return next((entry for entry in self._included_subs() if entry["id"] == self._burn_id), None)
+
+    def _soft_subs(self):
+        """The included tracks that stay separate tracks (all but the burned one)."""
+        burned = self._burn_entry()
+        return [entry for entry in self._included_subs() if entry is not burned]
+
+    def _sub_args(self, entry):
+        """A soft track's settings entry (what `ffmpeg_vars` reads)."""
+        settings = self._sub_settings.get(entry["id"], {})
+        return {"source": entry["source"], "file": entry["file"], "index": entry["index"],
+                "codec_name": entry["stream"].get("codec_name"), "language": settings.get("language"),
+                "default": bool(settings.get("default")), "forced": bool(settings.get("forced")),
+                "start_time": entry.get("start_time")}
+
+    def _burn_args(self):
+        entry = self._burn_entry()
+        if entry is None:
+            return None
+        stream = entry["stream"]
+        return {"source": entry["source"], "file": entry["file"], "index": entry["index"],
+                "image": bool(stream.get("image")), "width": stream.get("width"), "height": stream.get("height"),
+                "start_time": entry.get("start_time")}
+
+    def _auto_select_subtitles(self, info):
+        """Seed the source's subtitle tracks once per file, all included with their own
+        language and flags; tracks added from other files stay."""
+        if self.app.media.current_file_path == self._subs_source:
+            return
+        self._subs_source = self.app.media.current_file_path
+        self._history["subtitle"] = {"undo": [], "redo": []}
+        primary = [{"id": f"src:{stream['index']}", "source": "primary", "file": None,
+                    "index": stream["index"], "stream": stream, "name": None}
+                   for stream in info.get("subtitle_streams") or []
+                   if stream.get("codec_name") in formats.FFPROBE_SUBTITLE]
+        external = [entry for entry in self._sub_list if entry["source"] == "external"]
+        external_ids = {entry["id"] for entry in external}
+        kept = {i: v for i, v in self._sub_settings.items() if i in external_ids}
+        self._sub_list = primary + external
+        self._sub_settings = {entry["id"]: self._default_sub_settings(entry["stream"]) for entry in primary}
+        self._sub_settings.update(kept)
+        self._sub_included = {entry["id"] for entry in primary} | (self._sub_included & external_ids)
+        self._burn_id = self._burn_id if self._burn_id in external_ids else None
+        self._active_sub_id = None
+
+    @staticmethod
+    def _default_sub_settings(stream):
+        return {"language": formats.language_code(stream.get("language")),
+                "default": bool(stream.get("default")), "forced": bool(stream.get("forced"))}
+
+    def _open_sub_picker(self):
+        """Choose Stream(s) for subtitles: OK swaps the edited list in (one undo step), Cancel
+        changes nothing."""
+        result = choose_streams(self.app, "subtitle", self._sub_list, self._sub_included, self._output_directory())
+        if result is None:
+            return
+        entries, chosen = result
+        present = {entry["id"] for entry in entries}
+        new_included = chosen & present
+        if entries == self._sub_list and new_included == self._sub_included:
+            return
+        prior = self._snapshot("subtitle")
+        for entry in entries:
+            self._sub_settings.setdefault(entry["id"], self._default_sub_settings(entry["stream"]))
+        self._sub_settings = {i: v for i, v in self._sub_settings.items() if i in present}
+        self._sub_list = entries
+        self._sub_included = new_included
+        if self._burn_id not in self._sub_included:
+            self._burn_id = None
+        # Every track removed, or simply none left ticked — either way nothing plays as
+        # subtitles, the same outcome as Strip Subtitles, so the button reflects it (matches
+        # Muxing's empty-box == stripped rule); Return Subtitles undoes back to this same step
+        # (see `_on_strip_clicked`).
+        if not new_included:
+            self.strip_subtitles_check.setChecked(True)
+        self._push_history("subtitle", prior)
+        self._sync_controls()
+
+    def _on_sub_track_change(self, label):
+        self._active_sub_id = self._sub_track_ids.get(label)
+        self._sync_controls()
+
+    def _on_sub_setting_change(self, *_args, flag=None):
+        """Language / Default / Forced edited: saved on the active track. Only one track can be
+        the default."""
+        if self._active_sub_id is None:
+            return
+        name = self.sub_language_menu.value()
+        code = next((c for c, n in formats.SUBTITLE_LANGUAGES.items() if n == name), name)
+        default = self.sub_default_check.isChecked()
+        if flag == "default" and default:
+            for settings in self._sub_settings.values():
+                settings["default"] = False
+        self._sub_settings[self._active_sub_id] = {"language": code, "default": default,
+                                                   "forced": self.sub_forced_check.isChecked()}
+        self._sync_controls()
+
+    def _on_burn_toggle(self, *_):
+        on = self.sub_burn_check.isChecked()
+        self._burn_id = self._active_sub_id if on else (None if self._burn_id == self._active_sub_id else self._burn_id)
+        self._sync_controls()
+
+    def _sync_subtitles(self, video_live):
+        """The Subtitles page's part of the constraint pass: the Track list, the active track's
+        settings, and what's live (Burn In needs the video)."""
+        has_file = bool(self.app.media.current_file_path)
+        stripping = self.strip_subtitles_check.isChecked()
+        live = has_file and not stripping
+        included = self._included_subs()
+        self._sub_track_ids = {}
+        labels = []
+        for number, entry in enumerate(self._sub_list, start=1):
+            if entry["id"] in self._sub_included:
+                label = f"Track {number} ({entry['stream'].get('codec') or '?'})"
+                self._sub_track_ids[label] = entry["id"]
+                labels.append(label)
+        self.sub_track_menu.set_values(labels or [NO_OPTION])
+        if self._active_sub_id not in self._sub_track_ids.values():
+            self._active_sub_id = included[0]["id"] if included else None
+        active = next((l for l, i in self._sub_track_ids.items() if i == self._active_sub_id), None)
+        if active:
+            self.sub_track_menu.set(active)
+        settings = self._sub_settings.get(self._active_sub_id, {})
+        languages = list(formats.SUBTITLE_LANGUAGES.values())
+        if self._active_sub_id is not None:
+            name = formats.language_name(settings.get("language"))
+            if name not in languages:
+                languages.append(name)
+            self.sub_language_menu.set_values(languages)
+            self.sub_language_menu.set(name)
+        else:
+            self.sub_language_menu.set_values([NO_OPTION])
+        burned = self._active_sub_id is not None and self._active_sub_id == self._burn_id
+        self.sub_default_check.setChecked(bool(settings.get("default")) and not burned)
+        self.sub_forced_check.setChecked(bool(settings.get("forced")) and not burned)
+        self.sub_burn_check.setChecked(burned and video_live)
+
+        editable = live and self._active_sub_id is not None
+        set_enabled(self.sub_track_menu, self.sub_track_label, editable)
+        self.choose_subs_btn.setEnabled(live)
+        # A burned track is part of the picture: no language or flags of its own.
+        set_enabled(self.sub_language_menu, self.sub_language_label, editable and not burned)
+        self.sub_default_check.setEnabled(editable and not burned)
+        self.sub_forced_check.setEnabled(editable and not burned)
+        self.sub_burn_check.setEnabled(editable and video_live)
+        # A Remove Stream(s) that emptied the list keeps the button live: Return Subtitles is
+        # still the way back (an undo — see `_on_strip_clicked`), unlike a source that genuinely
+        # never had a subtitle track and has no history to restore either.
+        self.strip_subtitles_check.setEnabled(
+            has_file and (bool(self._sub_list) or bool(self._history["subtitle"]["undo"])))
+        self.subtitle_undo_btn.setEnabled(bool(self._history["subtitle"]["undo"]))
+        self.subtitle_redo_btn.setEnabled(bool(self._history["subtitle"]["redo"]))
+        self.sub_tab_bar.set_marked("Subtitles", stripping)
+
+    # ------------------------------------------------------------------ #
     #  Rundown
     # ------------------------------------------------------------------ #
     def _refresh_summary(self):
-        info = self.app.media_info
-        no_file = not self.app.current_file_path
+        info = self.app.media.info
+        no_file = not self.app.media.current_file_path
 
         if no_file:
             video = ("— no streams selected —", "stop")
@@ -791,6 +1082,8 @@ class EncodingTab(MediaTab):
                 bits.append(f"{self.fps_menu.value()}fps")
             if self.hdr_switch.isChecked():
                 bits.append("SDR")
+            if self._burn_entry() is not None:
+                bits.append("subs burned in")
             video = (" · ".join(bits), None)
 
         if self.strip_audio_check.isChecked():
@@ -814,7 +1107,7 @@ class EncodingTab(MediaTab):
                     bool(primary.get("passthru")) and bool(stream.get("lossless")))
                 for key in ("bitrate", "channels", "sample_rate"):
                     if key == "bitrate" and lossless:
-                        continue      # the codec already says lossless; a number would only mislead
+                        continue      # the codec already says lossless
                     value = primary.get(key, formats.SELECT)
                     if value not in (formats.SELECT, NO_OPTION, ""):
                         bits.append(value)
@@ -839,8 +1132,10 @@ class EncodingTab(MediaTab):
     #  Media info
     # ------------------------------------------------------------------ #
     def on_media_info(self, info):
-        """Adopt the source's container (while unpicked), then auto-resolve
-        Encoder and the per-stream audio from the same probe."""
+        """Adopt the source's container (while unpicked), then resolve Encoder and the audio."""
+        if self.app.media.current_file_path != self._video_history_source:
+            self._video_history_source = self.app.media.current_file_path
+            self._history["video"] = {"undo": [], "redo": []}
         container = info.get("container")
         if container and self._auto_format is not None and container in formats.containers():
             self.format_menu.set(container)
@@ -849,11 +1144,11 @@ class EncodingTab(MediaTab):
         self._sync_controls()
         self._auto_select_codecs(info)
         self._auto_select_audio_streams(info)
+        self._auto_select_subtitles(info)
         self._sync_controls()
 
     def _auto_select_codecs(self, info):
-        """Encoder (+ best-effort Profile / Level) from the probe, only while
-        the user hasn't picked one; anything unidentified stays on Select."""
+        """Encoder (+ Profile / Level) from the probe, while the user hasn't picked one."""
         if self._auto_encoder is None:
             return
         video = info.get("video")
@@ -882,23 +1177,22 @@ class EncodingTab(MediaTab):
             "quality": self.crf_slider.value(),
             "resolution": self.resolution_menu.value(),
             "fps": self.fps_menu.value(),
-            # A fact about the input at queue time, not a user choice — same
-            # convention as mastering_max_nits/max_cll below — so a job
-            # queued now still scales/retimes against the source it was
-            # actually queued against even if the user swaps files before
-            # it runs.
-            "source_height": self.app.media_info.get("height"),
-            "source_fps": self.app.media_info.get("fps"),
+            # Facts about the input at queue time, so a queued job follows the source it was
+            # queued against.
+            "source_height": self.app.media.info.get("height"),
+            "source_fps": self.app.media.info.get("fps"),
             "gpu_enabled": bool(self.app.gpu_enabled),
             "hdr_to_sdr": self.hdr_switch.isChecked(),
-            # Facts about the input at queue time — together they decide the
-            # tonemap's peak_detect (see core.utilities.libplacebo_tonemap_vf).
-            "mastering_max_nits": self.app.media_info.get("mastering_max_nits"),
-            "max_cll": self.app.media_info.get("max_cll"),
+            # Together these decide the tone-map's peak_detect.
+            "mastering_max_nits": self.app.media.info.get("mastering_max_nits"),
+            "max_cll": self.app.media.info.get("max_cll"),
             "strip_video": self.strip_video_check.isChecked(),
             "strip_audio": self.strip_audio_check.isChecked(),
-            # In list order — the output's stream order. `source` / `file` say which
-            # input a track is read from (a stream added from another file has its own).
+            "source_width": self.app.media.info.get("width"),
+            "source_start": self.app.media.info.get("start_time"),
+            "subtitle_tracks": [self._sub_args(entry) for entry in self._soft_subs()],
+            "burn_subtitle": self._burn_args(),
+            # In output order; `source` / `file` say which input a stream is read from.
             "audio_streams": [
                 dict(self._audio_stream_settings.get(entry["id"], {}), id=entry["id"],
                      index=entry["index"], source=entry["source"], file=entry["file"],
@@ -909,9 +1203,8 @@ class EncodingTab(MediaTab):
         return settings
 
     def _apply_settings(self, settings):
-        """Write a settings dict in dependency order — container, codecs,
-        then the leaves — syncing between tiers so every list is legal before
-        the next tier's value lands in it. Snap toasts muted throughout."""
+        """Write a settings dict in dependency order (container, codecs, then the leaves),
+        syncing between tiers; snap toasts muted."""
         if not settings:
             return
         was_ready, self._ready = self._ready, False
@@ -964,11 +1257,10 @@ class EncodingTab(MediaTab):
             self._ready = was_ready
         self._sync_controls()
         self._apply_preview_frames()
-        if self.hdr_switch.isChecked() and self.app.hdr_frames_path != self._preview_path:
-            self.app.start_hdr_render(self._preview_path)
+        self._follow_hdr_switch()
 
     def _validate_specific(self, settings):
-        info = self.app.media_info
+        info = self.app.media.info
         if (not settings["strip_video"] and info.get("has_video") is not False
                 and settings["encoder"] == formats.SELECT):
             show_message(

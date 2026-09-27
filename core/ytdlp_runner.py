@@ -1,50 +1,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Runs one YT-DLP download off the GUI thread, with the same contract as
-`core.ffmpeg_runner.FfmpegJob` so the Queue tab drives both identically:
-`start()` / `suspend()` / `resume()` / `stop()` / `poll_events()`, emitting
-("progress", fraction), then ("done",) or ("failed", reason) — plus one extra
-event, ("stage", text), which the Queue shows as the row's status
-("Downloading video..." -> "Downloading audio..." -> "Merging...").
+"""Runs one yt-dlp download off the GUI thread with FfmpegJob's contract (`start` / `suspend` /
+`resume` / `stop` / `poll_events`), plus ("stage", text) events the Queue shows as the status.
 
-**The whole process tree lives in a Windows Job Object.** yt-dlp.exe is a
-PyInstaller bundle (a bootloader process plus the real Python child) and it
-starts its *own* ffmpeg to merge/convert — killing or suspending just the
-process `Popen` returned would leave the rest running. Every process started
-under the job joins it automatically, so `stop()` terminates the whole tree
-and `suspend()` freezes every member. The first process is created
-suspended and only resumed once it's inside the job, so nothing can escape
-in between. `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` is a last line of defence:
-if the app dies outright, Windows closes the handle and takes the tree down.
+The whole process tree (yt-dlp's bootloader, its Python child and its own ffmpeg) lives in a
+kill-on-close Windows Job Object, so stop and pause reach every member; the first process is
+created suspended and resumed only once inside the job. yt-dlp works in a private hidden folder
+beside the output, and the finished file is moved in only on success.
 
-**Nothing is written to the user's folder until the download succeeds.**
-yt-dlp works entirely inside a private hidden folder beside the output
-(`.llamamxd-download-XXXXXXXX`), and the finished file is moved onto
-`final_path` with the same retrying replace as ffmpeg jobs. Stop or failure
-just deletes that folder.
-
-**Progress is time-based, not a fixed split.** One bar covers the video
-download, the audio download and the merge, and each gets exactly as much of
-it as it takes:
-
-    fraction = elapsed / (elapsed + estimated time remaining)
-
-Remaining download time is bytes left across every part / yt-dlp's live
-speed; the merge (or conversion) before it starts is estimated from the last
-one this session measured, and once it's running, from how fast its output
-is actually growing on disk. The fraction never moves backward — a slower
-estimate holds the bar still rather than dropping it — and it's computed in
-`poll_events()` on the GUI thread (a cheap folder stat), so it keeps moving
-through a merge that prints nothing at all. Paused time doesn't count.
-
-The reader thread follows the same rule as FfmpegJob's: it never touches a
-widget; everything reaches the GUI thread through `poll_events()`.
-"""
+Progress is time-based: elapsed / (elapsed + estimated remaining), where remaining is bytes
+left over the recent speed plus the merge / conversion (estimated from the last measured one,
+then from its output growing on disk). Never moves backward; paused time doesn't count."""
 
 import collections
 import json
 import os
-import queue
 import shutil
 import subprocess
 import threading
@@ -53,38 +23,26 @@ import uuid
 
 from core import downloader, llamalog
 from core import priority as process_priority
-from core.ffmpeg_runner import _replace_output, _set_suspended
+from core.process_job import ProcessJob, replace_output, set_suspended
 
-# CREATE_SUSPENDED so the first process can be put in the job before it runs
-# a single instruction; CREATE_NO_WINDOW so no console flashes.
+# Created suspended so it can join the job before it runs.
 _CREATE_SUSPENDED = 0x00000004
-_CREATION_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) | (
-    _CREATE_SUSPENDED if os.name == "nt" else 0
-)
 
 _OUTPUT_TAIL = 60
 # How often poll_events re-applies the priority level to the process tree.
 _PRIORITY_SYNC_SECS = 1.0
 _WORK_DIR_PREFIX = ".llamamxd-download-"
-# Never report more than this until the file is actually in place — the last
-# sliver is the move into the user's folder.
+# The most reported until the file is in place (the last sliver is the move).
 _MAX_LIVE_FRACTION = 0.99
 _SPEED_SMOOTHING = 0.3
-# Download speed for the estimate is bytes actually received over this many
-# seconds of (unpaused) time, not yt-dlp's instantaneous figure: one burst
-# after a stall once read as a near-finished download and jumped the bar from
-# 15% to 78%, where the never-backward rule then held it for two minutes
-# (confirmed on a real 1080p job). yt-dlp's own smoothed speed only stands in
-# until the window has _MIN_WINDOW_SECS of history.
+# Download speed is bytes received over this window, not yt-dlp's instantaneous figure: one
+# burst after a stall jumped the bar from 15% to 78%, where never-backward then held it.
 _SPEED_WINDOW_SECS = 20.0
 _MIN_WINDOW_SECS = 2.0
-# Each poll moves the bar this share of the way to its new target, so what
-# spikes the estimate for a moment only nudges the bar (~1s time constant at
-# the Queue's 100ms poll).
+# Each poll moves the bar this share of the way to its target, so a spike only nudges it.
 _EASE = 0.12
-# Measured rates from the last finished post-processing step this session,
-# so the next job's pre-merge estimate is grounded in this machine's disk.
-# Defaults are deliberately middle-of-the-road; a single job replaces them.
+# Rates measured from the last post-processing step this session, for the next pre-merge
+# estimate; middle-of-the-road defaults until then.
 _learned = {"copy_bytes_per_sec": 150 * 1024 * 1024, "convert_realtime": 80.0}
 _MIN_MEASURE_SECS = 0.5
 
@@ -137,42 +95,32 @@ if os.name == "nt":
 
 
 def work_dir_for(final_path):
-    """A fresh private folder beside `final_path` for one download. Beside it
-    (not in %TEMP%) so moving the finished file in is a same-drive rename."""
+    """A fresh private folder beside `final_path` (same drive, so the final move is a rename)."""
     folder = os.path.dirname(os.path.abspath(final_path))
     return os.path.join(folder, _WORK_DIR_PREFIX + uuid.uuid4().hex[:8])
 
 
-class YtDlpJob:
+class YtDlpJob(ProcessJob):
     """One yt-dlp download plus the thread that watches it. `plan` is
     `core.downloader.resolve()`'s dict, as carried in the task's settings."""
 
+    AREA, TOOL = "ytdlp", "yt-dlp"
+    CONTAIN = False        # its tree lives in its own kill-on-close job (_make_job)
+    CREATION_FLAGS = ProcessJob.CREATION_FLAGS | (_CREATE_SUSPENDED if os.name == "nt" else 0)
+
     def __init__(self, url, plan, final_path, priority=process_priority.DEFAULT_LEVEL, label=None):
         self.url = url
-        self._priority = priority
+        final_path = os.path.abspath(final_path)
+        work_dir = work_dir_for(final_path)
+        super().__init__(downloader.build_download_args(plan, url, work_dir, verbose=llamalog.is_detailed()),
+                         final_path, priority, label)
+        self.work_dir = work_dir
         self._last_priority_sync = 0.0
         self.plan = plan
-        self.final_path = os.path.abspath(final_path)
-        self.work_dir = work_dir_for(self.final_path)
-        self.args = downloader.build_download_args(plan, url, self.work_dir, verbose=llamalog.is_detailed())
-        # The log's name for the job, its output as a bounded ring buffer (whole for a failed job,
-        # the last 100 lines for a successful one — see `core.llamalog.JobOutput`), and where it
-        # was written once the job has ended.
-        self.label = label or os.path.basename(self.final_path)
-        self.output = llamalog.JobOutput()
-        self.log_path = None
-        self._recorded = False
-
-        self._proc = None
         self._job_handle = None
-        self._events = queue.Queue()
         self._tail = collections.deque(maxlen=_OUTPUT_TAIL)
-        self._lock = threading.Lock()
-        self._finished = False
-        self._stopped = False
 
-        # Progress state — written by the reader thread, read by poll_events,
-        # always under _lock.
+        # Progress state: written by the reader thread, read by poll_events, under _lock.
         self._parts = [dict(part, done=0, finished=False) for part in plan.get("parts") or []]
         self._post = dict(plan["post"]) if plan.get("post") else None
         self._post_running = None      # postprocessor name while one is running
@@ -192,8 +140,8 @@ class YtDlpJob:
     #  Control (all called from the GUI thread)
     # ------------------------------------------------------------------ #
     def start(self):
-        """Launches yt-dlp inside its job object. Never raises — a job that
-        can't even start reports ("failed", ...) instead."""
+        """Launch yt-dlp inside its job object. Never raises: a job that can't start reports
+        ("failed", ...)."""
         try:
             os.makedirs(self.work_dir, exist_ok=True)
             if os.name == "nt":
@@ -202,102 +150,39 @@ class YtDlpJob:
             self._fail_early(f"Couldn't create a working folder beside the output: {exc.strerror or exc}")
             return
 
-        try:
-            self._proc = subprocess.Popen(
-                self.args,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                # One pipe: yt-dlp writes download progress to stdout but
-                # post-processing events and errors to stderr (confirmed), and
-                # merging them keeps their order and needs only one reader.
-                stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace", bufsize=1,
-                creationflags=_CREATION_FLAGS | process_priority.creation_flag(self._priority),
-                env=downloader.subprocess_env(),
-            )
-        except FileNotFoundError:
-            self._fail_early("yt-dlp wasn't found. Reinstall LlamaMXD.")
-            return
-        except OSError as exc:
-            self._fail_early(f"Couldn't start yt-dlp: {exc.strerror or exc}")
+        # One pipe: progress comes on stdout but post-processing and errors on stderr, and
+        # merged they keep their order.
+        if not self._launch("yt-dlp wasn't found. Reinstall LlamaMXD.", stderr=subprocess.STDOUT,
+                            env=downloader.subprocess_env()):
             return
 
         self._job_handle = self._make_job(self._proc)
         if os.name == "nt":
-            _set_suspended(self._proc.pid, False)   # created suspended — let it run
+            set_suspended(self._proc.pid, False)   # created suspended — let it run
         self._started_at = time.monotonic()
-        llamalog.log_job_start("ytdlp", self.label, self.args)
+        llamalog.log_job_start(self.AREA, self.label, self.args)
         self._events.put(("stage", "Preparing..."))
         threading.Thread(target=self._watch, daemon=True).start()
 
-    def set_priority(self, level):
-        """Moves the whole tree to a new priority level (Settings' "Priority
-        Level" changed mid-download). Returns whether it worked."""
-        self._priority = level
-        return self._sync_priority()
-
     def _sync_priority(self):
-        """Puts every process in the tree at the chosen level. A child only
-        inherits its parent's class when that class is Low or Below Normal, so
-        yt-dlp's own ffmpeg (started later, for a merge) would otherwise run
-        at Normal under a High parent -- `poll_events` re-runs this about once
-        a second to catch it. (The job object's own priority-limit isn't used
-        instead: Windows refuses High there without a privilege a normal user
-        doesn't hold.)"""
+        """Put every process in the tree at the chosen level. A child inherits only Low / Below
+        Normal, so yt-dlp's later ffmpeg would run at Normal under a High parent; poll_events
+        re-runs this about once a second. (A job-object limit refuses High for a normal user.)"""
         self._last_priority_sync = time.monotonic()
-        if self._proc is None or self._proc.poll() is not None:
-            return False
-        return all([process_priority.set_process_priority(pid, self._priority)
-                    for pid in self._tree_pids()])
+        return super()._sync_priority()
 
-    def suspend(self):
-        """Freezes every process in the tree. Returns whether it worked."""
-        if self._proc is None or self._proc.poll() is not None:
-            return False
-        ok = all([_set_suspended(pid, True) for pid in self._tree_pids()])
+    def _on_suspended(self, suspended):
+        """Paused time doesn't count toward the progress estimate."""
         with self._lock:
-            if self._paused_since is None:
+            if suspended and self._paused_since is None:
                 self._paused_since = time.monotonic()
-        return ok
-
-    def resume(self):
-        """Thaws every process in the tree. Returns whether it worked."""
-        if self._proc is None or self._proc.poll() is not None:
-            return False
-        ok = all([_set_suspended(pid, False) for pid in self._tree_pids()])
-        with self._lock:
-            if self._paused_since is not None:
+            elif not suspended and self._paused_since is not None:
                 self._paused_total += time.monotonic() - self._paused_since
                 self._paused_since = None
-        return ok
-
-    def stop(self):
-        """Kills the whole tree (suspended or not) and deletes the working
-        folder. Returns False when the job had already finished on its own."""
-        with self._lock:
-            if self._finished:
-                return False
-            self._stopped = True
-        self._kill_tree()
-        if self._proc is not None:
-            try:
-                self._proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                llamalog.get("ytdlp").warning('yt-dlp for "%s" was still running 10s after being killed', self.label)
-        self._close_job()
-        self._discard_work_dir()
-        self._record("stopped", self._proc.returncode if self._proc is not None else None)
-        return True
 
     def poll_events(self):
-        """Every event queued since the last call, oldest first, with a fresh
-        progress estimate appended while the job is still going."""
-        events = []
-        while True:
-            try:
-                events.append(self._events.get_nowait())
-            except queue.Empty:
-                break
+        """Every event since the last call, oldest first, plus a fresh progress estimate."""
+        events = super().poll_events()
         if not any(e[0] in ("done", "failed") for e in events):
             if (self._priority != process_priority.DEFAULT_LEVEL
                     and time.monotonic() - self._last_priority_sync >= _PRIORITY_SYNC_SECS):
@@ -344,8 +229,7 @@ class YtDlpJob:
             return fraction
 
     def _remaining_download(self):
-        """Seconds of downloading left, 0 once every part is in, or None
-        while there's no speed to judge by yet."""
+        """Seconds of downloading left: 0 once every part is in, None with no speed yet."""
         left = sum(max(0, p["size"] - p["done"]) for p in self._parts if not p["finished"])
         if left <= 0 or all(p["finished"] for p in self._parts):
             return 0.0
@@ -355,9 +239,8 @@ class YtDlpJob:
         return left / speed
 
     def _window_speed(self):
-        """Bytes/second received over the recent window (see
-        _SPEED_WINDOW_SECS), or yt-dlp's own smoothed speed until the window
-        has enough history. Call with _lock held."""
+        """Bytes/second over the recent window, or yt-dlp's own speed until it has enough
+        history. Call with _lock held."""
         if len(self._samples) >= 2:
             (t0, b0), (t1, b1) = self._samples[0], self._samples[-1]
             if t1 - t0 >= _MIN_WINDOW_SECS:
@@ -419,14 +302,9 @@ class YtDlpJob:
         self._settle(returncode)
 
     def _on_formats(self, line):
-        """What yt-dlp really picked. Normally the plan's own pinned IDs —
-        but if YouTube rotated one and the fallback selector kicked in, the
-        byte budget is rebuilt from the formats actually chosen.
-
-        Two prints feed this: `LLAMA_FORMATS <json list>` for a merge (it's
-        `[]` for a single format — confirmed), and `LLAMA_FORMAT <id> <size>`
-        for a single format (a merge shows its combined "299+140" id there,
-        which is skipped)."""
+        """What yt-dlp really picked: normally the pinned IDs, but if the fallback selector
+        kicked in the byte budget is rebuilt from what was chosen. `LLAMA_FORMATS <json>` for a
+        merge (`[]` for a single format) and `LLAMA_FORMAT <id> <size>` for a single format."""
         tag, payload = line.split(" ", 1)
         if tag == "LLAMA_FORMATS":
             if not payload.strip().startswith("["):
@@ -528,7 +406,7 @@ class YtDlpJob:
                 folder = os.path.dirname(self.final_path)
                 if folder:
                     os.makedirs(folder, exist_ok=True)
-                _replace_output(self._final_file, self.final_path)
+                replace_output(self._final_file, self.final_path)
                 outcome = ("done",)
             except OSError as exc:
                 outcome = ("failed", _replace_failure(exc))
@@ -554,8 +432,7 @@ class YtDlpJob:
     # ------------------------------------------------------------------ #
     @staticmethod
     def _make_job(proc):
-        """A kill-on-close job object holding `proc`, or None if Windows
-        refuses (the tree then falls back to single-process control)."""
+        """A kill-on-close job object holding `proc`, or None if Windows refuses."""
         if os.name != "nt":
             return None
         handle = _k32.CreateJobObjectW(None, None)
@@ -570,9 +447,8 @@ class YtDlpJob:
             return None
         return handle
 
-    def _tree_pids(self):
-        """Every process id in the job — yt-dlp, its bootloader child, and
-        any ffmpeg it started — or just yt-dlp's own without a job."""
+    def _pids(self):
+        """Every process id in the job, or just yt-dlp's without one."""
         if self._job_handle is None:
             return [self._proc.pid]
         # JOBOBJECT_BASIC_PROCESS_ID_LIST: two DWORD counts, then ULONG_PTR ids.
@@ -586,7 +462,7 @@ class YtDlpJob:
         return [int.from_bytes(bytes(raw[8 + i * size:8 + (i + 1) * size]), "little")
                 for i in range(min(count, capacity))]
 
-    def _kill_tree(self):
+    def _kill(self):
         """Terminates everything in the job (or just yt-dlp without one)."""
         if self._job_handle is not None:
             _k32.TerminateJobObject(self._job_handle, 1)
@@ -601,41 +477,29 @@ class YtDlpJob:
             _k32.CloseHandle(handle)
 
     def _discard_work_dir(self):
-        """Deletes the private working folder, retrying briefly — a just-
-        killed ffmpeg can hold its output open for a moment."""
+        """Delete the work folder, retrying briefly (a killed ffmpeg can hold its output)."""
         for _ in range(20):
             shutil.rmtree(self.work_dir, ignore_errors=True)
             if not os.path.exists(self.work_dir):
                 return
             time.sleep(0.15)
 
-    def _fail_early(self, reason):
-        """Reports a job that never got as far as running yt-dlp."""
-        with self._lock:
-            self._finished = True
+    def _cleanup(self):
+        self._close_job()
         self._discard_work_dir()
-        self._record("failed", reason=reason)
-        self._events.put(("failed", reason))
 
-    def _record(self, outcome, returncode=None, reason=""):
-        """Writes the job's end to the log, once: a summary line, and the output file its ring buffer
-        rule calls for (`log_path`)."""
-        with self._lock:
-            if self._recorded:
-                return
-            self._recorded = True
-        seconds = self._active_elapsed() if self._started_at else 0.0
-        self.log_path = llamalog.record_job("ytdlp", self.label, self.args, outcome, self.output,
-                                            returncode=returncode, reason=reason, seconds=seconds)
+    def _elapsed(self):
+        return self._active_elapsed()
+
+    def _fail_early(self, reason):
+        self._discard_work_dir()
+        super()._fail_early(reason)
 
 
 def _folder_bytes(folder):
-    """Total size of the files directly inside `folder` (0 if it's gone).
-
-    `os.stat(path)`, not `entry.stat()`: on Windows the latter is the
-    directory listing's cached size, which isn't updated for a file another
-    process still has open — a growing .part or merge output read as 0 bytes
-    the whole time it was being written (confirmed)."""
+    """Total size of the files directly in `folder` (0 if gone). `os.stat(path)`, not
+    `entry.stat()`: on Windows the latter is stale for a file still open, so a growing output
+    read as 0 bytes."""
     total = 0
     try:
         with os.scandir(folder) as entries:

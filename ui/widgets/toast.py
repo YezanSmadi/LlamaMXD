@@ -1,12 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Transient notifications that drop in at the current tab frame's top-right.
-
-A toast is a child widget painted with real alpha and antialiased corners,
-so it moves and minimizes with the window. At most `_MAX_VISIBLE` hold a slot
-at once: every toast runs its own animation, and an uncapped stack under
-button-mashing is wasted work — a new arrival retires the oldest into a fast
-fade."""
+"""Transient notifications that slide in at the tab frame's top-right. At most `_MAX_VISIBLE`
+hold a slot: a new arrival retires the oldest into a fast fade."""
 from PySide6.QtCore import QEasingCurve, QPoint, QRectF, Qt, QTimer, QVariantAnimation
 from PySide6.QtGui import QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
@@ -14,7 +9,7 @@ from PySide6.QtWidgets import QWidget
 from ui import scale
 from ui import theme as T
 from ui.scale import px
-from ui.widgets.controls import ui_font
+from ui.widgets.text import ui_font
 
 _TOAST_WIDTH = 260
 _TOAST_HEIGHT = 44

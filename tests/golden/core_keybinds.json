@@ -1,0 +1,158 @@
+{
+ "conflicts": {
+  "activate=Space": [
+   "toggle_queue",
+   "Start / Pause Queue",
+   "Space",
+   [
+    "window"
+   ],
+   "Starts the queue, or pauses it while it runs (Queue tab)."
+  ],
+  "dropdown_next=Down": null,
+  "fullscreen=Left": [
+   "preview_prev",
+   "Scroll Preview Left",
+   "Left",
+   [
+    "window"
+   ],
+   "Steps the preview to the previous frame (Muxing and Encoding)."
+  ],
+  "preview_next=Right": null,
+  "tab_next=Up": [
+   "tab_prev",
+   "Previous Tab",
+   "Up",
+   [
+    "window"
+   ],
+   "Goes to the tab above in the sidebar. Not while the preview is expanded."
+  ],
+  "toggle_queue=F11": [
+   "fullscreen",
+   "Fullscreen Window",
+   "F11",
+   [
+    "window"
+   ],
+   "Fills the screen; press it again to go back. In Borderless mode this is Settings' Fullscreen box."
+  ]
+ },
+ "defaults": {
+  "activate": {
+   "enabled": true,
+   "key": "Return"
+  },
+  "collapse_preview": {
+   "enabled": true,
+   "key": "Esc"
+  },
+  "dropdown_next": {
+   "enabled": true,
+   "key": "Down"
+  },
+  "dropdown_prev": {
+   "enabled": true,
+   "key": "Up"
+  },
+  "expand_preview": {
+   "enabled": true,
+   "key": "F"
+  },
+  "focus_next": {
+   "enabled": true,
+   "key": "Tab"
+  },
+  "fullscreen": {
+   "enabled": true,
+   "key": "F11"
+  },
+  "preview_next": {
+   "enabled": true,
+   "key": "Right"
+  },
+  "preview_prev": {
+   "enabled": true,
+   "key": "Left"
+  },
+  "redo": {
+   "enabled": true,
+   "key": "Ctrl+Shift+Z"
+  },
+  "tab_next": {
+   "enabled": true,
+   "key": "Down"
+  },
+  "tab_prev": {
+   "enabled": true,
+   "key": "Up"
+  },
+  "toggle_queue": {
+   "enabled": true,
+   "key": "Space"
+  },
+  "undo": {
+   "enabled": true,
+   "key": "Ctrl+Z"
+  }
+ },
+ "normalized_broken": {
+  "activate": {
+   "enabled": true,
+   "key": "Return"
+  },
+  "collapse_preview": {
+   "enabled": true,
+   "key": "Esc"
+  },
+  "dropdown_next": {
+   "enabled": true,
+   "key": "Down"
+  },
+  "dropdown_prev": {
+   "enabled": true,
+   "key": "Up"
+  },
+  "expand_preview": {
+   "enabled": true,
+   "key": "F"
+  },
+  "focus_next": {
+   "enabled": true,
+   "key": "Tab"
+  },
+  "fullscreen": {
+   "enabled": false,
+   "key": "F11"
+  },
+  "preview_next": {
+   "enabled": true,
+   "key": "Right"
+  },
+  "preview_prev": {
+   "enabled": true,
+   "key": "Left"
+  },
+  "redo": {
+   "enabled": true,
+   "key": "Ctrl+Shift+Z"
+  },
+  "tab_next": {
+   "enabled": true,
+   "key": "Down"
+  },
+  "tab_prev": {
+   "enabled": true,
+   "key": "Up"
+  },
+  "toggle_queue": {
+   "enabled": true,
+   "key": "Space"
+  },
+  "undo": {
+   "enabled": true,
+   "key": "Ctrl+Z"
+  }
+ }
+}

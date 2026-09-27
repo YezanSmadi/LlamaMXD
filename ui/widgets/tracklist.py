@@ -1,26 +1,22 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""`TrackListBox` — Muxing's inline, checkable track picker: a scrollable,
-secondary-bordered box (see `BorderedFrame`) where each row is one stream the
-output can carry, checked to include it. It's the same "one checkbox per
-probed stream" idea as `AudioStreamPickerDialog` (`ui/widgets/dialogs.py`),
-just inline in the panel instead of behind a "Choose Stream(s)" button — and
-rows aren't limited to the source file's own streams: MuxingTab appends rows
-here for streams pulled in from another file via "Add Stream(s)". Which rows
-exist, and in what order, is MuxingTab's to decide (it can remove any row,
-source or external, and undo it); this widget just shows the list it is
-given. A row can be dragged up or down the list to reorder it — any row, checked
-or not — and the box reports the new order through `reordered`."""
+"""`TrackListBox`: the checkable, reorderable track list used by Muxing's panels and Encoding's
+Choose Stream(s) popup. Each row is one stream, ticked to include it. Which rows exist and in
+what order is the caller's; the box shows the list it is given and reports ticks (`changed`)
+and drag reorders (`reordered`)."""
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QPainter, QPainterPath, QPen, QPixmap, QRegion
+from PySide6.QtGui import QPainter, QPainterPath, QPixmap, QRegion
 from PySide6.QtWidgets import (
     QApplication, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget,
 )
 
+from core import formats
 from ui import scale
 from ui import theme as T
 from ui.scale import px
-from ui.widgets.controls import CheckBox, MarqueeGroup, MarqueeLabel, ScaledLabel
+from ui.widgets.marquee import MarqueeGroup, MarqueeLabel
+from ui.widgets.text import ScaledLabel
+from ui.widgets.toggles import CheckBox
 from ui.widgets.panels import BorderedFrame
 from ui.widgets.tooltip import hold_tips
 
@@ -29,19 +25,20 @@ _AUTOSCROLL_STEP = 7        # px scrolled per 16ms tick at the very edge
 _DRAGGED_OPACITY = 0.28     # the row's own slot, left in the list as a placeholder
 
 
-# Row text — shared by Muxing's track boxes and Encoding's "Choose Stream(s)" popup, whose
-# rows are the same shape of entry: {"id", "source", "file", "index", "stream", "name"}.
+# Row text, for both users' entries: {"id", "source", "file", "index", "stream", "name"}.
 def stream_details(kind, stream, compact=False):
-    """The descriptive fields of one stream, in the order a row shows them.
-    Video: codec, profile, level, size, frame rate, HDR kind, bit depth +
-    chroma, bit rate, language — enough to tell two video tracks apart at a
-    glance. Audio: codec, channels, sample rate, language. `compact` is the
-    "Add Stream(s)" picker's version, which has 330-odd pixels of caption and
-    no marquee: the video fields that tell tracks apart, HDR only when it is."""
+    """One stream's details in row order. Video: codec, profile, level, size, fps, HDR kind,
+    bit depth + chroma, bit rate, language. Audio: codec, channels, rate, language. Subtitle:
+    codec, language, Default / Forced, title. `compact` (the narrow "Add Stream(s)" picker):
+    fewer video fields, HDR only when it is."""
     if kind == "video" and compact:
         bits = [stream.get("codec") or stream.get("codec_name"), stream.get("profile"),
                 stream.get("resolution_display"),
                 stream.get("hdr_display") if stream.get("hdr") else None, stream.get("language")]
+    elif kind == "subtitle":
+        bits = [stream.get("codec"), formats.language_name(stream.get("language")),
+                "Default" if stream.get("default") else None, "Forced" if stream.get("forced") else None,
+                stream.get("title")]
     elif kind == "video":
         level, fps = stream.get("level"), stream.get("fps_display")
         bits = [stream.get("codec") or stream.get("codec_name"), stream.get("profile"),
@@ -55,32 +52,29 @@ def stream_details(kind, stream, compact=False):
 
 
 def describe_stream(kind, stream):
-    """A stream as the "Add Stream(s)" picker lists it: its own track number
-    *in the file it came from*, then its details."""
+    """A stream as the "Add Stream(s)" picker lists it: its number in its own file, then its
+    details."""
     return "  ·  ".join([f"Track {stream['index'] + 1}", *stream_details(kind, stream, compact=True)])
 
 
 def row_label(kind, entry, number):
-    """One track-box row's text. `number` is the row's place in the list, not
-    the stream's index in its file — removing a track renumbers the ones below
-    it. A track from another file says which."""
+    """A row's text. `number` is the row's place in the list (removing a track renumbers the
+    rest); a track from another file says so. A subtitle entry's own language / Default /
+    Forced (as edited) stand in for the stream's."""
     bits = [f"Track {number}"]
     if entry["source"] == "external":
         bits.append(f"External: {entry['name']}")
-    bits += stream_details(kind, entry["stream"])
+    stream = entry["stream"]
+    if kind == "subtitle":
+        stream = dict(stream, **{key: entry[key] for key in ("language", "default", "forced") if key in entry})
+    bits += stream_details(kind, stream)
     return "  ·  ".join(bits)
 
 
 class _DragGhost(QWidget):
-    """What follows the cursor while a row is dragged: a snapshot of the row on a
-    rounded slab in the window colour (the box's own background is transparent,
-    so the bare snapshot would print its text over the rows underneath).
-
-    The slab is painted, and the snapshot clipped, to one rounded shape. The
-    snapshot used to be `QWidget.grab()`, which fills the row with its own opaque
-    window-colour rectangle — on Windows that covered everything else and showed
-    as a sharp-cornered band. It is now taken onto a transparent pixmap
-    (`snapshot`), and the clip keeps the corners round whatever the pixmap holds."""
+    """What follows the cursor during a drag: a snapshot of the row on a rounded slab in the
+    window colour (the box itself is transparent). The snapshot is taken onto a transparent
+    pixmap and clipped round: `QWidget.grab()` filled a sharp-cornered opaque band."""
 
     def __init__(self, row, parent):
         super().__init__(parent)
@@ -90,7 +84,7 @@ class _DragGhost(QWidget):
 
     @staticmethod
     def snapshot(row):
-        """`row` (children included) drawn onto a transparent pixmap — no window background."""
+        """`row` and its children drawn onto a transparent pixmap."""
         ratio = row.devicePixelRatioF()
         pixmap = QPixmap(round(row.width() * ratio), round(row.height() * ratio))
         pixmap.setDevicePixelRatio(ratio)
@@ -109,13 +103,9 @@ class _DragGhost(QWidget):
 
 
 class _TrackRow(QWidget):
-    """One row: a text-less `CheckBox` plus a `MarqueeLabel` in place of the
-    checkbox's own caption, so a long label scrolls instead of clipping while
-    the box itself stays put. A click anywhere on the row (label and checkbox
-    included) toggles the checkbox, matching what clicking a captioned
-    `CheckBox` did before; a press that then moves further than a click would
-    is a drag instead — the row is picked up and the box takes over
-    (`TrackListBox._begin_drag`), and letting go toggles nothing."""
+    """One row: a text-less `CheckBox` and a `MarqueeLabel` (long text scrolls). A click
+    anywhere on the row toggles the box; a press that moves past the drag distance picks the
+    row up instead (`TrackListBox._begin_drag`) and toggles nothing."""
 
     def __init__(self, label, checked, group, box):
         super().__init__()
@@ -127,12 +117,10 @@ class _TrackRow(QWidget):
         rl.setContentsMargins(0, 0, 0, 0)
         scale.spacing(rl, 7)
         self.check = CheckBox("", checked=checked)
-        # The row does the clicking (see mouseReleaseEvent), so a drag can start
-        # on the checkbox too — a press on a widget that takes it never reaches the row.
+        # The row does the clicking, so a drag can start on the checkbox too.
         self.check.setAttribute(Qt.WA_TransparentForMouseEvents)
         rl.addWidget(self.check)
-        # Same face as CheckBox's own caption (Arial 12 bold) so the swap
-        # is invisible for text that already fit.
+        # CheckBox's own caption face (Arial 12 bold).
         self.label = MarqueeLabel(label, pixel_size=12, bold=True, family="Arial", group=group)
         self.label.setAttribute(Qt.WA_TransparentForMouseEvents)
         rl.addWidget(self.label, 1)
@@ -171,59 +159,38 @@ class _TrackRow(QWidget):
 
 
 class TrackListBox(BorderedFrame):
-    """`set_items([{"id", "label"}, ...])` rebuilds the row list. Empty shows
-    a centered "No tracks available" in place of the list.
-
-    Matching by `id`, an already-present row keeps its checked state and just
-    refreshes its label — a click on one checkbox never disturbs the others.
-    The rows are also put in the order of `items`, so a track that comes back
-    (an undone removal) lands where it was rather than at the bottom, and
-    `checked_ids()` — which becomes the output's stream order — always
-    follows what is on screen.
-    `reset=True` (a new input file — its stream indices no longer mean what
-    they meant before) instead tears down every row first, so a same-named id
-    from the *previous* file can't be mistaken for a carried-over pick.
-    A brand new id (first appearance, whether from a reset or a fresh "Add
-    Stream(s)" pull) starts **checked** — every track is selected by default,
-    for the source's own and for one added later — unless
-    `checked` (a set of ids) is given, which then decides *every* row's state,
-    existing ones included: an undo/redo putting the ticks back as they were."""
+    """`set_items([{"id", "label"}, ...])` updates the rows; empty shows `empty_text`.
+    Rows are matched by id (an existing row keeps its tick, so one click never disturbs
+    another) and put in the order of `items`. `reset=True` (a new input file) rebuilds every
+    row, so an old file's id can't pass for a pick. A new row starts ticked (`new_checked`),
+    unless `checked` (a set of ids) is given, which then sets every row (an undo putting ticks
+    back). `reorderable=False` turns dragging off (chapters keep their time order)."""
 
     changed = Signal()          # a row's checkbox was toggled by the user
     reordered = Signal(list)    # a drag ended with the rows in a new order: every id, top to bottom
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, min_width=340, reorderable=True, new_checked=True,
+                 empty_text="No tracks available"):
         super().__init__(parent, color_key="secondary")
-        # Height is fixed, not just a minimum: a QScrollArea's own sizeHint
-        # follows its scrolled widget's when `widgetResizable` is True, so
-        # with only a *minimum* height here, five or six rows would have
-        # quietly grown the box (and the whole panel, and the whole tab's
-        # preview area — see the "same height as Encoding" paragraph in
-        # CLAUDE.md) taller than an empty or lightly-populated one. Fixed
-        # forces every extra row into the scroll area's own internal
-        # scrollbar instead. Width stays a minimum/floor — MuxingTab's
-        # `_track_panel` stretches the box wider via its row's own layout,
-        # which a fixed width would block.
-        scale.bounds(self, min_w=340)
+        self._reorderable = reorderable
+        self._new_checked = new_checked
+        # Fixed height, not a minimum: the scroll area's hint follows its rows, so extra rows
+        # would grow the box (and shrink the preview). Width is a floor; the row stretches it.
+        scale.bounds(self, min_w=min_width)
         scale.fixed(self, h=92)
         self._rows = {}  # id -> (row_widget, CheckBox)
         self._drag = None   # while a row is being dragged: see _begin_drag
         self._autoscroll = QTimer(self)
         self._autoscroll.setInterval(16)
         self._autoscroll.timeout.connect(self._autoscroll_tick)
-        # One shared loop for every row's label: a long label holds at its
-        # start once its own sweep ends, and they all restart together only
-        # after the longest has too — same as the Overview rundown.
+        # One shared loop, so every row's label sweeps and restarts in step.
         self._marquee_group = MarqueeGroup()
 
         outer = QVBoxLayout(self)
         scale.margins(outer, 9, 7, 5, 7)
 
-        # Centered dead-center in the box, not the scroll list's first row —
-        # a "No tracks" message sitting at the top-left like a row would look
-        # like a label, not an empty state. Hidden (and out of the layout's
-        # space calculation) the moment there's a real row to show instead.
-        self.empty_label = ScaledLabel("No tracks available")
+        # Centred in the box, not placed like the list's first row; hidden when there are rows.
+        self.empty_label = ScaledLabel(empty_text)
         self.empty_label.setProperty("role", "empty")
         self.empty_label.setAlignment(Qt.AlignCenter)
         outer.addWidget(self.empty_label, 1, Qt.AlignCenter)
@@ -257,9 +224,8 @@ class TrackListBox(BorderedFrame):
                 if checked is not None:
                     check.setChecked(rid in checked)
             else:
-                row = self._add_row(item, checked=(rid in checked) if checked is not None else True)
-            # Move a row only when it isn't already where it belongs (an
-            # insert at an occupied slot shifts the rest down).
+                row = self._add_row(item, checked=(rid in checked) if checked is not None else self._new_checked)
+            # Move a row only when it isn't already in place.
             at = self._list_layout.itemAt(i)
             if at is None or at.widget() is not row:
                 self._list_layout.removeWidget(row)
@@ -285,14 +251,12 @@ class TrackListBox(BorderedFrame):
     # ------------------------------------------------------------------ #
     #  Drag to reorder
     # ------------------------------------------------------------------ #
-    # The dragged row stays in the layout as a dimmed placeholder and is moved
-    # through it as the cursor passes its neighbours, so the other rows make room
-    # live; a `_DragGhost` (a snapshot of the row) follows the cursor itself. Nothing
-    # is reported until the drop, so a drag that ends where it began is a no-op.
+    # The dragged row stays in the layout as a dimmed placeholder, moved as the cursor passes
+    # its neighbours; a `_DragGhost` follows the cursor. Only the drop reports anything.
 
     def _begin_drag(self, row, global_pos):
         """Picks `row` up. False (drag refused) with fewer than two rows."""
-        if len(self._rows) < 2 or self._drag is not None:
+        if not self._reorderable or len(self._rows) < 2 or self._drag is not None:
             return False
         viewport = self.scroll.viewport()
         top_left = row.mapTo(viewport, QPoint(0, 0))
@@ -303,7 +267,7 @@ class TrackListBox(BorderedFrame):
         effect = QGraphicsOpacityEffect(row)
         effect.setOpacity(_DRAGGED_OPACITY)
         row.setGraphicsEffect(effect)
-        # Where inside the row the cursor took hold, so it doesn't jump to the top edge.
+        # Where inside the row the cursor took hold, so the ghost doesn't jump.
         grab_dy = viewport.mapFromGlobal(global_pos).y() - top_left.y()
         self._drag = {"row": row, "ghost": ghost, "grab_dy": grab_dy, "pos": global_pos}
         QApplication.setOverrideCursor(Qt.ClosedHandCursor)
@@ -316,8 +280,8 @@ class TrackListBox(BorderedFrame):
         self._follow_cursor()
 
     def _follow_cursor(self):
-        """Moves the ghost to the cursor (kept inside the viewport) and the
-        placeholder to the slot the ghost's centre is over."""
+        """Move the ghost to the cursor (inside the viewport) and the placeholder to the slot
+        under the ghost's centre."""
         drag = self._drag
         viewport = self.scroll.viewport()
         ghost, row = drag["ghost"], drag["row"]
@@ -380,10 +344,7 @@ class TrackListBox(BorderedFrame):
         return [rid for rid, (_row, check) in self._rows.items() if check.isChecked()]
 
     def set_checked(self, row_id, checked):
-        """Programmatically (un)checks one row — "Select All" / "Deselect All".
-        Doesn't emit `changed` (this app's controls only fire on a genuine
-        user click), so the caller is responsible for its own follow-up
-        resync."""
+        """(Un)check one row programmatically, without emitting `changed`."""
         entry = self._rows.get(row_id)
         if entry:
             entry[1].setChecked(checked)
@@ -392,6 +353,5 @@ class TrackListBox(BorderedFrame):
         return len(self._rows)
 
     def item_ids(self):
-        """Every row's id, top to bottom — checked or not,
-        unlike `checked_ids()`. What "Select All"/"Deselect All" iterate."""
+        """Every row's id, top to bottom, checked or not."""
         return list(self._rows)

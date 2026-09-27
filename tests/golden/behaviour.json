@@ -1,0 +1,374 @@
+[
+ {
+  "menus": {
+   "audio_bitrate_menu": "128 kbps",
+   "audio_channels_menu": "Stereo",
+   "audio_codec_menu": "AAC",
+   "audio_samplerate_menu": "48000 Hz",
+   "audio_track_menu": "Track 1 (AAC)",
+   "encoder_menu": "H.264",
+   "format_menu": ".mp4",
+   "fps_menu": "Source",
+   "level_menu": "3.0",
+   "preset_menu": "— none —",
+   "profile_menu": "High",
+   "resolution_menu": "Source",
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
+  },
+  "save": "<work>\\out\\sdr-Fixture Clip.mp4",
+  "step": "encoding: load sdr.mp4",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "audio_bitrate_menu": "128 kbps",
+   "audio_channels_menu": "Stereo",
+   "audio_codec_menu": "Select",
+   "audio_samplerate_menu": "48000 Hz",
+   "audio_track_menu": "Track 1 (AAC)",
+   "encoder_menu": "Select",
+   "format_menu": ".webm",
+   "fps_menu": "Source",
+   "level_menu": "—",
+   "preset_menu": "— none —",
+   "profile_menu": "—",
+   "resolution_menu": "Source",
+   "speed_menu": "—",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
+  },
+  "save": "<work>\\out\\sdr-Fixture Clip.webm",
+  "step": "encoding: container -> .webm (H.264/AAC can't go)",
+  "toasts": [
+   "Encoder switched to Select — .webm can't carry H.264.",
+   "Audio codec switched to Select — .webm can't carry AAC."
+  ]
+ },
+ {
+  "menus": {
+   "audio_bitrate_menu": "128 kbps",
+   "audio_channels_menu": "Stereo",
+   "audio_codec_menu": "Select",
+   "audio_samplerate_menu": "48000 Hz",
+   "audio_track_menu": "Track 1 (AAC)",
+   "encoder_menu": "Select",
+   "format_menu": ".mov",
+   "fps_menu": "Source",
+   "level_menu": "—",
+   "preset_menu": "— none —",
+   "profile_menu": "—",
+   "resolution_menu": "Source",
+   "speed_menu": "—",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
+  },
+  "save": "<work>\\out\\sdr-Fixture Clip.mov",
+  "step": "encoding: container -> .mov",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "audio_bitrate_menu": "128 kbps",
+   "audio_channels_menu": "Stereo",
+   "audio_codec_menu": "Select",
+   "audio_samplerate_menu": "48000 Hz",
+   "audio_track_menu": "Track 1 (AAC)",
+   "encoder_menu": "Select",
+   "format_menu": ".mov",
+   "fps_menu": "Source",
+   "level_menu": "—",
+   "preset_menu": "— none —",
+   "profile_menu": "—",
+   "resolution_menu": "360p",
+   "speed_menu": "—",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
+  },
+  "save": "<work>\\out\\sdr-Fixture Clip.mov",
+  "step": "encoding: resolution 360p",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "audio_bitrate_menu": "Select",
+   "audio_channels_menu": "Mono",
+   "audio_codec_menu": "AAC",
+   "audio_samplerate_menu": "44100 Hz",
+   "audio_track_menu": "Track 1 (AAC)",
+   "encoder_menu": "H.264",
+   "format_menu": ".mov",
+   "fps_menu": "Source",
+   "level_menu": "3.0",
+   "preset_menu": "— none —",
+   "profile_menu": "High",
+   "resolution_menu": "Source",
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
+  },
+  "save": "<work>\\out\\late.mov",
+  "step": "encoding: load late.mkv (180p, 25fps)",
+  "toasts": [
+   "Resolution reset to Source — this file is only 180p tall."
+  ]
+ },
+ {
+  "menus": {
+   "audio_bitrate_menu": "Select",
+   "audio_channels_menu": "Mono",
+   "audio_codec_menu": "AAC",
+   "audio_samplerate_menu": "44100 Hz",
+   "audio_track_menu": "Track 1 (AAC)",
+   "encoder_menu": "H.264",
+   "format_menu": ".mov",
+   "fps_menu": "25",
+   "level_menu": "3.0",
+   "preset_menu": "— none —",
+   "profile_menu": "High",
+   "resolution_menu": "Source",
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
+  },
+  "save": "<work>\\out\\late.mov",
+  "step": "encoding: fps 25",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "audio_bitrate_menu": "128 kbps",
+   "audio_channels_menu": "Stereo",
+   "audio_codec_menu": "AAC",
+   "audio_samplerate_menu": "48000 Hz",
+   "audio_track_menu": "Track 1 (AAC)",
+   "encoder_menu": "H.264",
+   "format_menu": ".mov",
+   "fps_menu": "Source",
+   "level_menu": "3.0",
+   "preset_menu": "— none —",
+   "profile_menu": "High",
+   "resolution_menu": "Source",
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
+  },
+  "save": "<work>\\out\\sdr-Fixture Clip.mov",
+  "step": "encoding: load sdr.mp4 (24fps)",
+  "toasts": [
+   "FPS reset to Source — this file is only 24.00fps."
+  ]
+ },
+ {
+  "menus": {
+   "audio_bitrate_menu": "128 kbps",
+   "audio_channels_menu": "Stereo",
+   "audio_codec_menu": "AAC",
+   "audio_samplerate_menu": "48000 Hz",
+   "audio_track_menu": "Track 1 (AAC)",
+   "encoder_menu": "H.265",
+   "format_menu": ".mov",
+   "fps_menu": "Source",
+   "level_menu": "3.1",
+   "preset_menu": "— none —",
+   "profile_menu": "Main",
+   "resolution_menu": "Source",
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
+  },
+  "save": "<work>\\out\\sdr-Fixture Clip.mov",
+  "step": "encoding: encoder H.265",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "audio_bitrate_menu": "Select",
+   "audio_channels_menu": "Stereo",
+   "audio_codec_menu": "AAC",
+   "audio_samplerate_menu": "48000 Hz",
+   "audio_track_menu": "Track 1 (AAC)",
+   "encoder_menu": "H.265",
+   "format_menu": ".mov",
+   "fps_menu": "Source",
+   "level_menu": "3.1",
+   "preset_menu": "— none —",
+   "profile_menu": "Main",
+   "resolution_menu": "Source",
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
+  },
+  "save": "<work>\\out\\multi.mov",
+  "step": "encoding: load multi.mkv",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "format_menu": ".mp4",
+   "preset_menu": "— none —"
+  },
+  "save": "<work>\\out\\sdr-Fixture Clip.mp4",
+  "step": "muxing: load sdr.mp4",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "format_menu": ".mov",
+   "preset_menu": "— none —"
+  },
+  "save": "<work>\\out\\sdr-Fixture Clip.mov",
+  "step": "muxing: container -> .mov",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "format_menu": ".mkv",
+   "preset_menu": "— none —"
+  },
+  "save": "<work>\\out\\vp9.mkv",
+  "step": "muxing: load vp9.webm (VP9 can't go in .mov)",
+  "toasts": [
+   "Container switched to .mkv — .mov can't hold this file's streams without re-encoding."
+  ]
+ },
+ {
+  "menus": {
+   "format_menu": ".mkv",
+   "preset_menu": "— none —"
+  },
+  "save": "<work>\\out\\multi.mkv",
+  "step": "muxing: load multi.mkv (H.264 + AAC + Opus)",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "format_menu": ".mp4",
+   "preset_menu": "— none —"
+  },
+  "save": "<work>\\out\\multi.mp4",
+  "step": "muxing: container -> .mp4",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "format_menu": ".mp4",
+   "preset_menu": "— none —"
+  },
+  "save": "<work>\\out\\multi.mp4",
+  "step": "muxing: untick the AAC track (Opus now decides)",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "format_menu": ".mp4",
+   "preset_menu": "— none —"
+  },
+  "save": "<work>\\out\\hdr.mp4",
+  "step": "muxing: load hdr.mkv",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "audio_menu": "Best Available",
+   "codec_menu": "Best Available",
+   "format_menu": ".mp4",
+   "mode_switch": "Video + Audio",
+   "quality_menu": "Best"
+  },
+  "save": "<work>/out",
+  "step": "downloader: fetched",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "audio_menu": "Best Available",
+   "codec_menu": "VP9",
+   "format_menu": ".mkv",
+   "mode_switch": "Video + Audio",
+   "quality_menu": "Best"
+  },
+  "save": "<work>/out",
+  "step": "downloader: codec VP9",
+  "toasts": [
+   "Video Format switched to .mkv — .mp4 isn't available for this pick."
+  ]
+ },
+ {
+  "menus": {
+   "audio_menu": "Best Available",
+   "codec_menu": "VP9",
+   "format_menu": ".mkv",
+   "mode_switch": "Video + Audio",
+   "quality_menu": "2160p60 HDR"
+  },
+  "save": "<work>/out",
+  "step": "downloader: resolution top",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "audio_menu": "Best Available",
+   "codec_menu": "H.264",
+   "format_menu": ".mkv",
+   "mode_switch": "Video + Audio",
+   "quality_menu": "Best"
+  },
+  "save": "<work>/out",
+  "step": "downloader: codec H.264 (that resolution may be gone)",
+  "toasts": [
+   "Resolution switched to Best — 2160p60 HDR isn't available for this pick."
+  ]
+ },
+ {
+  "menus": {
+   "audio_menu": "Opus",
+   "codec_menu": "H.264",
+   "format_menu": ".mkv",
+   "mode_switch": "Video + Audio",
+   "quality_menu": "Best"
+  },
+  "save": "<work>/out",
+  "step": "downloader: audio codec Opus",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "audio_menu": "Opus",
+   "codec_menu": "Best Available",
+   "format_menu": "Original",
+   "mode_switch": "Audio Only",
+   "quality_menu": "Best"
+  },
+  "save": "<work>/out",
+  "step": "downloader: mode Audio Only",
+  "toasts": []
+ },
+ {
+  "menus": {
+   "audio_menu": "Opus",
+   "codec_menu": "Best Available",
+   "format_menu": ".mp3",
+   "mode_switch": "Audio Only",
+   "quality_menu": "Best (VBR)"
+  },
+  "save": "<work>/out",
+  "step": "downloader: format .mp3",
+  "toasts": [
+   "Resolution switched to Best (VBR) — Best isn't available for this pick."
+  ]
+ },
+ {
+  "menus": {
+   "audio_menu": "Opus",
+   "codec_menu": "Best Available",
+   "format_menu": ".mp4",
+   "mode_switch": "Video Only",
+   "quality_menu": "Best"
+  },
+  "save": "<work>/out",
+  "step": "downloader: mode Video Only",
+  "toasts": []
+ }
+]

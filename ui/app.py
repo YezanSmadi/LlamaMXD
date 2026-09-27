@@ -1,16 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""The main window and the app's hub: shared state, the file-selection
-broadcast, background work (probe + preview frames, HDR renders, yt-dlp
-fetches, the Deno check), tab routing, keybinds, toasts and the close prompt.
-
-Every tab is built once and lives in a QStackedWidget. A tab switch is one
-`setCurrentWidget` — Qt hides one page and shows another inside a single
-native window and presents the result as one frame, so there's no re-mapping
-of hundreds of child windows and nothing fills in piece by piece."""
+"""The main window and the app's hub: shared state, the file-selection broadcast, background
+work, tab routing, keybinds, toasts and the close prompt. Every tab is built once and stacked."""
 import os
-import threading
-import time
 
 from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QIcon, QPainter, QPainterPath
@@ -27,17 +19,13 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import isValid
 
-from core import downloader, formats, gpu, llamalog, power, priority, window_mode, window_style
+from core import downloader, gpu, llamalog, power, window_mode, window_style
 from core.theme import load_settings
-from core.utilities import (
-    extract_hdr_tonemapped_thumbnails,
-    extract_video_thumbnails,
-    libplacebo_problem,
-    probe_media,
-)
 from ui import scale
 from ui import theme as T
+from ui.hover import HoverSync
 from ui.keymap import KeyMap
+from ui.media_session import MediaSession
 from ui.keynav import KeyNav
 from ui.tabs.downloader import DownloaderTab
 from ui.tabs.encoding import EncodingTab
@@ -45,56 +33,21 @@ from ui.tabs.media_tab import set_line_text
 from ui.tabs.muxing import MuxingTab
 from ui.tabs.queue import QueueTab
 from ui.tabs.settings import SettingsTab
-from ui.widgets.controls import Dropdown
+from ui.widgets.dropdown import Dropdown
 from ui.widgets.dialogs import ask_yes_no, confirm_countdown, show_message
 from ui.widgets.frameless import ResizeGrips, WindowControls
 from ui.widgets.panels import ASSETS, Sidebar, TabIndicator
 from ui.scale import px
 from ui.widgets.toast import ToastManager
-from ui.workers import emit_progress, pil_to_qimage, run_async
+from ui.workers import pil_to_qimage, run_async
 
 TAB_NAMES = ("Muxing", "Encoding", "Downloader", "Queue", "Settings")
 
 _QWIDGETSIZE_MAX = 16777215   # Qt's "no maximum size"
 
-_MEDIA_INFO_KEYS = ("container", "video", "audio", "video_profile", "video_level", "hdr",
-                    "width", "height", "duration", "file_size", "has_video", "has_audio",
-                    "title", "chapters", "bit_rate", "creation_time")
-
-
-def _probe_summary(info):
-    """One line describing a probe result, for the log."""
-    parts = [info.get("container") or "?"]
-    if info.get("video"):
-        size = f"{info.get('width')}x{info.get('height')}" if info.get("width") else "?"
-        parts.append(f"video {info['video']} {size}{' HDR' if info.get('hdr') else ''}")
-    elif info.get("has_video") is False:
-        parts.append("no video")
-    if info.get("audio"):
-        count = len(info.get("audio_streams") or [])
-        parts.append(f"audio {info['audio']}" + (f" (+{count - 1} more)" if count > 1 else ""))
-    elif info.get("has_audio") is False:
-        parts.append("no audio")
-    if info.get("duration"):
-        parts.append(f"{info['duration']:.1f}s")
-    if info.get("file_size"):
-        parts.append(f"{info['file_size'] / 1024 ** 2:.1f} MB")
-    return ", ".join(parts)
-
-
-def _empty_media_info():
-    """"Unknown" for every probe field — None never reads as absent."""
-    info = dict.fromkeys(_MEDIA_INFO_KEYS)
-    info["audio_streams"] = []
-    return info
-
-
 class _MainLayout(QHBoxLayout):
-    """The window's own layout, opted out of height-for-width. Word-wrapped
-    labels deep in a page (Settings has several) make a plain layout report
-    it, and Qt then restores a maximised or fullscreen window at the height
-    those labels want at the *outgoing* scale — 1388px tall on a 540px
-    window — instead of the size it had."""
+    """The window's layout, opted out of height-for-width: word-wrapped labels otherwise made
+    Qt restore a maximised window at the height they wanted at the outgoing scale."""
 
     def hasHeightForWidth(self):
         return False
@@ -107,9 +60,8 @@ class _MainLayout(QHBoxLayout):
 
 
 class _TabFrame(QWidget):
-    """The rounded panel the pages sit on. Painted rather than styled: a
-    stylesheet rule on it would cascade over — and re-style — every page under
-    it on each rescale, which is the one cost live resizing can't afford."""
+    """The rounded panel the pages sit on. Painted, not styled: a stylesheet rule here would
+    cascade over every page on each rescale."""
 
     def __init__(self):
         super().__init__()
@@ -129,17 +81,9 @@ def _is_typing(widget):
 
 
 class _Keybinds(QObject):
-    """Global keybinds, filtered at the application level so they work
-    wherever focus happens to be — unless focus is on something the key
-    already means something for. Which key does what is the user's
-    (`MainWindow.keymap`, Settings' Shortcuts page); this decides *when* each
-    one may fire. Also clears a text field's focus the moment a click lands
-    somewhere else: every clickable in this app is `Qt.NoFocus` (see
-    Conventions), so Qt's own default — a click that lands on a widget which
-    never takes focus simply leaves focus wherever it already was — otherwise
-    left a line edit looking and behaving focused (cursor still blinking,
-    still first in line for Ctrl+A/paste) long after the user had clicked off
-    it onto a button or blank space."""
+    """Global keybinds, filtered application-wide so they work wherever focus is, unless focus
+    is on something the key already means something for. Also clears a text field's focus when
+    a click lands elsewhere: clickables are `Qt.NoFocus`, so Qt would leave it focused."""
 
     def __init__(self, window):
         super().__init__(window)
@@ -170,10 +114,8 @@ class _Keybinds(QObject):
         expanded = win.preview_expanded()
         typing = _is_typing(focus)
 
-        # These two work from inside a text field too: F11 means nothing there, and Tab is how
-        # you leave it. Always consumed, so Qt's own Tab (which hops into the next text field and
-        # would leave the shortcuts standing aside) never runs; an expanded preview covers every
-        # control, so Tab has nowhere to go then.
+        # These two work inside a text field too. Tab is always consumed: Qt's own Tab hops into
+        # the next text field, where every shortcut then stands aside.
         if keys.matches("fullscreen", event):
             if not repeat:
                 win.toggle_fullscreen()
@@ -198,6 +140,8 @@ class _Keybinds(QObject):
             ("tab_prev", False, lambda: not expanded and win.cycle_tab(-1)),
             ("tab_next", False, lambda: not expanded and win.cycle_tab(1)),
             ("activate", False, lambda: not expanded and win.keynav.activate()),
+            ("undo", False, lambda: self._dispatch_undo(tab, False)),
+            ("redo", False, lambda: self._dispatch_undo(tab, True)),
         )
         for action, may_repeat, handler in table:
             if keys.matches(action, event):
@@ -215,6 +159,16 @@ class _Keybinds(QObject):
         carousel.step(delta)
         return True
 
+    @staticmethod
+    def _dispatch_undo(tab, redo):
+        """Ctrl+Z / Ctrl+Shift+Z: whichever Video/Audio/Subtitles sub-tab is showing on Muxing
+        or Encoding, if either has one (`MediaTab.undo_current`/`redo_current`)."""
+        method = getattr(tab, "redo_current" if redo else "undo_current", None)
+        if method is None:
+            return False
+        method()
+        return True
+
     def _toggle_queue(self, focus):
         """Space on the Queue tab starts / pauses it — unless a button or dropdown has focus."""
         win = self.window
@@ -227,8 +181,7 @@ class _Keybinds(QObject):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        # {widget: (stylesheet text, scale)} — what each stylesheet target was last
-        # given, and the scale its layouts were last invalidated for.
+        # {widget: (stylesheet text, scale)} each target was last styled at.
         self._styled = {}
         T.theme.changed.connect(self.update)
         self.setWindowTitle("LlamaMXD")
@@ -237,36 +190,28 @@ class MainWindow(QWidget):
             self.setWindowIcon(QIcon(icon))
 
         settings = load_settings()
-        self.current_file_path = ""
         self.default_save_location = settings["default_save_location"]
-        # `gpu_preference` is what the user chose (and what gets saved);
-        # `gpu_enabled` is what jobs actually use -- forced off on a machine
-        # with no dedicated GPU, without overwriting the saved choice (a GPU
-        # added later picks the preference back up).
+        # `gpu_preference` is the saved choice; `gpu_enabled` is what jobs use (forced off
+        # without a dedicated GPU, without overwriting the choice).
         self.gpu_preference = bool(settings["gpu_enabled"])
         self.gpu_enabled = self.gpu_preference and gpu.has_dedicated()
-        # The Downloader's own save folder, used instead of the shared
-        # default only while separate-save is on and a folder's been set.
+        # The Downloader's own save folder, used only while separate-save is on and one is set.
         self.downloader_separate_save = bool(settings["downloader_separate_save"])
         self.downloader_save_location = settings["downloader_save_location"] or ""
-        # Settings' output naming format (`core.naming`), the Queue's job
-        # priority, and what to do when the queue empties. "When Done" starts
-        # over at Do Nothing when its reset-on-launch flag is set, so a
-        # Shutdown chosen last session can't surprise this one.
+        # The Clear button's confirmation, off once the user checks "Don't ask again".
+        self.confirm_clear_selection = bool(settings["confirm_clear_selection"])
+        # "When Done" starts over at Do Nothing when its reset flag is set, so a Shutdown chosen
+        # last session can't surprise this one.
         self.naming_template = settings["naming_template"]
         self.priority_level = settings["priority_level"]
         self.when_done_reset = bool(settings["when_done_reset"])
         self.when_done = power.DO_NOTHING if self.when_done_reset else settings["when_done"]
-        # Settings' window mode (`core.window_mode`) and, for Borderless, whether
-        # it fills the screen.
         self.window_mode = settings["window_mode"]
         self.borderless_fullscreen = bool(settings["borderless_fullscreen"])
         # F11 in Windowed / Fixed: fullscreen for this session only (Borderless's is a setting).
         self._session_fullscreen = False
-        # Settings' log detail (`core.llamalog`): Normal or Detailed.
         self.log_detail = settings["log_detail"]
         llamalog.set_detail(self.log_detail)
-        # Settings' keyboard shortcuts (`core.keybinds`): which key does what, and which are on.
         self.keymap = KeyMap(settings["keybinds"])
         llamalog.get("settings").info(
             "Settings: theme=%s appearance=%s window=%s gpu=%s priority=%s when_done=%s startup_tab=%s "
@@ -280,36 +225,16 @@ class MainWindow(QWidget):
                 llamalog.get("settings").warning("Couldn't create the default save folder %s: %s",
                                                  self.default_save_location, exc)
 
-        # Preview frames (QImages) for the selected file, decoded once off
-        # the GUI thread and cached so tab switches never re-decode.
-        self.thumb_frames = []
-        self.thumb_frames_path = None
-        self._thumb_token = 0
-        self.media_info = _empty_media_info()
-        self._media_info_path = None
-        self._preview_index = 0
-        # HDR→SDR tone-mapped preview frames, cached per file.
-        self.hdr_frames = None
-        self.hdr_frames_path = None
-        self._hdr_inflight_path = None
-        self._hdr_token = 0
-        self._hdr_cancel_event = None
-        self._hdr_cancelled_token = 0     # the render a file change interrupted: its late, empty result is dropped
-        # Downloader: the last successful fetch, and a token so a superseded
-        # fetch's late result is dropped.
+        self.media = MediaSession(self)
+        # Downloader: the last successful fetch, and a token that drops a superseded one.
         self.ytdlp_cache = None
         self._ytdlp_token = 0
         self.deno_missing = False
-        self.media_tabs = []
-        # Settings' "Startup Tab" (`core.startup_tab`): the tab the app opens on.
         self.startup_tab = settings["startup_tab"]
         self.current_tab = self.startup_tab
 
-        # Starts at 35% of the screen's width at the reference aspect ratio,
-        # centred. The window's size sets the UI scale (`ui.scale`) — adopted
-        # before any widget is built, so every size in the app is already at
-        # this scale when it's constructed. `_apply_window_mode` (last thing
-        # in here) then fixes, frees or strips the window per Settings.
+        # The window's size sets the UI scale, adopted before any widget is built;
+        # `_apply_window_mode` (last in here) then fixes, frees or strips the window.
         scale.changed.connect(self._on_scale_changed)
         self._replace_pending = False
         screen = self.screen().geometry()
@@ -321,9 +246,8 @@ class MainWindow(QWidget):
         layout = _MainLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        # The window's size limits are `_apply_window_mode`'s to set, not
-        # whatever the layout's own minimum would impose at the current scale
-        # (which would stop a shrinking window from ever lowering it).
+        # Size limits are `_apply_window_mode`'s: the layout's own minimum at the current scale
+        # would stop a shrinking window from ever lowering it.
         layout.setSizeConstraint(QLayout.SetNoConstraint)
         self.sidebar = Sidebar()
         self.sidebar.navigate.connect(self.show_tab)
@@ -348,8 +272,7 @@ class MainWindow(QWidget):
         for name in TAB_NAMES:
             self.stack.addWidget(self.tabs[name])
         self.stack.setCurrentWidget(self.tabs[self.current_tab])
-        # Everything was just built under the application-level sheet, which is
-        # current: record that so `_restyle` knows what still needs the new one.
+        # Everything was just built under the current application-level sheet.
         css = T.stylesheet()
         for target in (self.sidebar, *self.tabs.values()):
             self._styled[target] = (css, scale.factor())
@@ -357,10 +280,9 @@ class MainWindow(QWidget):
         self.indicator = TabIndicator(self)
         self.toasts = ToastManager(self, lambda: self.tab_frame)
         self.keynav = KeyNav(self)
+        self.hover = HoverSync()
         self._grips = ResizeGrips(self)
-        # Borderless has no OS title bar, so it gets its own close / maximise /
-        # minimise, in the strip above the sidebar's title (`_apply_window_mode`
-        # shows them only in that mode).
+        # Borderless has no OS title bar, so it gets its own close / maximise / minimise.
         self.window_controls = WindowControls(self.sidebar)
         self.window_controls.closeRequested.connect(self.close)
         self.window_controls.maximizeRequested.connect(self._toggle_maximized)
@@ -373,9 +295,6 @@ class MainWindow(QWidget):
         T.theme.changed.connect(self._sync_titlebar)
 
         run_async(downloader.deno_path, self._deliver_deno_check)
-        # Warm the (cached) libplacebo/Vulkan probe: it is a real ffmpeg run, so
-        # it belongs off the GUI thread and ahead of the first HDR file.
-        run_async(libplacebo_problem, lambda _problem: None)
 
     # ------------------------------------------------------------------ #
     #  Tabs
@@ -390,8 +309,7 @@ class MainWindow(QWidget):
                 on_leave()
         self.current_tab = name
         self.stack.setCurrentWidget(incoming)
-        # Only once it's visible: a hidden widget restyled doesn't invalidate
-        # its parent's layout, so its size hints stay cached at the old scale.
+        # Only once visible: a hidden widget restyled doesn't invalidate its parent's layout.
         if self._style_tab(incoming):
             scale.settle()      # sizes measured off this page's hints, now against its new sheet
         on_enter = getattr(incoming, "on_enter", None)
@@ -411,18 +329,17 @@ class MainWindow(QWidget):
 
     def preview_expanded(self):
         """Is a media tab's preview blown up over the window?"""
-        return any(getattr(tab.carousel, "_expanded", False) for tab in self.media_tabs)
+        return any(getattr(tab.carousel, "_expanded", False) for tab in self.media.tabs)
 
     def collapse_previews(self):
         """Shrink any expanded preview back. True if there was one."""
-        expanded = [tab for tab in self.media_tabs if getattr(tab.carousel, "_expanded", False)]
+        expanded = [tab for tab in self.media.tabs if getattr(tab.carousel, "_expanded", False)]
         for tab in expanded:
             tab.carousel.force_collapse()
         return bool(expanded)
 
     def showEvent(self, e):
         super().showEvent(e)
-        # Geometry is final once shown — no after(50) guesswork needed.
         QTimer.singleShot(0, lambda: self.show_tab(self.current_tab, animate=False))
 
     def notify(self, message, go_to_queue=True):
@@ -436,18 +353,10 @@ class MainWindow(QWidget):
         QPainter(self).fillRect(self.rect(), T.theme.color("window"))
 
     def _style(self, target):
-        """Give `target` (the sidebar or a page) the current stylesheet if it
-        doesn't have it yet, and re-measure its layouts if the scale moved;
-        True when it did either. Applied on the widget itself, which overrides
-        the application-level sheet the app started with and touches only that
-        subtree. The sheet is compared by *text*: every length in it is a whole
-        pixel, so between two nearby scales (a drag moves it a thousandth per
-        pixel) it is often byte-identical, and then there is nothing to
-        re-apply. The layouts are keyed on the *scale* as well, though: a text
-        label's size hint follows the scale continuously (`ScaledLabel`), not
-        the sheet's whole pixels, and a hidden page's `updateGeometry` calls
-        reach nothing — so its layouts must be invalidated here, when it is
-        next made current, or it would show hints from an older scale."""
+        """Give `target` (the sidebar or a page) the current stylesheet if it lacks it, and
+        re-measure its layouts if the scale moved; True if it did either. The sheet is compared
+        as text (nearby scales often give an identical sheet); layouts are keyed on the scale
+        too, since a `ScaledLabel`'s hint follows the scale continuously."""
         css = T.stylesheet()
         key = (css, scale.factor())
         prev = self._styled.get(target)
@@ -456,11 +365,8 @@ class MainWindow(QWidget):
         if prev is None or prev[0] != css:
             target.setStyleSheet(css)
         self._styled[target] = key
-        # A restyle doesn't refresh the cached size hints of widgets that are
-        # hidden inside the page (Encoding's Video and Audio panels while
-        # Overview shows), and the stack above takes the tallest page's hint —
-        # so the preview would stay sized for the old scale until that panel
-        # was next shown. Invalidate every layout in the subtree explicitly.
+        # A restyle doesn't refresh hints of widgets hidden inside the page (Encoding's
+        # Video/Audio while Overview shows), and the stack sizes to its tallest page.
         for layout in target.findChildren(QLayout):
             layout.invalidate()
         if target.layout() is not None:
@@ -468,59 +374,29 @@ class MainWindow(QWidget):
         return True
 
     def _restyle(self):
-        """The theme or the scale changed. Re-applying the one application-wide
-        sheet re-styles all ~500 widgets (~185ms — measured; the same sheet on
-        the window itself is ~45ms, on one page ~13ms), far too slow to follow
-        a window being dragged. So only the sidebar and the page on screen are
-        restyled now; a page that isn't showing catches up in `show_tab`."""
+        """The theme or scale changed. The app-wide sheet takes ~185ms to re-apply, too slow for
+        a drag, so only the sidebar and the page on screen are restyled; others catch up in
+        `show_tab`."""
         if not getattr(self, "tabs", None):
-            # Nothing is built yet (the scale moved during construction): the
-            # application-level sheet is all there is.
+            # Nothing is built yet: the application-level sheet is all there is.
             QApplication.instance().setStyleSheet(T.stylesheet())
             return
         self._style(self.sidebar)
         self._style_tab(self.tabs[self.current_tab])
 
     def _style_tab(self, tab):
-        """`_style`, scoped to what a tab says is actually on screen right now
-        (`tab.style_scope()`) instead of the tab's whole widget tree.
-
-        A plain `_style(tab)` would call `setStyleSheet` on the tab's own
-        top-level widget, which — because Qt's stylesheet engine re-polishes
-        an entire subtree on every `setStyleSheet` call, visible or not —
-        re-styles every sub-tab page a tab keeps alive in its own internal
-        `QStackedWidget` (Muxing/Encoding's Video/Audio panels, Settings'
-        other four pages), even though only one is ever on screen. A tab can
-        opt in by implementing `style_scope()` — returning just the widgets
-        genuinely visible right now — and must then also call
-        `MainWindow.style_now()` on a sub-page the moment it's switched to, so
-        that page catches up instead of showing whatever it looked like the
-        last time this ran (mirrors how `show_tab` already catches up a
-        newly-shown top-level tab). Tabs that don't implement it (Downloader,
-        Queue — no internal sub-tab stack, so there's nothing to skip) are
-        restyled exactly as before.
-
-        Not used for Muxing/Encoding's own sub-tab stack: their preview above
-        it sizes off `panels.sizeHint()`, which — by design (`QStackedWidget`
-        sizes to its *tallest ever-shown* page, so a sub-tab switch never
-        resizes the preview) — depends on every page's size hint staying
-        accurate at the *current* scale, hidden ones included. Skipping their
-        restyle would let a hidden page's hint go stale and could size the
-        preview against last scale's numbers — exactly the kind of drift the
-        Muxing/Encoding preview-height invariant exists to prevent. Settings'
-        own sub-pages carry no such risk: `self.pages` is given a layout
-        stretch (fills whatever room it's left, never sized to its own
-        content), so a stale hidden page's hint has no visible consequence."""
+        """`_style`, limited to what the tab says is on screen (`tab.style_scope()`), so its
+        hidden sub-pages aren't re-polished; such a tab calls `style_now()` when it switches
+        page. Muxing/Encoding don't opt in: their preview is sized off every sub-page's hint,
+        hidden ones included."""
         scope_fn = getattr(tab, "style_scope", None)
         if scope_fn is None:
             return self._style(tab)
         return any([self._style(w) for w in scope_fn()])
 
     def style_now(self, widget):
-        """Catch `widget` up to the live stylesheet/scale right away. For a
-        sub-tab page a tab's own `style_scope()` leaves out of the live-resize
-        restyle (see `_style_tab`) — called the moment that page is actually
-        switched to, the same way `show_tab` catches up a newly-shown tab."""
+        """Catch `widget` (a sub-page `style_scope()` left out) up to the current sheet and
+        scale, when it is switched to."""
         if self._style(widget):
             scale.settle()
 
@@ -552,22 +428,18 @@ class MainWindow(QWidget):
         self._apply_window_mode()
 
     def _apply_window_mode(self):
-        """Bring the window's frame, size limits and state in line with the
-        mode: Fixed is the reference-shaped window, not resizable; Windowed and
-        Borderless are free to resize, never below the default size;
-        Borderless drops the frame (moved by the sidebar, resized by
-        `ResizeGrips`) and can fill the screen."""
+        """Bring the frame, size limits and state in line with the mode: Fixed is the
+        reference-shaped window, not resizable; Windowed and Borderless resize freely but never
+        below the default size; Borderless drops the frame and can fill the screen."""
         mode = self.window_mode
         frameless = mode == window_mode.BORDERLESS
         visible = self.isVisible()
-        # Back to an ordinary window first — a fullscreen or maximised state
-        # would fight the size limits set below.
+        # Back to an ordinary window first: a fullscreen or maximised state fights the limits.
         size = None
         if visible and (self.isFullScreen() or self.isMaximized()):
             size = self.normalGeometry().size()
             self.showNormal()
-            # Let the restore finish: flipping the frame flag before it has
-            # would re-show the window maximised and swallow the resizes below.
+            # Let the restore finish, or flipping the frame re-shows the window maximised.
             QApplication.processEvents()
         screen = self.screen().geometry()
         fixed_size = scale.window_size(screen.width(), screen.height())
@@ -579,10 +451,8 @@ class MainWindow(QWidget):
             self.setWindowFlag(Qt.FramelessWindowHint, frameless)   # hides a visible window
             if visible:
                 self.show()
-                # Adding or dropping the frame leaves Windows with a client
-                # area a title bar and borders smaller than Qt believes it is
-                # (880x501 for 896x540) — and Qt, seeing no change, never
-                # corrects it. Make it see one.
+                # Adding or dropping the frame leaves the real client area smaller than Qt
+                # believes (880x501 for 896x540), and Qt never corrects it. Make it see a change.
                 self.setMinimumSize(0, 0)
                 self.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
                 self.resize(size.width() + 1, size.height() + 1)
@@ -597,8 +467,7 @@ class MainWindow(QWidget):
             self.setMinimumSize(*fixed_size)
             self.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
         if visible:
-            # Qt leaves the maximize button as it was: a Fixed window must not
-            # have one, a resizable one must.
+            # Qt doesn't update the maximise button with the size limits on a live window.
             window_style.set_maximize_box(int(self.winId()), mode != window_mode.FIXED)
             self._sync_titlebar()
         if fullscreen and visible:
@@ -608,18 +477,14 @@ class MainWindow(QWidget):
         self._schedule_replace()
 
     def _sync_titlebar(self):
-        """Match the native title bar to the app's resolved Light / Dark. Qt only
-        sets it when it creates a window that already has a frame, so a window
-        that gained one later (Borderless -> Windowed / Fixed) has to be told."""
+        """Match the native title bar to Light / Dark. Qt sets it only for a window created
+        with a frame, so one that gained a frame later has to be told."""
         if self.window_mode != window_mode.BORDERLESS and self.isVisible():
             window_style.set_dark_titlebar(int(self.winId()), T.theme.resolved_mode() == "Dark")
 
     def _sync_window_chrome(self):
-        """Show the borderless controls and resize grips the window's current
-        mode and state call for: the controls in Borderless only (fullscreen
-        included — there is no OS button then either, though maximise is
-        dimmed since fullscreen is a Settings choice), the grips only while the
-        window is a resizable, un-maximised, non-fullscreen one."""
+        """Show the borderless controls (Borderless only, fullscreen included) and the resize
+        grips (only on a resizable, un-maximised, non-fullscreen window)."""
         frameless = self.window_mode == window_mode.BORDERLESS
         fullscreen = self._wants_fullscreen()
         self.window_controls.setVisible(frameless)
@@ -628,10 +493,8 @@ class MainWindow(QWidget):
         self._grips.set_active(frameless and not fullscreen and not self.isMaximized())
 
     def _toggle_maximized(self):
-        """The borderless maximise button: maximise, or restore if already so.
-        Inert in borderless *fullscreen* (a Settings choice) — judged by the
-        setting, not `isFullScreen()`: a maximised frameless window reports
-        `Maximized|FullScreen`, and that would swallow the restore click."""
+        """The borderless maximise button. Inert in borderless fullscreen — judged by the
+        setting, since a maximised frameless window also reports `FullScreen`."""
         if self._wants_fullscreen():
             return
         if self.isMaximized():
@@ -654,28 +517,22 @@ class MainWindow(QWidget):
             self.show()
 
     def _prescale_for_screen(self, screen):
-        """Adopt the scale a fullscreen window will need before it is shown, so
-        it opens laid out once rather than at the old scale first."""
+        """Adopt the scale a fullscreen window will need before it is shown."""
         scale.set_factor(scale.fit(screen.width(), screen.height()))
 
     def resizeEvent(self, e):
-        """The window's size is the UI scale: every size in the app is
-        authored at the reference window and multiplied by this — rescaled on
-        every resize event, so the whole window follows a drag live."""
+        """The window's size is the UI scale, re-set on every resize so the layout follows a
+        drag live."""
         super().resizeEvent(e)
         self._grips.place()
         # The expanded preview covers the whole window, so follows its size.
-        for tab in self.media_tabs:
+        for tab in self.media.tabs:
             overlay = getattr(tab, "_expand_overlay", None)
             if overlay is not None and overlay.isVisible():
                 overlay.setGeometry(self.rect())
-        # Everything below must finish before this handler returns: Windows
-        # paints synchronously between a resize and the next posted event, so
-        # anything left for a queued LayoutRequest or a zero-delay timer is
-        # drawn one frame late — the new window size with last step's layout,
-        # and the tab pipe trailing behind its button. That was the jitter.
-        # `_replace_pending` stands in for the timer `_schedule_replace` would
-        # otherwise queue (the overlays are re-placed here, once).
+        # Finish everything here: Windows paints between a resize and the next posted event,
+        # so work left to a LayoutRequest or zero-delay timer is drawn a frame late (jitter).
+        # `_replace_pending` stands in for the timer `_schedule_replace` would queue.
         self._replace_pending = True
         try:
             if abs(scale.fit(self.width(), self.height()) - scale.factor()) > 1e-6:
@@ -690,20 +547,15 @@ class MainWindow(QWidget):
         scale.set_factor(scale.fit(self.width(), self.height()))
 
     def _settle_layout(self):
-        """Run every layout the last resize / rescale invalidated now, rather
-        than on its posted `LayoutRequest`. A layout that activates posts its
-        parent's request only once it has changed size, so a single flush
-        leaves a chain of them behind — one row of Muxing's Overview page was
-        still 1-2px off at some scales — and a few passes reach the fixed
-        point (measured: two settled every scale in a 60-step drag)."""
+        """Run every layout the last resize invalidated now, not on its posted request. A
+        layout posts its parent's request only once it changed size, so one flush leaves a
+        chain; a few passes reach the fixed point."""
         for _ in range(3):
             QApplication.sendPostedEvents(None, QEvent.LayoutRequest)
 
     def mousePressEvent(self, e):
-        """A borderless window has no title bar: a press on the sidebar or the
-        margin around the tab frame (anything a child widget didn't take)
-        drags it. The tab frame itself doesn't, so an empty spot in a page
-        can't pick the window up by accident."""
+        """Borderless: a press on the sidebar or the margin around the tab frame (anything a
+        child didn't take) drags the window. The tab frame itself doesn't."""
         if (e.button() == Qt.LeftButton and self.window_mode == window_mode.BORDERLESS
                 and not self.isFullScreen()
                 and not self.tab_frame.geometry().contains(e.position().toPoint())):
@@ -714,28 +566,16 @@ class MainWindow(QWidget):
         super().mousePressEvent(e)
 
     def _on_scale_changed(self):
-        """The scale moved: restyle what's on screen, let the sizes measured off
-        other widgets re-measure, then re-place what sits at absolute positions
-        (the tab pipe, the toasts) once the layout has caught up."""
+        """The scale moved: restyle what's on screen, re-measure sizes taken off other widgets,
+        then re-place the absolutely positioned overlays."""
         self._restyle()
         if hasattr(self, "indicator"):
-            # Sizes measured off other widgets' hints must read *current* hints,
-            # so the layouts the rescale invalidated run first.
+            # Sizes measured off other widgets' hints need the invalidated layouts run first.
             self._settle_layout()
         scale.settle()
         if getattr(self, "tabs", None):
-            # Every MediaTab's `panels` (Muxing's *and* Encoding's), not just
-            # the current top-level tab's: the bound setters that drive this
-            # bug (`scale.bind`/`scale.bind_after` fixed sizes) run for every
-            # widget in the app on every scale change regardless of which
-            # tab is on screen (see `ui/scale.py`'s `set_factor`), so a tab
-            # that's hidden *entirely* -- not just one of its own hidden
-            # sub-pages -- goes just as stale. Confirmed: resizing while on
-            # Muxing left Encoding's own drop box a full 23px short the
-            # moment it was switched to, having never been the active tab
-            # during that resize at all. Settings/Downloader/Queue have no
-            # `panels` attribute, so this only ever touches the two tabs
-            # that actually need it.
+            # Every MediaTab, not just the current one: the bound setters run for every widget
+            # on each scale change, so a hidden tab goes just as stale.
             for tab in self.tabs.values():
                 panels = getattr(tab, "panels", None)
                 if panels is not None:
@@ -743,69 +583,10 @@ class MainWindow(QWidget):
         self._schedule_replace()
 
     def _bust_hidden_size_caches(self, panels):
-        """`panels` is a `MediaTab`'s Overview/Video/Audio `QStackedWidget`.
-        Root cause of the documented "Muxing's panel stack is left too tall
-        after the window is dragged bigger and then smaller" bug: found by
-        tracing exactly why `panels.sizeHint()` (which sizes itself to
-        whichever sub-page is tallest, so switching sub-tabs never resizes
-        the preview above it) kept reporting a stale, too-tall number for a
-        *hidden* sub-page (Muxing's Video/Audio) even after every layout in
-        it had been `invalidate()`-d and its widgets' real fixed heights
-        (e.g. `_track_panel`'s `size_box()`, a `scale.bind_after` measured
-        off Overview's own height) had already been recomputed correctly.
-
-        `invalidate()` marks a *layout's own* aggregate hint dirty, but each
-        widget it contains is held by a separate cached `QWidgetItem`, and
-        that cache is only busted by calling `updateGeometry()` on the widget
-        itself — which Qt's widgets already do internally whenever their own
-        size changes. The catch: `QWidget::updateGeometry()` invalidates the
-        widget's *own* cached item (as seen by its *direct* parent layout)
-        unconditionally, but only *cascades further up* to invalidate the
-        grandparent's cache when the widget `isHidden()` is false. Every
-        widget inside a hidden sub-tab page *is* hidden, so a fixed-height
-        change three layouts deep (a `TrackListBox` -> its row -> the page)
-        busts the immediate parent's cache and stops there — the *next*
-        layout up (and the one above that) never finds out its child's hint
-        changed, so `sizeHint()` at the top keeps returning whatever was
-        cached from the last time that page was genuinely shown. Confirmed
-        by hand: calling `.invalidate()` (even directly, even repeatedly) on
-        every layout in the chain did nothing; explicitly calling
-        `.updateGeometry()` on each *widget* one level at a time is what
-        actually cleared each cache in turn.
-
-        The fix: after every scale change (`scale.settle()`, once every
-        `bind_after` setter has run and any fixed sizes are at their final,
-        correct values), call `updateGeometry()` on every widget under
-        `panels` — including its hidden sub-pages — so each one's cache is
-        individually busted regardless of the hidden-cascade cutoff, and the
-        next `sizeHint()` query at any level recomputes for real instead of
-        replaying a snapshot from whenever that page was last on screen.
-        Scoped to just `panels` (not the whole tab — the carousel, header and
-        save row are all genuinely visible already *when their own tab is the
-        one on screen*, so Qt's normal resize path keeps them correct then)
-        to keep this cheap enough for a live resize — `updateGeometry()`
-        itself only marks a cache dirty, it doesn't force an immediate
-        recompute. Not needed for Settings' own hidden sub-pages (its page
-        stack is layout-stretched, not sized to content, so a stale hint
-        there is invisible) or for Downloader/Queue (no such stack at all).
-
-        **`_on_scale_changed` calls this for every `MediaTab`, not only the
-        current one.** The bound setters that drive this bug run for every
-        widget in the app on every scale change regardless of which top-level
-        tab is on screen (`scale.set_factor` iterates the whole app's
-        `_bound` registry) — so a tab that's *entirely* hidden behind another
-        one goes just as stale as one of its own hidden sub-pages does, and
-        the drop box comes out visibly shrunk the moment it's switched to.
-        Confirmed: resizing while on Muxing left Encoding's own `drop_box` a
-        real 23px short (226 instead of 249) the instant Encoding became the
-        active tab, having never been on screen during that resize at all.
-
-        Verified: a real 1.0x -> 2.6x -> 1.0x drag (and a repeated
-        1.0x -> 1.7x -> 1.0x one right after), on either tab, while it was
-        active or while the other one was, left both tabs' `panels.sizeHint()`
-        and `drop_box` size exactly where they started and identical to each
-        other, across a battery of scales (0.5x-3.0x), every sub-tab, and
-        both a single resize jump and a stepped multi-frame drag."""
+        """Bust the cached size hints under a `MediaTab`'s Overview/Video/Audio stack after a
+        rescale. `updateGeometry()` on a hidden widget invalidates only its direct parent's
+        cache, not further up, so a hidden sub-page's hint stayed stale (Muxing's stack stayed
+        too tall after a drag up and back). Calling it on every widget clears each level."""
         for widget in panels.findChildren(QWidget):
             widget.updateGeometry()
         panels.updateGeometry()
@@ -828,12 +609,10 @@ class MainWindow(QWidget):
         self.toasts.relayout()
 
     def _restack(self):
-        """Restore the window's stacking order, bottom to top: the tab pipe, an
-        expanded preview, the keyboard selection's ring, the toasts, the resize grips. The tab pipe raises
-        itself every time it is re-laid out (a tab switch, any resize), so
-        without this it ended up on top of an expanded preview — a cable
-        drawn across the picture."""
-        for tab in self.media_tabs:
+        """Restore the stacking order, bottom to top: the tab pipe, an expanded preview, the
+        keyboard selection ring, the toasts, the resize grips. The tab pipe raises itself on
+        every re-layout and would draw across an expanded preview."""
+        for tab in self.media.tabs:
             overlay = getattr(tab, "_expand_overlay", None)
             if overlay is not None and overlay.isVisible():
                 overlay.raise_()
@@ -846,15 +625,11 @@ class MainWindow(QWidget):
     #  Settings-driven defaults
     # ------------------------------------------------------------------ #
     def set_default_save_location(self, path):
-        """A new default save location from Settings — while no file's been
-        imported yet, Muxing/Encoding's save fields (still just the bare
-        default directory — see `MediaTab._autofill_output_path`) follow it
-        live, and so does the Downloader's own field unless it has its own
-        separate location. Once a real file/fetch is in the field, only that
-        flow's own autofill touches it again."""
+        """A new default save location from Settings. Save fields still holding the bare
+        default (no file imported / nothing fetched yet) follow it."""
         self.default_save_location = path
-        if not self.current_file_path:
-            for tab in self.media_tabs:
+        if not self.media.current_file_path:
+            for tab in self.media.tabs:
                 set_line_text(tab.save_entry, path)
                 tab._auto_output = path
         downloader_tab = self.tabs.get("Downloader")
@@ -862,26 +637,23 @@ class MainWindow(QWidget):
             downloader_tab.refresh_default_location()
 
     def downloader_default_location(self):
-        """The folder the Downloader autofills into before a fetch — its own
-        separate location when Settings has that on and one's been set, else
-        the same default save location every other tab uses."""
+        """Where the Downloader autofills before a fetch: its own location if separate-save is
+        on and one is set, else the shared default."""
         if self.downloader_separate_save and self.downloader_save_location:
             return self.downloader_save_location
         return self.default_save_location
 
     def set_naming_template(self, template):
-        """A new output naming format from Settings: every tab whose Save
-        field still holds an autofilled name re-derives it live."""
+        """A new naming format: every Save field still holding an autofilled name re-derives."""
         if template == self.naming_template:
             return
         self.naming_template = template
-        for tab in (*self.media_tabs, self.tabs.get("Downloader")):
+        for tab in (*self.media.tabs, self.tabs.get("Downloader")):
             if tab is not None:
                 tab.refresh_auto_output()
 
     def set_priority_level(self, level):
-        """A new job priority from Settings — applied at once to a job that's
-        already running, and to every job started after."""
+        """A new job priority: applied to a running job at once, and to every later one."""
         self.priority_level = level
         llamalog.get("settings").info("Priority level set to %s", level)
         queue_tab = self.tabs.get("Queue")
@@ -889,9 +661,8 @@ class MainWindow(QWidget):
             queue_tab.apply_priority()
 
     def perform_when_done(self):
-        """The queue just emptied: carry out Settings' "When Done" choice.
-        The four that end or suspend the Windows session get a 30-second
-        cancellable countdown first — nothing is worth a surprise shutdown."""
+        """The queue just emptied: carry out "When Done". Shutdown, Sleep, Hibernate and Log Off
+        get a 30-second cancellable countdown first."""
         action = self.when_done
         if action == power.DO_NOTHING:
             return
@@ -923,247 +694,6 @@ class MainWindow(QWidget):
         downloader_tab = self.tabs.get("Downloader")
         if downloader_tab is not None and self.downloader_separate_save:
             downloader_tab.refresh_default_location()
-
-    # ------------------------------------------------------------------ #
-    #  File selection broadcast
-    # ------------------------------------------------------------------ #
-    def register_media_tab(self, tab):
-        self.media_tabs.append(tab)
-
-    def update_global_file(self, file_path):
-        """The only place the selected file changes."""
-        clean_path = (file_path or "").strip("{}").strip()
-        if not clean_path:
-            return
-        if clean_path != self.current_file_path:
-            self._preview_index = 0
-            if clean_path != self._media_info_path:
-                self.media_info = _empty_media_info()
-            # A genuinely new file — drop the outgoing file's preview right
-            # away instead of leaving it on screen until the new one's
-            # frames finish decoding (_load_thumbnails, below, rebroadcasts
-            # synchronously on a cache hit, so this never even flashes blank
-            # for a file that's been seen before).
-            for tab in self.media_tabs:
-                tab.carousel.clear_preview()
-            # The file being replaced owns any HDR→SDR preview still
-            # rendering, and its own HDR→SDR switch — interrupt the one and
-            # turn the other back off so the new file never inherits either.
-            self._cancel_hdr_render()
-            for tab in self.media_tabs:
-                reset_hdr = getattr(tab, "reset_hdr_preview", None)
-                if callable(reset_hdr):
-                    reset_hdr()
-        self.current_file_path = clean_path
-        llamalog.get("app").info("File selected: %s", clean_path)
-        for tab in self.media_tabs:
-            tab.set_selected_file(clean_path)
-            tab._autofill_output_path()
-        self._load_thumbnails(clean_path)
-
-    def _load_thumbnails(self, path):
-        """Cache hit → broadcast now. Miss → probe then decode ten frames on a
-        worker; the probe (~50ms) lands first so defaults settle early."""
-        self._thumb_token += 1
-        token = self._thumb_token
-        self._thumb_t0 = time.monotonic()
-        cached_info = path == self._media_info_path
-        if cached_info:
-            self._broadcast_media_info()
-            # An audio file has no frames to wait for, and its Wave Loop is what reveals the
-            # carousel — as `_deliver_media_info` does for a fresh probe. Without this a
-            # re-selected audio file kept showing the loading spinner until the frame
-            # decode (which OpenCV never finishes on an audio-only file) reported back.
-            if self._is_audio_only(path):
-                self._broadcast_audio_only(True)
-        if path == self.thumb_frames_path and self.thumb_frames:
-            self._broadcast_thumbnails(self.thumb_frames)
-            self._prerender_hdr(path)
-            if cached_info:
-                return
-
-        def work():
-            if not cached_info:
-                info = probe_media(path)
-                emit_progress(lambda i: self._deliver_media_info(token, path, i), info)
-            return [pil_to_qimage(f) for f in extract_video_thumbnails(path, count=10)]
-
-        run_async(work, lambda frames: self._deliver_thumbnails(token, path, frames or []))
-
-    def _deliver_media_info(self, token, path, info):
-        if token != self._thumb_token or info is None:
-            return
-        # Neither a video nor an audio stream at all -- not a legitimate
-        # audio-only file (that's has_audio True, has_video False) but a
-        # probe that found literally nothing, the signature of ffmpeg's
-        # demuxer failing to read this file (a corrupt file, or a container
-        # variant this build's demuxer doesn't handle -- e.g. some vendors'
-        # MXF headers). Rejected before it ever reaches a tab, rather than
-        # broadcast as if it were a real, empty file.
-        if info.get("has_video") in (None, False) and info.get("has_audio") in (None, False):
-            self._reject_file(path)
-            return
-        self.media_info = info
-        self._media_info_path = path
-        llamalog.get("probe").info("Probed %s: %s", os.path.basename(path), _probe_summary(info))
-        self._broadcast_media_info()
-        if self._is_audio_only(path):
-            self._broadcast_audio_only(True)
-
-    def _reject_file(self, path):
-        """Undo the selection entirely -- back to the dropbox's pristine,
-        nothing-imported state, and this file's info never reaches Muxing/
-        Encoding. Bumping the token also makes the in-flight thumbnail
-        decode for this same path a no-op once it lands (`_deliver_thumbnails`
-        checks it too)."""
-        llamalog.get("app").warning("Rejected %s: no video or audio stream could be identified "
-                                    "(unreadable, or a format this ffmpeg can't parse)", path)
-        self._thumb_token += 1
-        self.current_file_path = ""
-        self.media_info = _empty_media_info()
-        self._media_info_path = None
-        self.thumb_frames = []
-        self.thumb_frames_path = None
-        self._preview_index = 0
-        self._cancel_hdr_render()
-        for tab in self.media_tabs:
-            tab.clear_selected_file()
-            reset_hdr = getattr(tab, "reset_hdr_preview", None)
-            if callable(reset_hdr):
-                reset_hdr()
-        show_message(
-            self, "Couldn't Read This File",
-            f"“{os.path.basename(path)}”'s video and audio couldn't be identified. "
-            "It may be corrupted, or use a format this app's bundled ffmpeg can't "
-            "fully parse.",
-        )
-
-    def _is_audio_only(self, path):
-        info = self.media_info
-        if info.get("video"):
-            return False
-        if info.get("audio"):
-            return True
-        return os.path.splitext(path)[1].lower() in formats.AUDIO_EXTENSIONS
-
-    def _broadcast_audio_only(self, flag):
-        for tab in self.media_tabs:
-            tab.carousel.set_audio_only(flag)
-
-    def _broadcast_media_info(self):
-        for tab in self.media_tabs:
-            tab.on_media_info(self.media_info)
-            tab.carousel.set_media_info(self.media_info)
-            # The probe may carry a title / chapter count the naming format
-            # uses, which weren't known when the file was first picked.
-            tab.refresh_auto_output()
-
-    def _deliver_thumbnails(self, token, path, frames):
-        if token != self._thumb_token:
-            return
-        took = time.monotonic() - getattr(self, "_thumb_t0", time.monotonic())
-        if not frames:
-            if self._is_audio_only(path):
-                llamalog.get("app").info("%s is audio-only: no preview frames (Wave Loop)", os.path.basename(path))
-                self._broadcast_audio_only(True)
-                return
-            llamalog.get("app").warning("No preview frames could be decoded for %s after %.1fs "
-                                        "(the file stays selected)", path, took)
-            # A video that decoded to no frames (the preview decoder, OpenCV, can fail
-            # on a file ffmpeg reads fine): the file stays selected and usable, the
-            # drop box says so, and the user is told once.
-            for tab in self.media_tabs:
-                tab.show_no_preview()
-            show_message(
-                self, "No Preview",
-                "No preview images could be generated.\n\n"
-                "The file is still usable but the preview images could not be decoded properly.",
-            )
-            return
-        self.thumb_frames = frames
-        self.thumb_frames_path = path
-        llamalog.get("app").info("Previews ready for %s: %d frames in %.1fs",
-                                 os.path.basename(path), len(frames), took)
-        self._broadcast_thumbnails(frames)
-        self._prerender_hdr(path)
-
-    def _broadcast_thumbnails(self, frames):
-        for tab in self.media_tabs:
-            tab.carousel.set_audio_only(False)
-            tab.on_thumbnails(frames)
-            tab.carousel.sync_index(self._preview_index)
-
-    def sync_preview_index(self, index):
-        """A carousel was scrubbed — mirror it onto the other tab's."""
-        if index == self._preview_index:
-            return
-        self._preview_index = index
-        for tab in self.media_tabs:
-            tab.carousel.sync_index(index)
-
-    # ------------------------------------------------------------------ #
-    #  HDR→SDR preview renders
-    # ------------------------------------------------------------------ #
-    def _prerender_hdr(self, path):
-        """An HDR file's tone-mapped previews start rendering as soon as its raw ones are up,
-        in the background, so HDR→SDR shows them the moment it is switched on rather than
-        after a ~15s wait. Only an HDR file (the probe has landed by now) pays for it; a
-        switch pressed before it finishes just waits for the rest (`start_hdr_render` is a
-        no-op while this path's render is in flight). It runs alongside a running queue job."""
-        if path == self.current_file_path and path == self._media_info_path \
-                and self.media_info.get("hdr") is True:
-            self.start_hdr_render(path)
-
-    def start_hdr_render(self, path):
-        """One tone-mapped render per file, cached here; no-op when cached or
-        already running for this path."""
-        if not path or path == self.hdr_frames_path or path == self._hdr_inflight_path:
-            return
-        self._hdr_inflight_path = path
-        self._hdr_t0 = time.monotonic()
-        llamalog.get("app").info("HDR preview render started for %s", os.path.basename(path))
-        self._hdr_token += 1
-        token = self._hdr_token
-        cancel_event = threading.Event()
-        self._hdr_cancel_event = cancel_event
-
-        def work():
-            frames = extract_hdr_tonemapped_thumbnails(path, count=10, should_cancel=cancel_event.is_set)
-            return [pil_to_qimage(f) for f in frames]
-
-        run_async(work, lambda frames: self._deliver_hdr(token, path, frames or []))
-
-    def _cancel_hdr_render(self):
-        """Interrupts an HDR→SDR preview render still in flight — its file is
-        no longer the one being shown, so letting it finish would just be
-        wasted ffmpeg/libplacebo work. A no-op when nothing's running."""
-        if self._hdr_cancel_event is not None:
-            self._hdr_cancel_event.set()
-        if self._hdr_inflight_path:
-            llamalog.get("app").info("HDR preview render cancelled (%s)", os.path.basename(self._hdr_inflight_path))
-            self._hdr_cancelled_token = self._hdr_token
-        self._hdr_inflight_path = None
-
-    def _deliver_hdr(self, token, path, frames):
-        if path == self._hdr_inflight_path:
-            self._hdr_inflight_path = None
-        if token != self._hdr_token or token == self._hdr_cancelled_token:
-            # Superseded, or interrupted by a file change: its (empty) result must not be logged as a
-            # failure, nor replace the cached frames of the file before it.
-            return
-        took = time.monotonic() - getattr(self, "_hdr_t0", time.monotonic())
-        if frames:
-            llamalog.get("app").info("HDR preview ready for %s: %d frames in %.1fs",
-                                     os.path.basename(path), len(frames), took)
-        else:
-            llamalog.get("app").warning("HDR preview render for %s produced no frames (%.1fs; cancelled, "
-                                        "libplacebo unavailable, or a decode failure)", os.path.basename(path), took)
-        self.hdr_frames = frames or None
-        self.hdr_frames_path = path if frames else None
-        for tab in self.media_tabs:
-            ready = getattr(tab, "on_hdr_frames_ready", None)
-            if callable(ready):
-                ready(path, self.hdr_frames)
 
     # ------------------------------------------------------------------ #
     #  Downloader
@@ -1202,10 +732,8 @@ class MainWindow(QWidget):
     #  Closing
     # ------------------------------------------------------------------ #
     def closeEvent(self, event):
-        """Confirm before discarding unfinished queue work (pausing — not
-        stopping — for the prompt, so backing out resumes exactly where it
-        was), then kill any active job: Windows doesn't take a child process
-        down with its parent."""
+        """Confirm before discarding unfinished work (the queue pauses for the prompt, so backing
+        out resumes it), then kill any active job: Windows doesn't end a child with its parent."""
         if getattr(self, "_closing", False):
             event.accept()
             return

@@ -1,19 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""The Queue: task rows, one real ffmpeg / yt-dlp job at a time, pause (a real
-OS suspend), stop, failures, the details popup and the overall progress bar.
-
-A row is one widget with one paintEvent: draw the row, then clip to the
-fill width and draw it again in `primary` — so the fill edge cuts a glyph
-cleanly, both halves coming from the same renderer at the same coordinates.
-
-Progress arrives in coarse jumps (ffmpeg reports ~2 Hz); the painted fill
-eases toward the latest value every frame so it glides rather than steps."""
+"""The Queue: task rows, one real ffmpeg / yt-dlp job at a time, pause (an OS suspend), stop,
+failures, the details panel and the overall progress bar. A running row paints itself twice,
+the second pass clipped to the fill width in `primary`, and the fill eases toward the reported
+fraction every frame."""
+import math
 import os
 import subprocess
+import time
 
-from PySide6.QtCore import QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QPainter, QPainterPath, QPixmap
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QFontMetricsF, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -23,17 +20,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core import downloader, ffmpeg_vars, formats, llamalog
-from core.ffmpeg_build import compile_command, uses_hdr_tonemap
+from core import downloader, ffmpeg_vars, formats, llamalog, power
+from core.ffmpeg_build import compile_command, prepare_commands, uses_hdr_tonemap
 from core.ffmpeg_runner import FfmpegJob, partial_path
-from core.utilities import extract_video_thumbnail
-from core.ytdlp_runner import YtDlpJob
+from core.previews import extract_video_thumbnail
+from core.ytdlp_runner import _STAGE_FOR_PART, _STAGE_FOR_POST, YtDlpJob
 from ui import scale
 from ui import theme as T
 from ui.scale import px
 from ui.tabs.media_tab import hms
-from ui.widgets.controls import IconButton, ScaledLabel, button, draw_cross, ui_font
+from ui.widgets.controls import button, button_width_for, draw_cross, IconButton
+from ui.widgets.marquee import _MARQUEE_GAP, _MARQUEE_HOLD, _MARQUEE_SPEED, MarqueeGroup
+from ui.widgets.text import ScaledLabel, ui_font
 from ui.widgets.dialogs import ask_yes_no, show_message
+from ui.widgets.tooltip import tip
+from ui.widgets.queue_controls import GAP, SearchBar, SearchToggle, SlideHost, SortDropdown, WhenDoneButton
 from ui.workers import pil_to_qimage, run_async
 
 _FINISHED = ("Done", "Failed")
@@ -43,6 +44,8 @@ _THUMB_W, _THUMB_H = 60, 40
 _ROW_H = 56
 _ROW_CORNER = 8
 _DETAIL_SCROLL_HEIGHT = 140
+_SORTS = ["A to Z", "Z to A", "Recent", "Oldest"]
+_SORT_DEFAULT = "Recent"
 _YTDLP = "Downloader"
 _PREPARING = "Preparing..."
 
@@ -59,7 +62,7 @@ _DETAIL_FIELDS = [
     ("video_codec", "Video Codec", None),
     ("audio_codec", "Audio Codec", None),
     ("start_secs", "Start Time", "time"),
-    ("duration_secs", "Clip Duration", "time"),
+    ("duration_secs", "Duration", "time"),
     ("av_sync", "A/V Sync", "bool"),
     ("strip_video", "Strip Video", "bool"),
     ("gpu_enabled", "GPU Acceleration", "bool"),
@@ -77,25 +80,103 @@ _VIDEO_DETAIL_KEYS = {"encoder", "gpu_enabled", "hdr_to_sdr", "quality", "profil
 _AUDIO_DETAIL_KEYS = set()
 
 
+_INFO_FONT_PX = 11
+_TITLE_CHARS = 25            # a title longer than this scrolls instead of being cut
+_COL_GAP = 6
+_TITLE_LEFT = 10 + _THUMB_W + 8
+_STATUS_TEXTS = ("Queued", "Paused", "Done", "Failed", "Encoding...", "Muxing...", _PREPARING, "Finishing...",
+                 *_STAGE_FOR_PART.values(), *_STAGE_FOR_POST.values())
+_AUDIO_TEXTS = tuple(f"{codec} {ch}" for codec in ("Dolby TrueHD", "E-AC-3", "Vorbis")
+                     for ch in ("1.0", "2.0", "5.1", "7.1", "9.1", "5.2", "7.2"))
+_HDR_TEXTS = ("HDR10", "HLG", "SDR", "HDR", "—")
+_CHANNEL_SHORT = {"Mono": "1.0", "Stereo": "2.0"}
+_RES_TEXTS = ("2160p", "4320p", "1440p", "1080p60", "1080p", "720p", "480p", "—")
+_NO_INFO = "—"
+_columns = None              # measured once: {"time", "res", "audio", "status", "title"} reference px
+
+
+def _measure_columns():
+    """Each info column's width, from the widest thing it can hold (reference
+    pixels), so nothing but a scrolling title is ever cut off."""
+    global _columns
+    if _columns is None:
+        fm = QFontMetricsF(ui_font(_INFO_FONT_PX))
+
+        def widest(texts):
+            return math.ceil(max(fm.horizontalAdvance(t) for t in texts)) + 4
+        _columns = {
+            "time": widest(("00:00:00", "100:00:00")),
+            "res": widest(_RES_TEXTS),
+            "hdr": widest(_HDR_TEXTS),
+            "audio": widest(_AUDIO_TEXTS),
+            "status": widest(t.rstrip(".") for t in _STATUS_TEXTS),
+            "title": math.ceil(fm.horizontalAdvance("n" * _TITLE_CHARS)) + 4,
+        }
+    return _columns
+
+
 class QueueRow(QWidget):
-    """One task, fully painted: thumbnail, description, status, ✕."""
+    """One task, fully painted: thumbnail, title, length, resolution, HDR/SDR, audio
+    codec + channels, status, ✕. A title past 25 characters (or too wide for its space)
+    scrolls; every other segment has room for its longest value."""
 
     clicked = Signal(int)
     removeRequested = Signal(int)
 
-    def __init__(self, task_id, description, status):
+    def __init__(self, task_id, description, status, info=None, group=None):
         super().__init__()
         self.task_id = task_id
-        self.description = description
+        self.description = description          # the title
+        self.info = info or {}                  # {"length": "01:00:00", "resolution": "1080p", "audio": "AAC"}
         self.status = status
         self.fraction = 0.0      # what's painted
         self.thumb = None        # QPixmap
         self._hover_x = False
+        self._scrolling = False  # the title's marquee, driven by the queue's shared MarqueeGroup
+        self._group = group
+        if group is not None:
+            group.register(self)
         scale.fixed(self, h=_ROW_H)
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
-        self._font = ui_font(13)
+        self._font = ui_font(_INFO_FONT_PX)
         T.theme.changed.connect(self.update)
+
+    # -- title marquee (duck-typed as a MarqueeGroup member) -----------------
+    def _title_width(self):
+        return QFontMetricsF(self._font).horizontalAdvance(self.description)
+
+    def _title_rect(self):
+        """The title's box: from after the thumbnail up to the time column."""
+        return QRectF(_TITLE_LEFT, 0, self._time_left() - _COL_GAP - _TITLE_LEFT, _ROW_H)
+
+    def _overflows(self):
+        return len(self.description) > _TITLE_CHARS or self._title_width() > self._title_rect().width()
+
+    def _sweep_seconds(self):
+        return (self._title_width() + _MARQUEE_GAP) / _MARQUEE_SPEED
+
+    def _sync_scrolling(self):
+        scrolling = self.isVisible() and self._overflows()
+        if scrolling != self._scrolling:
+            self._scrolling = scrolling
+            if self._group is not None:
+                self._group.invalidate()
+                if scrolling:
+                    self._group.reset()
+                self._group.sync()
+
+    def showEvent(self, e):
+        self._sync_scrolling()
+
+    def hideEvent(self, e):
+        self._scrolling = False
+        if self._group is not None:
+            self._group.invalidate()
+            self._group.sync()
+
+    def resizeEvent(self, e):
+        self._sync_scrolling()
 
     def set_status(self, status):
         if status != self.status:
@@ -110,11 +191,31 @@ class QueueRow(QWidget):
             self.fraction = fraction
             self.update()
 
+    # -- column geometry, right to left from the ✕ ---------------------------
     def _x_rect(self):
         return QRectF(scale.ref_size(self)[0] - 38, (_ROW_H - 28) / 2, 28, 28)
 
     def _status_rect(self):
-        return QRectF(scale.ref_size(self)[0] - 38 - 10 - 80, 0, 80, _ROW_H)
+        w = _measure_columns()["status"]
+        return QRectF(scale.ref_size(self)[0] - 38 - 6 - w, 0, w, _ROW_H)
+
+    def _hdr_rect(self):
+        w = _measure_columns()["hdr"]
+        return QRectF(self._audio_rect().left() - _COL_GAP - w, 0, w, _ROW_H)
+
+    def _audio_rect(self):
+        w = _measure_columns()["audio"]
+        return QRectF(self._status_rect().left() - _COL_GAP - w, 0, w, _ROW_H)
+
+    def _res_rect(self):
+        w = _measure_columns()["res"]
+        return QRectF(self._hdr_rect().left() - _COL_GAP - w, 0, w, _ROW_H)
+
+    def _time_left(self):
+        return self._res_rect().left() - _COL_GAP - _measure_columns()["time"]
+
+    def _time_rect(self):
+        return QRectF(self._time_left(), 0, _measure_columns()["time"], _ROW_H)
 
     def mouseMoveEvent(self, e):
         over = self._x_rect().contains(scale.ref_pos(e.position()))
@@ -153,17 +254,33 @@ class QueueRow(QWidget):
         p.fillPath(row, base)
 
         status_rect = self._status_rect()
-        desc_rect = QRectF(10 + _THUMB_W + 8, 0, status_rect.left() - 10 - (10 + _THUMB_W + 8), _ROW_H)
+        title_rect = self._title_rect()
+        cells = ((self._time_rect(), self.info.get("length") or _NO_INFO),
+                 (self._res_rect(), self.info.get("resolution") or _NO_INFO),
+                 (self._hdr_rect(), self.info.get("hdr") or _NO_INFO),
+                 (self._audio_rect(), self.info.get("audio") or _NO_INFO))
         running = self.status not in ("Queued", "Done", "Failed")
+        fm = QFontMetricsF(self._font)
 
         def draw_description(color):
             p.setFont(self._font)
             p.setPen(color)
-            elided = p.fontMetrics().elidedText(self.description, Qt.ElideRight, int(desc_rect.width()))
-            p.drawText(desc_rect, Qt.AlignVCenter | Qt.AlignLeft, elided)
+            for rect, value in cells:
+                p.drawText(rect, Qt.AlignVCenter | Qt.AlignHCenter, value)
+            p.save()
+            p.setClipRect(title_rect, Qt.IntersectClip)
+            baseline = (_ROW_H + fm.ascent() - fm.descent()) / 2
+            if self._scrolling and self._group is not None:
+                span = self._title_width() + _MARQUEE_GAP
+                travel = max(0.0, min(self._group.phase() - _MARQUEE_HOLD, span / _MARQUEE_SPEED)) * _MARQUEE_SPEED
+                p.drawText(QPointF(title_rect.left() - travel, baseline), self.description)
+                p.drawText(QPointF(title_rect.left() - travel + span, baseline), self.description)
+            else:
+                p.drawText(QPointF(title_rect.left(), baseline), self.description)
+            p.restore()
 
         draw_description(text)
-        # The fill covers thumbnail + description, stopping at the status
+        # The fill covers thumbnail + title + info, stopping at the status
         # column; square right edge (mid-row and moving), rounded left.
         fill_w = status_rect.left() * self.fraction if running else 0.0
         if fill_w >= 1:
@@ -189,7 +306,7 @@ class QueueRow(QWidget):
 
         p.setFont(self._font)
         p.setPen(text)
-        p.drawText(status_rect, Qt.AlignCenter, self.status)
+        p.drawText(status_rect, Qt.AlignCenter, self.status.rstrip("."))
         xr = self._x_rect()
         if self._hover_x:
             hover = QPainterPath()
@@ -219,6 +336,17 @@ class ProgressStrip(QWidget):
         p.fillRect(QRectF(0, 0, self.width() * self.value, self.height()), T.theme.color("primary"))
 
 
+class _DetailScroll(QScrollArea):
+    """The details list: prefers `_DETAIL_SCROLL_HEIGHT` but gives way, so the
+    panel can be squeezed (by the search row) and stretched back."""
+
+    def sizeHint(self):
+        return QSize(super().sizeHint().width(), px(_DETAIL_SCROLL_HEIGHT))
+
+    def minimumSizeHint(self):
+        return QSize(0, px(40))
+
+
 class _DetailPanel(QWidget):
     def __init__(self):
         super().__init__()
@@ -228,10 +356,7 @@ class _DetailPanel(QWidget):
         self._restyle()
 
     def _restyle(self):
-        # Connected to `scale.changed`, which fires on every live-resize step
-        # regardless of which tab is showing: skip the (fairly costly)
-        # setStyleSheet call when the text it would set hasn't actually
-        # changed, same guard `MainWindow._style` uses for the per-tab sheet.
+        # Runs on every live-resize step: skip setStyleSheet when the text is unchanged.
         css = f"_DetailPanel {{ background: {T.theme.hex('panel')}; border-radius: {px(8)}px; }}"
         if css != getattr(self, "_last_css", None):
             self._last_css = css
@@ -251,13 +376,17 @@ class QueueTab(QWidget):
         self._error_queue = []
         self._error_dialog_open = False
         self._detail_task_id = None
+        self._marquee = MarqueeGroup()      # every row's scrolling title loops in step
+        self._sort = _SORT_DEFAULT          # one of _SORTS
+        self._filter = ""
 
         root = QVBoxLayout(self)
         scale.margins(root, 20, 15, 20, 10)
-        scale.spacing(root, 10)
+        scale.spacing(root, 0)      # the gaps are spacers / carried by the sliding rows, so none pops in or out
 
         self.progress_bar = ProgressStrip()
         root.addWidget(self.progress_bar)
+        scale.spacer(root, GAP)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -269,16 +398,8 @@ class QueueTab(QWidget):
         self.list_layout.addStretch(1)
         self.scroll.setWidget(host)
 
-        # The empty-state message lives in its own stack page, not inside
-        # `list_layout` alongside real rows — a stretch on both sides of it
-        # there would centre it nicely while the list is genuinely empty,
-        # but that same stretch stays live once rows exist too (a plain
-        # QLayout item, unaffected by any one widget's own `.hide()`),
-        # pushing the whole populated list down/off-centre instead of
-        # letting it anchor to the top and scroll normally. A `QStackedLayout`
-        # sidesteps that: only one page is ever shown, chosen explicitly by
-        # `_show_task_list`/`_show_empty_state` below, so the centring
-        # stretches here can never leak into the row list's own layout.
+        # The empty-state message is its own stack page: centring stretches in `list_layout`
+        # would stay live once rows arrive and push the list off the top.
         self.empty_label = ScaledLabel("No tasks queued yet.")
         self.empty_label.setProperty("role", "empty")
         self.empty_label.setAlignment(Qt.AlignCenter)
@@ -288,17 +409,16 @@ class QueueTab(QWidget):
         epl.addWidget(self.empty_label, 0, Qt.AlignHCenter)
         epl.addStretch(1)
 
-        list_area = QWidget()
+        list_area = self._list_area = QWidget()
         self._list_stack = QStackedLayout(list_area)
         self._list_stack.addWidget(self.scroll)
         self._list_stack.addWidget(self._empty_page)
         self._list_stack.setCurrentWidget(self._empty_page)
         root.addWidget(list_area, 1)
 
-        # Details popup — hidden until a row is clicked; fixed height so a
-        # long Encode field list scrolls instead of growing the box.
-        self.detail_frame = _DetailPanel()
-        dl = QVBoxLayout(self.detail_frame)
+        # Details panel: hidden until a row is clicked; a long field list scrolls.
+        self.detail_panel = _DetailPanel()
+        dl = QVBoxLayout(self.detail_panel)
         scale.margins(dl, 10, 8, 6, 8)
         scale.spacing(dl, 4)
         header = QHBoxLayout()
@@ -312,32 +432,59 @@ class QueueTab(QWidget):
         header.addWidget(self.detail_goto_btn)
         close = IconButton("close", role="ghost", width=24, height=24)
         scale.bind_style(close, lambda: f"min-height: {px(24)}px; padding: 0;")
-        close.clicked.connect(self.detail_frame.hide)
+        close.clicked.connect(self._close_details)
         header.addWidget(close)
         dl.addLayout(header)
-        self.detail_scroll = QScrollArea()
+        self.detail_scroll = _DetailScroll()
         self.detail_scroll.setWidgetResizable(True)
-        scale.fixed(self.detail_scroll, h=_DETAIL_SCROLL_HEIGHT)
         self.detail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         dl.addWidget(self.detail_scroll)
-        self.detail_frame.hide()
-        root.addWidget(self.detail_frame)
+        # The host slides the panel up over the bottom of the list (and keeps it put while
+        # another row is picked); it floats, placed in `_place_search`, not in the layout.
+        self.detail_frame = SlideHost(self.detail_panel)
+        self.detail_frame.setParent(self)
+
+        # Floats over the list (placed in `_place_search`, not in the layout).
+        self.search_bar = SearchBar()
+        self.search_bar.setParent(self)
+        self.search_bar.queryChanged.connect(self._set_filter)
+        self.search_bar.heightChanged.connect(self._on_search_height)
 
         controls = QHBoxLayout()
         scale.spacing(controls, 8)
-        self.clear_btn = button("Clear Completed", width=140)
+        self.clear_btn = button("Clear Completed", width=button_width_for(["Clear Completed"], padding=20))
         self.clear_btn.clicked.connect(self.clear_completed)
-        self.clear_all_btn = button("Clear All", width=90)
+        self.clear_all_btn = button("Clear All", width=button_width_for(["Clear All"], padding=20))
         self.clear_all_btn.clicked.connect(self.clear_all)
         controls.addWidget(self.clear_btn)
         controls.addWidget(self.clear_all_btn)
         controls.addStretch(1)
-        self.stop_btn = button("Stop Queue", role="danger", width=140)
+        self.sort_menu = SortDropdown("Sort By:", _SORTS)
+        self.sort_menu.set(_SORT_DEFAULT)
+        self.sort_menu.picked.connect(self._set_sort)
+        tip(self.sort_menu, "How the queue is ordered — and so the order it runs in. Recent puts the "
+                            "newest-added task first, Oldest the oldest-added.")
+        controls.addWidget(self.sort_menu)
+        self.search_toggle = SearchToggle()
+        self.search_toggle.clicked.connect(self.search_bar.toggle_open)
+        controls.addWidget(self.search_toggle)
+        controls.addStretch(1)
+        self.stop_btn = button("Stop Queue", role="danger", width=button_width_for(["Stop Queue"], padding=20))
         self.stop_btn.clicked.connect(self.stop_queue)
-        self.start_all_btn = button("Start Queue", role="action", width=140)
+        self.start_all_btn = button("Start Queue", role="action", width=button_width_for(["Start Queue", "Pause Queue"], padding=20))
         self.start_all_btn.clicked.connect(self.toggle_queue)
         controls.addWidget(self.stop_btn)
-        controls.addWidget(self.start_all_btn)
+        # Start Queue and its When Done button read as one control: almost no gap between them.
+        start_group = QHBoxLayout()
+        scale.spacing(start_group, 3)
+        start_group.addWidget(self.start_all_btn)
+        self.when_done_btn = WhenDoneButton(power.ACTIONS)
+        self.when_done_btn.set(app.when_done)
+        self.when_done_btn.picked.connect(self._on_when_done)
+        self._retip_when_done()
+        start_group.addWidget(self.when_done_btn)
+        controls.addLayout(start_group)
+        scale.spacer(root, GAP)
         root.addLayout(controls)
 
         self._poll_timer = QTimer(self)
@@ -358,15 +505,114 @@ class QueueTab(QWidget):
         self._next_id += 1
         settings = settings or {}
         llamalog.get("queue").info("Task %s added (%s, %s): %s", task_id, source_tab, status, description)
-        widget = QueueRow(task_id, description, status)
+        meta = self._row_meta(settings, source_tab)
+        shown = {**meta, "length": hms(meta["length"]) if meta["length"] is not None else ""}
+        widget = QueueRow(task_id, description, status, info=shown, group=self._marquee)
         widget.clicked.connect(self._show_details)
         widget.removeRequested.connect(self.remove_task)
         self.list_layout.insertWidget(self.list_layout.count() - 1, widget)
-        self._rows[task_id] = {"widget": widget, "settings": settings,
-                               "source_tab": source_tab, "error": None}
+        self._rows[task_id] = {"widget": widget, "settings": settings, "source_tab": source_tab,
+                               "error": None, "added": time.time(), "meta": meta}
         self._load_thumbnail(widget, settings.get("input_file"), settings.get("thumbnail_url"))
+        self._apply_sort()
+        if self._filter:
+            self._apply_filter()
         self._update_overall_progress()
         return task_id
+
+    # ------------------------------------------------------------------ #
+    #  Row info: length, resolution, audio codec — as the settings will leave them
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _effective_length(total, start, duration):
+        """Length of the output: the trim applied to the source's `total`
+        seconds (`duration` 0 means to the end); None while `total` is unknown."""
+        if not total:
+            return None
+        remaining = max(0.0, total - min(start or 0, total))
+        return duration if duration and duration < remaining else remaining
+
+    def _source_info(self, settings):
+        """The probe of this task's input, when it is still the selected file
+        (add_task always runs right after the tab gathered the settings)."""
+        info = self.app.media.info
+        if info and settings.get("input_file") and settings.get("input_file") == self.app.media.current_file_path:
+            return info
+        return {}
+
+    def _row_meta(self, settings, source_tab):
+        """`{"length": secs|None, "total": secs|None, "resolution", "hdr", "audio": text}` for the row
+        and the details panel; text is "" where there is nothing to show."""
+        if source_tab == _YTDLP:
+            return self._download_meta(settings)
+        info = self._source_info(settings)
+        total = info.get("duration")
+        length = self._effective_length(total, settings.get("start_secs"), settings.get("duration_secs"))
+        resolution = ""
+        if not settings.get("strip_video") and info.get("height"):
+            resolution = f"{info['height']}p"
+            target = formats.resolution_height_for(settings.get("resolution"))
+            source_h = settings.get("source_height") or info["height"]
+            if target and target < source_h:
+                resolution = f"{target}p"
+        hdr = ""
+        if not settings.get("strip_video"):
+            vtracks = settings.get("video_tracks") or []
+            vprobed = info.get("video_streams") or []
+            index = vtracks[0].get("index", 0) if vtracks and vtracks[0].get("source") == "primary" else 0
+            if settings.get("hdr_to_sdr"):
+                hdr = "SDR"
+            elif index < len(vprobed) and vprobed[index].get("hdr_display"):
+                hdr = vprobed[index]["hdr_display"]
+            elif info.get("hdr") is not None:
+                hdr = "HDR" if info["hdr"] else "SDR"
+        audio = ""
+        if not settings.get("strip_audio"):
+            probed = info.get("audio_streams") or []
+            codec, channels, stream = "", "", None
+            if source_tab == "Encoding":
+                streams = settings.get("audio_streams") or []
+                entry = streams[0] if streams else {}
+                codec = entry.get("codec") or ""
+                codec = "" if codec == formats.SELECT else codec
+                channels = entry.get("channels") or ""
+                if entry.get("source") == "primary" and entry.get("index", 0) < len(probed):
+                    stream = probed[entry["index"]]
+            else:
+                tracks = settings.get("audio_tracks") or []
+                first = tracks[0] if tracks else None
+                if first and first.get("source") == "primary" and first.get("index", 0) < len(probed):
+                    stream = probed[first["index"]]
+                elif not tracks:
+                    stream = probed[0] if probed else None
+                    codec = info.get("audio") or ""
+            if stream:
+                codec = codec or stream.get("codec") or ""
+            if not channels or channels == formats.SELECT:
+                channels = (stream or {}).get("channels_display") or ""
+            channels = _CHANNEL_SHORT.get(channels, channels)
+            audio = f"{codec} {channels}".strip() if codec else ""
+        return {"length": length, "total": total, "resolution": resolution, "hdr": hdr, "audio": audio}
+
+    def _download_meta(self, settings):
+        cache = self.app.ytdlp_cache or {}
+        total = None
+        if cache.get("url") == settings.get("url"):
+            total = (cache.get("info") or {}).get("duration")
+        plan = settings.get("download") or {}
+        total = total or ((plan.get("post") or {}).get("media_secs")) or None
+        mode = settings.get("mode")
+        quality = "" if mode == downloader.MODE_AUDIO else (settings.get("quality") or "")
+        resolution = quality.replace(" HDR", "")
+        hdr = "" if not quality or quality == downloader.BEST_QUALITY else ("HDR" if "HDR" in quality else "SDR")
+        if resolution == downloader.BEST_QUALITY:
+            resolution = "Best"
+        if mode == downloader.MODE_VIDEO:
+            audio = ""
+        else:
+            audio = settings.get("video_codec") if mode == downloader.MODE_AUDIO else settings.get("audio_codec")
+        audio = "Auto" if audio == downloader.BEST_CODEC else (audio or "")
+        return {"length": total, "total": total, "resolution": resolution, "hdr": hdr, "audio": audio}
 
     def _status(self, task_id):
         return self._rows[task_id]["widget"].status
@@ -377,6 +623,11 @@ class QueueTab(QWidget):
         thumbnail for the same link, else one decoded / fetched on a worker."""
         def deliver(image):
             if image is not None and not image.isNull() and widget.task_id in self._rows:
+                # Only as big as it can be drawn (the 60x40 slot at up to 4x), not the whole
+                # frame: a 4K preview frame is 33MB.
+                if image.width() > _THUMB_W * 4 and image.height() > _THUMB_H * 4:
+                    image = image.scaled(_THUMB_W * 4, _THUMB_H * 4,
+                                         Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
                 widget.thumb = QPixmap.fromImage(image)
                 widget.update()
 
@@ -389,8 +640,8 @@ class QueueTab(QWidget):
             return
         if not input_file:
             return
-        if self.app.thumb_frames and self.app.thumb_frames_path == input_file:
-            deliver(self.app.thumb_frames[0])
+        if self.app.media.thumb_frames and self.app.media.thumb_frames_path == input_file:
+            deliver(self.app.media.thumb_frames[0])
             return
         run_async(lambda: pil_to_qimage(extract_video_thumbnail(input_file)), deliver)
 
@@ -429,9 +680,7 @@ class QueueTab(QWidget):
         return False
 
     def on_leave(self):
-        """Switching away: a completed 100% bar resets so it doesn't linger,
-        and the details popup (if open) closes — coming back to Queue always
-        starts with it hidden rather than showing a stale task's details."""
+        """Switching away: a completed 100% bar resets and the details panel closes."""
         if self.progress_bar.value >= 1.0:
             self.progress_bar.set_value(0)
         self.detail_frame.hide()
@@ -457,8 +706,13 @@ class QueueTab(QWidget):
             row["widget"].deleteLater()
         if task_id == self._detail_task_id:
             self.detail_frame.hide()
+        if row:
+            self._marquee.unregister(row["widget"])
         if not self._rows:
+            self.empty_label.setText("No tasks queued yet.")
             self._list_stack.setCurrentWidget(self._empty_page)
+        elif self._filter:
+            self._apply_filter()
         self._update_overall_progress()
         if continue_with is not None:
             self._process_next(continue_with)
@@ -480,8 +734,96 @@ class QueueTab(QWidget):
             self.remove_task(task_id)
 
     # ------------------------------------------------------------------ #
+    #  Sorting and searching
+    # ------------------------------------------------------------------ #
+    def _set_sort(self, choice):
+        self._sort = choice
+        llamalog.get("queue").info("Queue sort: %s", choice)
+        self._apply_sort()
+
+    def _on_when_done(self, action):
+        """The queue's own door to Settings' When Done: same value, kept in step both ways."""
+        self.app.when_done = action
+        settings = self.app.tabs.get("Settings")
+        if settings is not None:
+            settings.when_done_menu.set(action)
+            settings.autosave()
+        self._retip_when_done()
+
+    def _retip_when_done(self):
+        tip(self.when_done_btn, f"When Done: {self.app.when_done}\nWhat happens once the queue has finished")
+
+    def on_enter(self):
+        """Settings may have changed When Done while this tab was away."""
+        self.when_done_btn.set(self.app.when_done)
+        self._retip_when_done()
+
+    def _apply_sort(self):
+        """Put the rows, and their run order, in the chosen order: title A-Z / Z-A, or time
+        added (Recent newest first, Oldest oldest first). Stable."""
+        by_time = sorted(self._rows, key=lambda tid: (self._rows[tid]["added"], tid))
+        if self._sort == "Recent":
+            order = by_time[::-1]
+        elif self._sort == "Oldest":
+            order = by_time
+        else:
+            order = sorted(by_time, key=lambda tid: self._rows[tid]["widget"].description.casefold(),
+                           reverse=self._sort == "Z to A")
+        self._rows = {tid: self._rows[tid] for tid in order}
+        for i, tid in enumerate(order):
+            self.list_layout.insertWidget(i, self._rows[tid]["widget"])
+        if self._active is not None:
+            position = {tid: i for i, tid in enumerate(order)}
+            self._active["rest"].sort(key=lambda tid: position.get(tid, len(position)))
+
+    def _place_search(self):
+        """The floating overlays: the details panel over the list's bottom edge, and the search row
+        (the list's width) just above the bottom buttons."""
+        row = self.search_bar.sizeHint().height()
+        area = self._list_area
+        self.detail_frame.set_anchor(area.x(), area.y() + area.height(), area.width())
+        self.detail_frame.raise_() if self.detail_frame.isVisible() else None
+        self.search_bar.setGeometry(area.x(), self.clear_btn.y() - scale.px(GAP) - row, area.width(), row)
+        self.search_bar.raise_()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._place_search()
+        QTimer.singleShot(0, self._place_search)      # once the layout has settled
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        QTimer.singleShot(0, self._place_search)
+
+    def _on_search_height(self, height):
+        """The search row floats over the list; only an open details panel gives it room
+        (its bottom edge moves up, its top edge stays put)."""
+        self._place_search()
+        self.detail_frame.set_inset(height)
+
+    def _set_filter(self, text):
+        self._filter = text.strip().casefold()
+        self._apply_filter()
+
+    def _apply_filter(self):
+        """Hides the rows whose title lacks the search text; says so when none match."""
+        shown = 0
+        for tid, row in self._rows.items():
+            match = self._filter in row["widget"].description.casefold()
+            row["widget"].setVisible(match)
+            shown += match
+        if not self._rows:
+            return
+        self.empty_label.setText("No matching tasks." if self._filter and not shown else "No tasks queued yet.")
+        self._list_stack.setCurrentWidget(self.scroll if shown else self._empty_page)
+
+    # ------------------------------------------------------------------ #
     #  Details popup
     # ------------------------------------------------------------------ #
+    def _close_details(self):
+        self.detail_frame.slide_closed()
+        self._detail_task_id = None
+
     def _show_details(self, task_id):
         row = self._rows.get(task_id)
         if not row:
@@ -503,21 +845,27 @@ class QueueTab(QWidget):
         strip_video = bool(settings.get("strip_video"))
         strip_audio = bool(settings.get("strip_audio"))
         is_download = row["source_tab"] == _YTDLP
+        meta = row.get("meta") or {}
+        length = meta.get("length")
+        # "from the start, to the end of the file" is no trim at all, so Start Time is left out.
+        whole_file = not settings.get("start_secs") and (
+            not settings.get("duration_secs") or (meta.get("total") and settings["duration_secs"] >= meta["total"]))
         for key, label, fmt in _DETAIL_FIELDS:
             if key not in settings:
                 continue
+            if key == "start_secs" and whole_file:
+                continue
             if (strip_video and key in _VIDEO_DETAIL_KEYS) or (strip_audio and key in _AUDIO_DETAIL_KEYS):
                 continue
-            # "quality" means two unrelated things depending on who queued
-            # the task: Encoding's CRF/qscale value vs. the Downloader's own
-            # resolution pick (DownloaderTab's dropdown is itself labeled
-            # "Resolution:" — see its own module docstring). Same settings
-            # key, so this is the one place that has to tell them apart
-            # rather than the field list itself, which has no per-task-kind
-            # branching otherwise.
+            # "quality" is Encoding's CRF / qscale but the Downloader's Resolution pick.
             if key == "quality" and is_download:
                 label = "Resolution"
             value = settings[key]
+            if key == "duration_secs":
+                value = length      # always how long the output is, never the raw 00:00:00 "to the end"
+                if value is None:
+                    rows.append((label, "—", False))
+                    continue
             if fmt == "time":
                 value = hms(value)
             elif fmt == "bool":
@@ -534,10 +882,7 @@ class QueueTab(QWidget):
                         bits.append(entry[k])
                 rows.append(("Audio Stream" if len(streams) == 1 else f"Audio Stream {i + 1}",
                              " · ".join(bits), False))
-        # video_tracks/audio_tracks (Muxing only -- see MuxingTab._track_args)
-        # each carry every *checked* track for that kind, so a Mux task shows
-        # one row per included track rather than a single "Video Track: ..."
-        # value the way the old single-track dropdown did.
+        # A Mux task lists one row per checked track.
         for kind, key, strip in (("Video", "video_tracks", strip_video), ("Audio", "audio_tracks", strip_audio)):
             if key not in settings or strip:
                 continue
@@ -547,6 +892,28 @@ class QueueTab(QWidget):
                          else os.path.basename((entry.get("file") or "").replace("\\", "/")))
                 label = f"{kind} Track" if len(tracks) == 1 else f"{kind} Track {i + 1}"
                 rows.append((label, f"Track {entry.get('index', 0) + 1}  ·  {where}", False))
+        # Subtitles and chapters (Mux and Encode tasks).
+        if settings.get("strip_subtitles"):
+            rows.append(("Strip Subtitles", "Yes", False))
+        elif "subtitle_tracks" in settings:
+            tracks = settings.get("subtitle_tracks") or []
+            for i, entry in enumerate(tracks):
+                where = ("Source" if entry.get("source") == "primary"
+                         else os.path.basename((entry.get("file") or "").replace("\\", "/")))
+                bits = [f"Track {entry.get('index', 0) + 1}", where,
+                        formats.FFPROBE_SUBTITLE.get(entry.get("codec_name"), entry.get("codec_name") or "—"),
+                        formats.language_name(entry.get("language"))]
+                bits += [flag.capitalize() for flag in ("default", "forced") if entry.get(flag)]
+                rows.append(("Subtitles" if len(tracks) == 1 else f"Subtitles {i + 1}", "  ·  ".join(bits), False))
+        burn = settings.get("burn_subtitle")
+        if burn and not strip_video:
+            where = ("Source" if burn.get("source") == "primary"
+                     else os.path.basename((burn.get("file") or "").replace("\\", "/")))
+            rows.append(("Burned In", f"Track {burn.get('index', 0) + 1}  ·  {where}", False))
+        if settings.get("strip_chapters"):
+            rows.append(("Strip Chapters", "Yes", False))
+        elif settings.get("chapters") is not None:
+            rows.append(("Chapters", f"{len(settings['chapters'])}, edited", False))
         if row.get("error"):
             rows.append(("Error", row["error"], True))
         for r, (label, value, is_error) in enumerate(rows):
@@ -562,7 +929,7 @@ class QueueTab(QWidget):
             grid.addWidget(value_label, r, 1)
         grid.setRowStretch(len(rows), 1)
         self.detail_scroll.setWidget(body)
-        self.detail_frame.show()
+        self.detail_frame.slide_open()      # rises once; picking another row while open just swaps the contents
 
     def _go_to_detail_file(self):
         row = self._rows.get(self._detail_task_id)
@@ -673,24 +1040,24 @@ class QueueTab(QWidget):
         if row["source_tab"] == _YTDLP:
             self._start_download(task_id, row, rest)
             return
-        # The job's values become the ffmpeg_vars globals and its argv is
-        # compiled from them here on the GUI thread — workers only ever see a
-        # plain list, never the shared module state.
-        ffmpeg_vars.load(row["settings"], row["source_tab"])
-        final_path = os.path.abspath(ffmpeg_vars.OUTPUT_PATH)
+        # Loaded and compiled here on the GUI thread: workers only ever see a plain argv.
+        job_vars = ffmpeg_vars.derive(row["settings"], row["source_tab"])
+        final_path = os.path.abspath(job_vars.output_path)
         temp_path = partial_path(final_path)
         try:
-            args = compile_command(temp_path, loglevel=llamalog.ffmpeg_loglevel())
+            args = compile_command(job_vars, temp_path, loglevel=llamalog.ffmpeg_loglevel())
+            prepare = prepare_commands(job_vars, temp_path)
         except Exception as exc:
             llamalog.get("queue").exception("Couldn't build the ffmpeg command for task %s", task_id)
             self._fail_task(task_id, rest, f"Couldn't build the ffmpeg command: {exc}")
             return
         job = FfmpegJob(
             args, final_path, temp_path,
-            duration_secs=ffmpeg_vars.DURATION_SECS,
-            input_file=ffmpeg_vars.INPUT_FILE,
-            start_secs=ffmpeg_vars.START_SECS,
-            verify_hdr_tag=uses_hdr_tonemap(),
+            duration_secs=job_vars.duration_secs,
+            input_file=job_vars.input_file,
+            start_secs=job_vars.start_secs,
+            verify_hdr_tag=uses_hdr_tonemap(job_vars),
+            prepare=prepare,
             priority=self.app.priority_level,
         )
         self._active = {"task_id": task_id, "job": job, "rest": rest,
@@ -719,9 +1086,8 @@ class QueueTab(QWidget):
             self._active["job"].set_priority(self.app.priority_level)
 
     def _run_when_done(self):
-        """Settings' "When Done" — held back while a failure notice is still
-        up (its modal would otherwise stack under the countdown) and dropped if
-        the user queued more work in the meantime."""
+        """Settings' "When Done": held back while a failure notice is up, and dropped if more
+        work was queued meanwhile."""
         if self._error_dialog_open or self._error_queue:
             QTimer.singleShot(500, self._run_when_done)
             return
@@ -737,10 +1103,8 @@ class QueueTab(QWidget):
         self._frame_timer.stop()
 
     def _poll(self):
-        """Drain the active job's events; settle it when it ends. The final
-        ("progress", 1.0) usually lands in the same batch as "done", so the
-        fraction is applied — and the fill snapped full — before the status
-        flips, and the full bar is actually seen."""
+        """Drain the active job's events and settle it when it ends. Progress is applied and
+        the fill snapped full before the status flips, so the full bar is seen."""
         active = self._active
         if active is None:
             self._stop_timers()
@@ -808,8 +1172,8 @@ class QueueTab(QWidget):
         self._process_next(rest)
 
     def _show_errors(self):
-        """Failure notices one at a time — never from inside the poll, since a
-        modal spins a nested loop and the poll keeps firing under it."""
+        """Failure notices one at a time, never from inside the poll (a modal's nested loop
+        keeps the poll firing)."""
         if self._error_dialog_open:
             return
         self._error_dialog_open = True

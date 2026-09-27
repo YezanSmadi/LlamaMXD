@@ -1,14 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""The shared Muxing/Encoding frame.
-
-The header, preview area, sub-tab panels, save row, action buttons, presets,
-output-path logic and queue hand-off live here once; each tab supplies its
-own panels and its own `_sync_controls` (the two rulesets genuinely differ —
-Encoding cascades container → codec, Muxing inverts it).
-
-The three sub-tab panels sit in a `QStackedWidget`, which sizes itself to the
-tallest page — so the preview above never changes height on a switch."""
+"""The frame Muxing and Encoding share: header, preview, sub-tab panels, save row, actions,
+presets, output-path logic and the queue hand-off. Each tab supplies its panels and its own
+`_sync_controls`. The panels' QStackedWidget sizes to its tallest page, so the preview never
+changes height on a sub-tab switch."""
 import os
 
 from PySide6.QtCore import Qt
@@ -23,30 +18,32 @@ from PySide6.QtWidgets import (
 
 from core import formats, naming, presets
 from ui import scale
-from ui.widgets.carousel import ThumbnailCarousel, _ExpandedPreviewOverlay
-from ui.widgets.controls import (
-    NO_OPTION,
-    CheckBox,
-    Dropdown,
-    MarqueeLabel,
-    ScaledLineEdit,
-    TimeSpinner,
-    button,
-    button_width_for,
-    labeled,
-    set_enabled,
-)
-from ui.widgets.dialogs import ask_text, ask_yes_no, confirm_output_path, show_message
+from ui.widgets.carousel import ThumbnailCarousel
+from ui.widgets.chapters import ChapterEditor
+from ui.widgets.preview_overlay import _ExpandedPreviewOverlay
+from ui.widgets.controls import button, button_width_for, labeled, set_enabled
+from ui.widgets.dropdown import Dropdown, NO_OPTION
+from ui.widgets.marquee import MarqueeLabel
+from ui.widgets.text import ScaledLineEdit
+from ui.widgets.timespinner import TimeSpinner
+from ui.widgets.toggles import CheckBox
+from ui.widgets.dialogs import ask_text, ask_yes_no, ask_yes_no_remember, confirm_output_path, show_message
 from ui.widgets.panels import MEDIA_FILTER, DropBox, SubTabBar, SummaryPanel
 from ui.widgets.tooltip import tip
 from ui.tips import CONTAINER_TIPS
 
-SUBTABS = ("Overview", "Video", "Audio")
+SUBTABS = ("Overview", "Video", "Audio", "Subtitles", "Chapters")
+# Ctrl+Z/Ctrl+Shift+Z (`undo_current`/`redo_current`): the sub-tab names that have a kind's
+# `_undo(kind)`/`_redo(kind)` history; Overview and Chapters don't.
+_UNDO_KIND_FOR_SUBTAB = {"Video": "video", "Audio": "audio", "Subtitles": "subtitle"}
 
 AV_SYNC_TIP = ("Holds a constant frame rate and keeps timestamps aligned — turn off only "
                "if you need the source's exact original timing.")
 STRIP_TIP = "Removes this stream entirely from the output — the other panel's stream is unaffected."
 PRESET_TIP = "Presets remember the container and codec/quality choices — never the trim, file paths, or track picks."
+CLEAR_TIP = "Clears the selected file and everything decoded from it, without touching the file itself."
+_CLEAR_TITLE = "Clear Selected File?"
+_CLEAR_MESSAGE = "Are you sure you want to clear the currently selected file?"
 
 
 def hrow(spacing=0, align_bottom=True):
@@ -76,9 +73,9 @@ def set_line_text(entry, text):
 
 class MediaTab(QWidget):
     """Base for Muxing and Encoding. Subclasses set the class constants and
-    implement `build_video`, `build_audio`, `_sync_controls`,
+    implement `build_video`, `build_audio`, `build_subtitles`, `_sync_controls`,
     `_refresh_summary`, `_gather_settings`, `_apply_settings` and
-    `_validate_specific`."""
+    `_validate_specific`. The Chapters page is shared (`ChapterEditor`)."""
 
     TAB = ""
     ACTION_TEXT = ""
@@ -92,8 +89,8 @@ class MediaTab(QWidget):
         self.app = app
         self._ready = False
         self._init_state()
-        # The container we defaulted for the user — None the moment they pick
-        # one, so a new file drop never overrides a deliberate choice.
+        # The container defaulted for the user; None once they pick one, so a new file never
+        # overrides a deliberate choice.
         self._auto_format = formats.containers()[0]
         self._auto_output = app.default_save_location or ""
 
@@ -111,19 +108,19 @@ class MediaTab(QWidget):
         root.addWidget(header)
         scale.spacer(root, 15)
 
-        # --- Preview: the DropBox until the first frames land, then the
-        # carousel in its place.
+        # --- Preview: the DropBox until the first frames land, then the carousel.
         preview = QWidget()
         self._preview_stack = QStackedLayout(preview)
         self.drop_box = DropBox(start_dir=self._output_directory)
-        self.drop_box.fileSelected.connect(app.update_global_file)
+        self.drop_box.fileSelected.connect(app.media.select_file)
         self.carousel = ThumbnailCarousel(host=self)
         self.carousel.reselect.connect(self.select_input_file)
         self.carousel.populated.connect(self._reveal_preview)
-        self.carousel.indexChanged.connect(app.sync_preview_index)
-        self.carousel.fileDropped.connect(app.update_global_file)
+        self.carousel.indexChanged.connect(app.media.sync_preview_index)
+        self.carousel.fileDropped.connect(app.media.select_file)
         self.carousel.expandToggled.connect(self._on_expand_toggled)
         self._expand_overlay = None
+        self._expand_slot = None
         self._preview_stack.addWidget(self.drop_box)
         self._preview_stack.addWidget(self.carousel)
         root.addWidget(preview, 1)
@@ -134,6 +131,10 @@ class MediaTab(QWidget):
         self.panels.addWidget(self._build_overview())
         self.panels.addWidget(self.build_video())
         self.panels.addWidget(self.build_audio())
+        self.panels.addWidget(self.build_subtitles())
+        self.chapter_editor = ChapterEditor(app, lambda: self.panels.widget(0).sizeHint().height())
+        self.chapter_editor.changed.connect(self._on_control_change)
+        self.panels.addWidget(self.chapter_editor)
         self.sub_tab_bar.changed.connect(lambda n: self.panels.setCurrentIndex(SUBTABS.index(n)))
         root.addWidget(self.panels)
         scale.spacer(root, 11)
@@ -151,18 +152,21 @@ class MediaTab(QWidget):
         root.addWidget(save)
         scale.spacer(root, 10)
 
-        # --- Queue Task (secondary) + the do-it-now button (primary) — by role, so a
-        # theme can swap the two (Terminal does).
+        # --- Clear, then Queue Task + the do-it-now button, by role (a theme can swap the latter two).
         actions, al = hrow(spacing=8, align_bottom=False)
+        self.clear_btn = button("Clear", role="danger", width=button_width_for(["Clear"]))
+        self.clear_btn.clicked.connect(self._on_clear)
+        tip(self.clear_btn, CLEAR_TIP)
         self.queue_btn = button("Queue Task", role="queue")
         self.queue_btn.clicked.connect(self.add_to_queue)
         self.go_btn = button(self.ACTION_TEXT, role="action")
         self.go_btn.clicked.connect(self.run_now)
+        al.addWidget(self.clear_btn)
         al.addWidget(self.queue_btn, 1)
         al.addWidget(self.go_btn, 1)
         root.addWidget(actions)
 
-        app.register_media_tab(self)
+        app.media.register_tab(self)
         self._sync_controls()
         self._ready = True
 
@@ -173,8 +177,8 @@ class MediaTab(QWidget):
     #  Overview panel (shared)
     # ------------------------------------------------------------------ #
     def _build_overview(self):
-        """Output Format + presets on one row, the one global trim + A/V Sync
-        below, the export rundown on the right."""
+        """Output Format + presets on one row, the trim + A/V Sync below, the rundown on the
+        right."""
         page = QWidget()
         outer = QHBoxLayout(page)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -206,12 +210,8 @@ class MediaTab(QWidget):
         r1.addWidget(self.preset_delete_btn, 0, Qt.AlignBottom)
         left.addWidget(row1)
 
-        # There is no "Retain Video Length" checkbox: Duration 00:00:00
-        # already means "to the end of the file" — greyed out like a
-        # placeholder while it's still 0, for exactly that reason, and back
-        # to normal the moment it's incremented off it. Start Time is the same:
-        # 00:00:00 there means "from the beginning", so it reads as not set until
-        # the user spins it.
+        # Duration 00:00:00 means "to the end" and Start 00:00:00 "from the beginning", so
+        # both read muted until spun.
         row2, r2 = hrow(spacing=14)
         self.start_time_spinner = TimeSpinner(mute_when_zero=True)
         self.duration_time_spinner = TimeSpinner(mute_when_zero=True)
@@ -239,8 +239,7 @@ class MediaTab(QWidget):
 
     @staticmethod
     def stream_page():
-        """An empty sub-tab page: `(page, left_layout, right_layout)`, the
-        left bottom-anchored."""
+        """An empty sub-tab page: `(page, left_layout, right_layout)`, left bottom-anchored."""
         page = QWidget()
         outer = QHBoxLayout(page)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -255,11 +254,34 @@ class MediaTab(QWidget):
         return page, left, right
 
     # ------------------------------------------------------------------ #
+    #  Undo / redo (Ctrl+Z / Ctrl+Shift+Z, `ui.app._Keybinds`)
+    # ------------------------------------------------------------------ #
+    def undo_current(self):
+        """Undo on whichever Video/Audio/Subtitles sub-tab is showing — both Muxing and
+        Encoding keep a per-kind `_undo(kind)`/`_redo(kind)` history; Overview and Chapters
+        have none."""
+        kind = _UNDO_KIND_FOR_SUBTAB.get(self.sub_tab_bar.active())
+        if kind:
+            self._undo(kind)
+
+    def redo_current(self):
+        kind = _UNDO_KIND_FOR_SUBTAB.get(self.sub_tab_bar.active())
+        if kind:
+            self._redo(kind)
+
+    # ------------------------------------------------------------------ #
     #  Change handlers
     # ------------------------------------------------------------------ #
     def _on_control_change(self, *_):
         """Every control lands here — one recompute, no pairwise handlers."""
         self._sync_controls()
+
+    def _sync_chapters(self):
+        """The Chapters page's part of `_sync_controls`: its list follows the probe, and its
+        sub-tab turns red while they're stripped."""
+        self.chapter_editor.load(self.app.media.info)
+        stripped = self.chapter_editor.refresh(bool(self.app.media.current_file_path))
+        self.sub_tab_bar.set_marked("Chapters", stripped)
 
     def _on_trim_change(self, *_):
         """A trim spinner changed — refresh just the rundown."""
@@ -267,14 +289,12 @@ class MediaTab(QWidget):
             self._refresh_summary()
 
     def _update_format_tip(self):
-        """The container dropdown's hover tip — called on every value change,
-        wherever it comes from (a user pick, `_apply_settings`, or a
-        subclass's `_sync_controls` auto-adopting the source's own)."""
+        """The container dropdown's tip, on every value change wherever it comes from."""
         tip(self.format_menu, CONTAINER_TIPS.get(self.format_menu.value(), ""))
 
     def _on_format_change(self, _value=None):
-        """The user picked a container: stop auto-adopting the source's,
-        swap the output path's extension, and re-sync."""
+        """The user picked a container: stop adopting the source's, swap the output path's
+        extension, and re-sync."""
         self._update_format_tip()
         self._auto_format = None
         current = self.save_entry.text().strip()
@@ -290,46 +310,27 @@ class MediaTab(QWidget):
     #  Import gate
     # ------------------------------------------------------------------ #
     def _apply_import_gate(self, extra=()):
-        """With no file imported, every Overview/Video/Audio dropdown reads
-        '—' and disables — Output Format and Preset here, plus whatever
-        tab-specific dropdowns `extra` names (`(menu, label)` pairs) —
-        rather than showing a default or stale value nothing has actually
-        confirmed yet. Call this last, at the end of `_sync_controls`. Start
-        Time, Clip Duration, A/V Sync, the preset Save/Delete buttons and the
-        Queue Task / Mux / Encode action buttons disable with them (their
-        values are left alone).
-
-        Output Format and Preset get their enabled state set *both ways*,
-        unconditionally — unlike every `extra` dropdown, nothing else in
-        either tab ever calls `set_enabled` on them, so once this method
-        had disabled them there was nothing to turn them back on again: a
-        file import left them stuck disabled forever (confirmed: Output
-        Format/Preset stayed greyed with a real file imported and a real
-        container value already showing). `extra` dropdowns don't need
-        that — each one's own enabled state is already recomputed fresh,
-        every pass, by the rest of `_sync_controls` regardless of file
-        presence, so with a file imported this leaves them, and their
-        values, exactly as that earlier logic already derived them."""
-        has_file = bool(self.app.current_file_path)
+        """With no file, every Overview/Video/Audio dropdown reads '—' and disables (Output
+        Format, Preset and the `extra` `(menu, label)` pairs), and the trim, A/V Sync, preset
+        buttons and actions disable. Call last in `_sync_controls`. Controls nothing else
+        re-enables (Output Format, Preset, the rest of Overview, the actions) are set both
+        ways; `extra` dropdowns are recomputed each pass, so only the no-file side is forced."""
+        has_file = bool(self.app.media.current_file_path)
         set_enabled(self.format_menu, self.format_label, has_file)
         set_enabled(self.preset_menu, self.preset_label, has_file)
-        # The rest of the Overview page too — a trim, A/V Sync, or a preset
-        # Save/Delete means nothing without a file to apply it to. Set both
-        # ways for the same reason as Output Format/Preset above: nothing
-        # else ever re-enables them.
+        # The rest of Overview means nothing without a file.
         set_enabled(self.start_time_spinner, self.start_label, has_file)
         set_enabled(self.duration_time_spinner, self.duration_label, has_file)
         self.av_sync_check.setEnabled(has_file)
         self.preset_save_btn.setEnabled(has_file)
         self.preset_delete_btn.setEnabled(has_file)
-        # Queue Task / Mux / Encode have nothing to run without a file — greyed like
-        # the Downloader's until a fetch succeeds (same both-ways rule as above).
+        # Nothing to run, or to clear, without a file (like the Downloader before a fetch).
+        self.clear_btn.setEnabled(has_file)
         self.queue_btn.setEnabled(has_file)
         self.go_btn.setEnabled(has_file)
         if has_file:
-            # The `—` the no-file pass left in Preset is a placeholder, not a pick: its
-            # option list never changes after an import, so nothing else clears it
-            # (an enabled Preset dropdown was reading `—`). No preset applied = None.
+            # Clear Preset's no-file `—`: its list never changes after import, so nothing
+            # else would.
             if self.preset_menu.value() == NO_OPTION:
                 self.preset_menu.set(presets.NONE_LABEL)
             return
@@ -346,13 +347,24 @@ class MediaTab(QWidget):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Video File", self._output_directory(), MEDIA_FILTER)
         if path:
-            self.app.update_global_file(path)
+            self.app.media.select_file(path)
+
+    def _on_clear(self):
+        """Clear: asks first unless the user has turned that off, then drops the selection and
+        everything decoded from it (the file itself is untouched)."""
+        if not self.app.media.current_file_path:
+            return
+        if self.app.confirm_clear_selection:
+            confirmed, dont_ask = ask_yes_no_remember(self.app, _CLEAR_TITLE, _CLEAR_MESSAGE)
+            if dont_ask:
+                self.app.confirm_clear_selection = False
+            if not confirmed:
+                return
+        self.app.media.clear_selection()
 
     def set_selected_file(self, path):
-        """A file was picked: the drop box turns into the loading spinner over the
-        preview area, until the frames (or the audio-only Wave Loop) arrive and
-        reveal the carousel. Picking a replacement while a preview is showing goes
-        back to the spinner too, rather than leaving the carousel blank meanwhile."""
+        """A file was picked: the drop box shows the loading spinner until frames (or the
+        audio-only Wave Loop) reveal the carousel; a replacement file goes back to it too."""
         self.file_label.setText(f"Selected File:  {path}")
         self.drop_box.collapse()
         self.carousel.force_collapse()
@@ -361,10 +373,7 @@ class MediaTab(QWidget):
         self._preview_stack.setCurrentWidget(self.drop_box)
 
     def clear_selected_file(self):
-        """Undo `set_selected_file` and the save-path autofill it triggers —
-        called when a just-picked file turns out to be unreadable
-        (`app._reject_file`), so the tab looks exactly as it did before that
-        file was ever picked rather than stranded mid-import."""
+        """Undo `set_selected_file` and its autofill (an unreadable file was rejected)."""
         self.file_label.setText("")
         self.drop_box.reset()
         self.carousel.force_collapse()
@@ -375,9 +384,8 @@ class MediaTab(QWidget):
         self._auto_output = self.app.default_save_location or ""
 
     def show_no_preview(self):
-        """The file stays selected but has no preview frames: put the drop box (now
-        reading "No Preview Available") back over the carousel. The carousel forgets
-        it was populated, so the next file that does have frames reveals it again."""
+        """The file stays selected but has no preview: the drop box ("No Preview Available")
+        goes back over the carousel, which forgets it was populated."""
         self.carousel.force_collapse()
         self.carousel.clear_preview()
         self.carousel.forget_populated()
@@ -388,13 +396,14 @@ class MediaTab(QWidget):
         self._preview_stack.setCurrentWidget(self.carousel)
 
     def _on_expand_toggled(self, expanded):
-        """The carousel's own expand/shrink icon: reparent the same carousel
-        instance into (or back out of) a dimming overlay filling the main
-        window. Every one of the carousel's own behaviors — chevrons, dots,
-        badges, drag/drop, the icon itself, arrow-key stepping — keeps
-        working unchanged since nothing here is a copy of it, just a
-        different temporary parent."""
+        """The expand icon: reparent the same carousel into (or out of) a dimming overlay over
+        the main window, so all its behaviour carries over."""
         if expanded:
+            # A blank stands in, or the stack would show the drop box and its spinner beneath.
+            if self._expand_slot is None:
+                self._expand_slot = QWidget()
+            self._preview_stack.insertWidget(1, self._expand_slot)
+            self._preview_stack.setCurrentWidget(self._expand_slot)
             self._preview_stack.removeWidget(self.carousel)
             if self._expand_overlay is None:
                 self._expand_overlay = _ExpandedPreviewOverlay(self.app)
@@ -403,11 +412,9 @@ class MediaTab(QWidget):
             self._expand_overlay.release()
             self._preview_stack.insertWidget(1, self.carousel)
             self._preview_stack.setCurrentWidget(self.carousel)
-            # Same reparent-hides-the-widget gotcha as show_with() above —
-            # insertWidget() reparents the carousel back here, which hides
-            # it regardless of the stack (and this tab) already being
-            # visible. Without this it stays invisible forever after,
-            # leaving the preview area blank no matter what's imported next.
+            self._preview_stack.removeWidget(self._expand_slot)
+            self._expand_slot.hide()
+            # insertWidget() reparents, which hides it: show it again.
             self.carousel.show()
 
     def on_thumbnails(self, frames):
@@ -415,78 +422,61 @@ class MediaTab(QWidget):
         self.carousel.set_frames(frames)
 
     def _output_directory(self):
-        """The folder the Save field currently points at — its own folder when
-        it holds a full path (told apart from a bare directory, fresh from
-        Settings, by whether it has an extension), else the default save
-        location. Where the input file dialogs open, and the one part of the
-        Save field an autofill keeps."""
+        """The folder the Save field points at (a full path's folder; a bare directory has no
+        extension), else the default save location. Where file dialogs open."""
         current = self.save_entry.text().strip().replace("\\", "/")
         directory = os.path.dirname(current) if current and os.path.splitext(current)[1] else current
         return directory or self.app.default_save_location or ""
 
     def _default_stem(self):
-        """The file name (no extension) Settings' naming format gives the
-        current input: live tokens filled in, queue-time ones (`{date}`, ...)
-        left as literal text until the job is queued (`_resolve_output_tokens`).
-        Falls back to the input's own name when the format comes out empty."""
-        input_file = self.app.current_file_path
-        values = naming.media_live_values(input_file, self.app.media_info)
+        """The file name (no extension) from the naming format: live tokens filled in,
+        queue-time ones left literal. The input's own name if the format comes out empty."""
+        input_file = self.app.media.current_file_path
+        values = naming.media_live_values(input_file, self.app.media.info)
         return naming.render_live(self.app.naming_template, values, fallback=values["source"])
 
     def _autofill_output_path(self):
-        """'<directory>/<naming format><format>' — the FILENAME always follows
-        the newly-selected input (and the naming format from Settings); only
-        the DIRECTORY persists (a bare directory, fresh from Settings, is told
-        apart from a full path by whether it has an extension)."""
-        input_file = self.app.current_file_path
+        """'<directory>/<naming format><format>': the file name follows the new input, only the
+        directory persists."""
+        input_file = self.app.media.current_file_path
         if not input_file:
             return
         stem = self._default_stem()
         fmt = self.format_menu.value()
         directory = self._output_directory()
         if fmt == NO_OPTION:
-            # This runs the instant a file is picked, before the tab's next
-            # `_sync_controls` has lifted the no-file placeholder off the
-            # Output Format dropdown. Writing the placeholder into the path
-            # left an extension-less name, which the *next* autofill then
-            # mistook for a folder ("...\clip—\clip.mp4").
+            # The Output Format dropdown may still show the no-file placeholder: writing it into
+            # the path made the next autofill mistake the name for a folder.
             ext = os.path.splitext(input_file)[1].lower()
             fmt = ext if ext in formats.containers() else (self._auto_format or formats.containers()[0])
         suggested = os.path.normpath(os.path.join(directory, f"{stem}{fmt}"))
-        # A format with no title/etc. can come out identical to the input's own
-        # name — never suggest overwriting the source, so fall back to the
-        # tab's own suffix in that one case.
+            # Never suggest overwriting the source: fall back to the tab's suffix.
         if os.path.normcase(suggested) == os.path.normcase(os.path.normpath(input_file)):
             suggested = os.path.normpath(os.path.join(directory, f"{stem}{self.OUTPUT_SUFFIX}{fmt}"))
         set_line_text(self.save_entry, suggested)
         self._auto_output = suggested
 
     def refresh_auto_output(self):
-        """Re-derive the suggested name — the probe just delivered a title or
-        chapter count, or the naming format changed — but only while the field
-        still holds what was autofilled: a hand-typed or Browsed path is never
-        touched. Compared without the extension, since a container snap
-        rewrites that on its own."""
-        if not self.app.current_file_path or not self._auto_output:
+        """Re-derive the suggested name (a title / chapter count arrived, or the format changed)
+        only while the field still holds the autofill, compared without the extension."""
+        if not self.app.media.current_file_path or not self._auto_output:
             return
         typed = os.path.splitext(self.save_entry.text().strip())[0]
         if typed == os.path.splitext(self._auto_output)[0]:
             self._autofill_output_path()
 
     def _resolve_output_tokens(self, settings):
-        """The queue-time pass: fill `{date}` `{time}` `{creation-time}`
-        `{quality}` `{bitrate}` into the job's output path, from the job's own
-        settings. The Save field keeps showing the tokens, so queueing again
-        later stamps its own time."""
+        """Fill the queue-time tokens into the job's output path. The Save field keeps them,
+        so each queueing stamps its own time."""
         path = settings.get("output_path") or ""
         if "{" in os.path.basename(path):
             values = naming.media_queue_values(
-                settings.get("input_file"), self.app.media_info, settings)
+                settings.get("input_file"), self.app.media.info, settings)
             settings["output_path"] = naming.resolve_path(path, values)
 
     def select_save_location(self):
         """Pick a full output FILE path."""
-        input_file = self.app.current_file_path
+        input_file = self.app.media.current_file_path
         fmt = self.format_menu.value()
         if input_file:
             initial_dir = os.path.dirname(input_file)
@@ -558,7 +548,7 @@ class MediaTab(QWidget):
     def _apply_common(self, settings):
         """The keys both tabs share, written in (inside a muted `_ready`)."""
         if settings.get("input_file"):
-            self.app.update_global_file(settings["input_file"])
+            self.app.media.select_file(settings["input_file"])
         if "output_path" in settings:
             set_line_text(self.save_entry, settings["output_path"])
             self._auto_output = self.save_entry.text().strip()
@@ -568,26 +558,40 @@ class MediaTab(QWidget):
             self.duration_time_spinner.set_seconds(settings["duration_secs"])
         if "av_sync" in settings:
             self.av_sync_check.setChecked(bool(settings["av_sync"]))
+        self._apply_strip_flags(settings)
+        self.chapter_editor.apply(settings)
+
+    def _apply_strip_flags(self, settings):
+        """Strip Video / Audio / Subtitles from an applied settings dict (a preset): each is a
+        checkbox on this tab. Muxing has none (see muxing.py) and overrides this instead."""
         if "strip_video" in settings:
             self.strip_video_check.setChecked(bool(settings["strip_video"]))
         if "strip_audio" in settings:
             self.strip_audio_check.setChecked(bool(settings["strip_audio"]))
+        if "strip_subtitles" in settings:
+            self.strip_subtitles_check.setChecked(bool(settings["strip_subtitles"]))
 
     def _gather_common(self):
-        return {
-            "input_file": self.app.current_file_path,
+        settings = {
+            "input_file": self.app.media.current_file_path,
             "output_path": self.save_entry.text(),
             "output_format": self.format_menu.value(),
             "start_secs": self.start_time_spinner.seconds(),
             "duration_secs": self.duration_time_spinner.seconds(),
             "av_sync": self.av_sync_check.isChecked(),
         }
+        settings.update(self._gather_strip_subtitles())
+        settings.update(self.chapter_editor.gather())
+        return settings
+
+    def _gather_strip_subtitles(self):
+        """The Strip Subtitles checkbox. Muxing (no checkbox) overrides this, computing it from
+        the track box instead."""
+        return {"strip_subtitles": self.strip_subtitles_check.isChecked()}
 
     @staticmethod
     def _menu_value(menu):
-        """A derived dropdown's value, with the placeholders as "": `NO_OPTION`
-        (nothing to pick) and `Lossless` (Bitrate on a lossless codec — there
-        is no bitrate to carry into a job)."""
+        """A derived dropdown's value with the placeholders (`NO_OPTION`, `Lossless`) as ""."""
         value = menu.value()
         return "" if value in (NO_OPTION, formats.LOSSLESS) else value
 
@@ -626,9 +630,9 @@ class MediaTab(QWidget):
         self._resolve_output_tokens(settings)
         if not self._validate_settings(settings):
             return
-        name = os.path.basename(settings["input_file"].replace("\\", "/"))
+        name = os.path.basename(settings["output_path"].replace("\\", "/"))
         queue_tab = self.app.tabs["Queue"]
-        task_id = queue_tab.add_task(f"{name}  ·  {self.DIRECT_LABEL}", settings=settings,
+        task_id = queue_tab.add_task(name, settings=settings,
                                      status="Queued", source_tab=self.TAB)
         outcome = queue_tab.start_task(task_id)
         self.app.notify({
@@ -642,7 +646,6 @@ class MediaTab(QWidget):
         self._resolve_output_tokens(settings)
         if not self._validate_settings(settings):
             return
-        name = os.path.basename(settings["input_file"].replace("\\", "/"))
-        description = f"{name}  ·  {settings['duration_secs']}s from {settings['start_secs']}s"
-        self.app.tabs["Queue"].add_task(description, settings=settings, status="Queued", source_tab=self.TAB)
+        name = os.path.basename(settings["output_path"].replace("\\", "/"))
+        self.app.tabs["Queue"].add_task(name, settings=settings, status="Queued", source_tab=self.TAB)
         self.app.notify(f"{self.VERB_ING} job added to queue.")

@@ -1,28 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Brand palettes, contrast helpers, and the settings.json read/write.
-
-UI-toolkit-free: `ui/theme.py` builds the live PySide6 palette and stylesheet
-on top of what's here."""
+"""Brand palettes, contrast helpers and settings.json read/write, with no UI toolkit
+(`ui/theme.py` builds the live palette and stylesheet on top)."""
 import json
 import os
 
 from core import keybinds, llamalog, naming, power, priority, startup_tab, window_mode
 
-# Repo root, derived from this file's own location — settings.json always
-# lands next to main.py whatever directory the app was launched from.
+# settings.json lives next to main.py, whatever the launch directory.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SETTINGS_PATH = os.path.join(_REPO_ROOT, "settings.json")
 
 DEFAULT_THEME_NAME = "Lemon"
 
-# Each theme is a primary (brand accent — sidebar, drop box border, the "do
-# it now" buttons, the active-tab pipe, queued rows, and the progress fill)
-# and a secondary (every other button, dropdown, checkbox, switch, slider).
-# Colors are flat hex strings, not (light, dark) pairs — deliberately, so
-# switching appearance mode never changes a theme's colours. Hover shades are
-# auto-derived (see _darken) except Lemon's primary hover, kept as its exact
-# historical value.
+# Each theme is a primary (the brand accent: sidebar, action buttons, tab pipe, queued rows,
+# progress) and a secondary (every other control). Flat hex strings, so appearance mode never
+# changes them. Hovers are derived (`_darken`) except Lemon's historical primary hover.
 THEMES = {
     "Lemon": {"primary": "#FDCA3C", "primary_hover": "#e0b234", "secondary": "#3B8ED0"},
     "Cupid": {"primary": "#FA6E99", "secondary": "#780219"},
@@ -33,27 +26,20 @@ THEMES = {
     "Vaporwave": {"primary": "#3B41B8", "secondary": "#ED72D4"},
     "Dreamsicle": {"primary": "#f9be90", "secondary": "#f97c9c"},
     "Funk": {"primary": "#3dbcc1", "secondary": "#4b3383", "sidebar_text": "white"},
-    # Black primary, neon-green secondary: the sidebar title/logo and the selected
-    # sub-tab take the green (`sidebar_text` / `swap_subtabs`, see get_theme), and
-    # black's derived hover is black again, so it names a visible one.
+    # The sidebar title/logo and the selected sub-tab take the green; black's derived hover is
+    # black again, so it names a visible one.
     "Terminal": {"primary": "#000000", "primary_hover": "#1c1c1c", "secondary": "#44fe2c",
                  "sidebar_text": "secondary", "swap_subtabs": True, "swap_action_buttons": True},
 }
 
 
-# The "destructive / halting" red — the Stop Queue button's fill, and the
-# Strip Video checkbox on the Encoding tab. A permanent, theme-independent
-# exception to the primary/secondary scheme (see CLAUDE.md): it never changes
-# with the theme, so anything that needs "this is destructive" red reads it
-# from here rather than the active palette.
+# The destructive / halting red (Stop Queue, Strip, failed rows); never changes with the theme.
 STOP_RED = "#E5484D"
 STOP_RED_HOVER = "#C93C40"
 
 
 def _darken(hex_color, factor=0.87):
-    """Returns a slightly-darker shade of hex_color for hover states —
-    the same ~0.87 factor already implicit in the brand yellow's existing
-    hover (#FDCA3C -> #e0b234)."""
+    """A slightly darker shade of `hex_color` for hover (~0.87, as in Lemon's own hover)."""
     hex_color = hex_color.lstrip("#")
     r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
     r, g, b = (max(0, min(255, int(channel * factor))) for channel in (r, g, b))
@@ -72,11 +58,7 @@ def _relative_luminance(hex_color):
 
 
 def readable_text_on(hex_color):
-    """Returns "black" or "white" — whichever has the higher WCAG contrast
-    ratio against hex_color. This is what lets every theme's primary/
-    secondary color carry legible text without a hand-picked per-theme text
-    color: pale primaries (Lemon's yellow, Cupid's pink) get black text,
-    and a near-black primary like Noir's #131317 gets white instead."""
+    """"black" or "white", whichever has the higher WCAG contrast against `hex_color`."""
     lum = _relative_luminance(hex_color)
     contrast_black = (lum + 0.05) / 0.05
     contrast_white = 1.05 / (lum + 0.05)
@@ -84,8 +66,7 @@ def readable_text_on(hex_color):
 
 
 def _gray_hex_for_luminance(lum):
-    """Inverse of the WCAG relative-luminance formula for a neutral grey
-    (equal R=G=B), rounded to the nearest hex channel value."""
+    """The neutral grey hex with relative luminance `lum` (the WCAG formula inverted)."""
     lum = max(0.0, min(1.0, lum))
     channel = lum * 12.92 if lum <= 0.0031308 else 1.055 * (lum ** (1 / 2.4)) - 0.055
     value = max(0, min(255, round(channel * 255)))
@@ -93,30 +74,10 @@ def _gray_hex_for_luminance(lum):
 
 
 def disabled_text_on(hex_color, target_ratio=3.0):
-    """A "greyed out" text color that still stays legible on `hex_color` —
-    the label of a disabled button or dropdown, which keeps its accent fill.
-    A fixed grey reads fine against a very dark or very light accent, but on
-    a mid-brightness one — Lemon's `#3B8ED0` secondary, Vaporwave's
-    `#ED72D4` — it sits close enough in brightness to nearly vanish
-    (confirmed: WCAG contrast ~1.1-1.2 for a stock gray74/gray60).
-
-    Rather than a single fixed grey, this solves for the grey brightness that
-    hits `target_ratio` against this *specific* color, on whichever side
-    (darker or lighter) already has more contrast headroom (the same side
-    `readable_text_on` would pick) — so it's still a genuine desaturated
-    grey, and only pushes as far toward black/white as this background
-    actually needs to stay readable, rather than every theme sharing one
-    compromise value that only fits some of them.
-
-    `target_ratio` defaults to 3.0 — WCAG's own minimum for non-text/UI-
-    component contrast (SC 1.4.11), deliberately looser than the 4.5 used
-    for real body text. 4.5 was tried first and read as too dark/light —
-    on Lemon's blue in particular the disabled dropdown text came out close
-    enough to solid black to look like ordinary enabled text rather than a
-    greyed-out control, i.e. readable but no longer visibly *disabled*. 3.0
-    is enough to fix a near-invisible fixed grey (~1.1:1 on Lemon/
-    Vaporwave) while keeping a genuine mid-grey, disabled-looking
-    result rather than one that reads as full-contrast text."""
+    """A disabled-text grey for a control that keeps its accent fill: solved to hit
+    `target_ratio` against `hex_color`, on the side `readable_text_on` would pick. 3.0 is WCAG's
+    UI-component minimum; 4.5 read as enabled text, and a fixed grey vanished on mid-brightness
+    accents (~1.1:1)."""
     lum = _relative_luminance(hex_color)
     contrast_black = (lum + 0.05) / 0.05
     contrast_white = 1.05 / (lum + 0.05)
@@ -128,23 +89,11 @@ def disabled_text_on(hex_color, target_ratio=3.0):
 
 
 def get_theme(name=None):
-    """Returns the full color palette for a theme name — primary/
-    primary_hover/primary_text/secondary/secondary_hover/secondary_text —
-    falling back to the default theme for an unknown or missing name. The
-    *_text entries are derived (see readable_text_on), not stored in THEMES,
-    so adding a palette never needs a matching text color hand-picked.
-
-    `sidebar_text` is the colour of the sidebar's title and logo only. It is
-    `primary_text` unless a theme names its own (Funk's teal reads better with
-    white there, while everything else on a teal fill keeps the derived black).
-    A theme may give it as a colour or as the keyword "primary"/"secondary"
-    (Terminal's is "secondary", so it follows that colour).
-
-    `subtab_active` / `subtab_inactive` (each with `_hover` and `_text`) are the
-    fills of the selected and the other sub-tabs (`SubTabBar`): primary and
-    secondary respectively, or the other way round for a theme with
-    `swap_subtabs` (Terminal — its primary is black, which vanishes as a
-    selected tab on the dark frame)."""
+    """The full palette for a theme (the default for an unknown name): the stored colours plus
+    derived `*_text` colours. `sidebar_text` (the sidebar title and logo only) is `primary_text`
+    unless the theme names one, as a colour or "primary"/"secondary". `subtab_active` /
+    `subtab_inactive` (+ `_hover`, `_text`) are primary / secondary, swapped for a theme with
+    `swap_subtabs`."""
     colors = THEMES.get(name, THEMES[DEFAULT_THEME_NAME])
     primary_text = readable_text_on(colors["primary"])
     palette = {
@@ -167,27 +116,13 @@ def get_theme(name=None):
 
 
 def default_output_dir():
-    """The out-of-the-box export folder — `<user home>/Videos/LlamaMXD
-    Export`. Used as `default_save_location`'s fallback on a fresh install
-    (no settings.json yet); the folder itself is created by MainWindow,
-    not here."""
+    """The out-of-the-box export folder, `~/Videos/LlamaMXD Export` (MainWindow creates it)."""
     return os.path.join(os.path.expanduser("~"), "Videos", "LlamaMXD Export")
 
 
 def load_settings():
-    """Reads persisted app settings (theme, appearance mode, default save
-    location, GPU acceleration, the Downloader's own separate save location,
-    the output naming format, "When Done" and its reset-on-launch flag, and
-    the job priority level, the window mode and its borderless-fullscreen
-    flag, the tab to open on, the log detail, and the keyboard shortcuts), filling in defaults for anything missing or if
-    the file doesn't exist yet (e.g. first run). Appearance mode defaults to
-    "System"; default save location defaults to default_output_dir(); the
-    Downloader's separate save location is off by default and empty until
-    set; the naming format is `core.naming.DEFAULT_TEMPLATE`, "When Done" is
-    "Do Nothing" (and reset to it on every launch), priority is "Normal", the
-    window is "Fixed" (and not fullscreen), the app opens on "Encoding".
-    A stored value that's no longer valid (a hand-edited file) falls back to
-    its default rather than reaching the UI."""
+    """Read settings.json, with defaults for anything missing (or no file yet); a stored value
+    that is no longer valid (a hand-edited file) falls back to its default."""
     settings = {
         "theme": DEFAULT_THEME_NAME,
         "appearance_mode": "System",
@@ -204,6 +139,7 @@ def load_settings():
         "startup_tab": startup_tab.DEFAULT_TAB,
         "log_detail": llamalog.DEFAULT_LEVEL,
         "keybinds": keybinds.defaults(),
+        "confirm_clear_selection": True,
     }
     if not os.path.exists(_SETTINGS_PATH):
         return settings

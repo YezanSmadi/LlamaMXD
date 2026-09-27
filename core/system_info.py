@@ -1,11 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""CPU / RAM / disk facts for the Settings tab's system info block. No UI
-code, no extra dependency (psutil isn't in requirements.txt) -- everything
-here goes through the registry or ctypes' Win32 calls directly. Every
-lookup is best-effort: a failure returns a placeholder rather than raising,
-same posture as core.utilities' ffmpeg capability probes.
-"""
+"""CPU / RAM / disk facts for Settings' system info, via the registry and Win32 calls (no
+psutil). Best-effort: a failure gives a placeholder, never an exception."""
 import ctypes
 import os
 import platform
@@ -29,10 +25,8 @@ def _query_cpu_name():
 
 
 def cpu_name():
-    """The CPU's marketing name (e.g. "AMD Ryzen 7 5800X"), from the
-    registry -- platform.processor() only returns the raw architecture
-    string ("AMD64 Family 25 Model 33...") on Windows, not a human name.
-    Cached; the CPU can't change while the process is running."""
+    """The CPU's marketing name from the registry (`platform.processor()` gives only the
+    architecture string on Windows). Cached."""
     global _cpu_name
     if _cpu_name is None:
         _cpu_name = _query_cpu_name() or platform.processor() or "Unknown CPU"
@@ -70,9 +64,7 @@ def ram_total_bytes():
 
 
 def format_bytes(n):
-    """"512.3 GB" -- binary (1024-based) units, matching how Windows itself
-    reports disk and RAM sizes. "Unknown" for a lookup that failed (None),
-    never a bare "0 B" that reads as a real, if odd, measurement."""
+    """"512.3 GB" in binary units, as Windows shows sizes; "Unknown" for None, never "0 B"."""
     if n is None:
         return "Unknown"
     value = float(n)
@@ -84,10 +76,8 @@ def format_bytes(n):
 
 
 def disk_usage(path):
-    """(total_bytes, free_bytes) for the drive holding `path` -- a file, a
-    folder, or a not-yet-created path (falls back to its parent directory).
-    (None, None) if that still doesn't resolve to a reachable drive (an
-    empty setting, a disconnected network share)."""
+    """(total_bytes, free_bytes) of the drive holding `path` (a missing path uses its parent),
+    or (None, None) when it doesn't reach a drive."""
     directory = path if os.path.isdir(path) else os.path.dirname(path)
     directory = directory or "."
     try:

@@ -1,0 +1,107 @@
+{
+ "download": {
+  "live": {
+   "chapters": "2ch",
+   "source": "Youtube",
+   "title": "Some / Video"
+  },
+  "queue": {
+   "bitrate": "2000kbps",
+   "chapters": "2ch",
+   "creation-time": "2024-03-05",
+   "date": "2026-09-26",
+   "quality": "1080p60",
+   "source": "Youtube",
+   "time": "14-05-09",
+   "title": "Some / Video"
+  }
+ },
+ "errors": {
+  "": "Enter a naming format.",
+  "   ": "Enter a naming format.",
+  "a<b": "A file name can't contain any of  < > : \" / \\ | ? *",
+  "{chapters}.{creation-time}": null,
+  "{nope}-{title}": "Unknown: {nope}",
+  "{source}  -  {title}": null,
+  "{source}-{quality}-{bitrate}": null,
+  "{source}-{title}": null,
+  "{source}_{date}_{time}": null,
+  "{title}": null
+ },
+ "live": {
+  "": [
+   "clip-My Clip Part 1",
+   "clip"
+  ],
+  "   ": [
+   "output",
+   "clip"
+  ],
+  "a<b": [
+   "ab",
+   "ab"
+  ],
+  "{chapters}.{creation-time}": [
+   "12ch.{creation-time}",
+   "{creation-time}"
+  ],
+  "{nope}-{title}": [
+   "{nope}-My Clip Part 1",
+   "{nope}"
+  ],
+  "{source}  -  {title}": [
+   "clip  -  My Clip Part 1",
+   "clip"
+  ],
+  "{source}-{quality}-{bitrate}": [
+   "clip-{quality}-{bitrate}",
+   "clip-{quality}-{bitrate}"
+  ],
+  "{source}-{title}": [
+   "clip-My Clip Part 1",
+   "clip"
+  ],
+  "{source}_{date}_{time}": [
+   "clip_{date}_{time}",
+   "clip_{date}_{time}"
+  ],
+  "{title}": [
+   "My Clip Part 1",
+   "clip"
+  ]
+ },
+ "queue_values": {
+  "bitrate": "18700kbps",
+  "chapters": "12ch",
+  "creation-time": "<2024-03-05T10:20:30Z as local>",
+  "date": "2026-09-26",
+  "quality": "crf22",
+  "source": "clip",
+  "time": "14-05-09",
+  "title": "My Clip: Part 1"
+ },
+ "resolve": {
+  "a<b": "C:/out/a<b.mp4",
+  "{chapters}.{creation-time}": "C:/out\\12ch.2024-03-05T102030Z as local.mp4",
+  "{nope}-{title}": "C:/out\\{nope}-My Clip Part 1.mp4",
+  "{source}  -  {title}": "C:/out\\clip  -  My Clip Part 1.mp4",
+  "{source}-{quality}-{bitrate}": "C:/out\\clip-crf22-18700kbps.mp4",
+  "{source}-{title}": "C:/out\\clip-My Clip Part 1.mp4",
+  "{source}_{date}_{time}": "C:/out\\clip_2026-09-26_14-05-09.mp4",
+  "{title}": "C:/out\\My Clip Part 1.mp4"
+ },
+ "unknown": {
+  "": [],
+  "   ": [],
+  "a<b": [],
+  "{chapters}.{creation-time}": [],
+  "{nope}-{title}": [
+   "{nope}"
+  ],
+  "{source}  -  {title}": [],
+  "{source}-{quality}-{bitrate}": [],
+  "{source}-{title}": [],
+  "{source}_{date}_{time}": [],
+  "{title}": []
+ }
+}

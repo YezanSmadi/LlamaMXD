@@ -1,12 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Live theme state for the UI.
-
-The brand palettes come from `core.theme` (THEMES / get_theme /
-readable_text_on). A theme or appearance switch is *live without a rebuild*:
-`ThemeManager.changed` fires, the app re-applies one stylesheet, and every
-custom-painted widget calls `update()`. Nothing is destroyed, so no form
-state is lost."""
+"""Live theme state for the UI, on `core.theme`'s palettes. A theme or appearance switch fires
+`ThemeManager.changed`: the stylesheet is re-applied and custom-painted widgets repaint, with
+nothing rebuilt."""
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication
 
@@ -144,9 +140,8 @@ class ThemeManager(QObject):
             self._rebuilding = False
 
     def _rebuild_colors(self):
-        # The native title bar follows the colour scheme (Qt 6.8+). "System"
-        # must hand the scheme back to the OS *before* resolving it, or an
-        # earlier explicit Light/Dark would read back as the system's own.
+        # The native title bar follows the scheme (Qt 6.8+). System must hand the scheme back
+        # to the OS before resolving it, or an earlier Light/Dark reads back as the OS's.
         hints = QGuiApplication.styleHints()
         if self.mode == "System":
             hints.unsetColorScheme()
@@ -164,16 +159,18 @@ class ThemeManager(QObject):
         colors["stop_pressed"] = _shade(STOP_RED_HOVER, 0.87)
         colors["secondary_pressed"] = _shade(brand["secondary_hover"], 0.87)
         colors["primary_pressed"] = _shade(brand["primary_hover"], 0.87)
-        # The do-it-now buttons (Mux / Encode / Download, Start / Pause Queue: role
-        # "action") are primary and Queue Task (role "queue") is secondary — unless
-        # the theme swaps them (Terminal, whose black primary would otherwise be the
-        # loud button). Aliased here, after every shade exists, so the stylesheet
-        # needs no theme knowledge.
+        # The action buttons are primary and their partners secondary, unless the theme swaps
+        # them (Terminal); aliased here so the stylesheet needs no theme knowledge.
         swap = bool(THEMES.get(self.name, {}).get("swap_action_buttons"))
         action, queue = ("secondary", "primary") if swap else ("primary", "secondary")
         for role, source in (("action_btn", action), ("queue_btn", queue)):
             for suffix in ("", "_hover", "_pressed", "_text", "_disabled_text"):
                 colors[role + suffix] = colors[source + suffix]
+        # The theme's own brand accent, used wherever primary would vanish against the
+        # background for a theme that swaps its action buttons (Terminal's black primary):
+        # a popup's outline (MessageDialog), a divider inside one (Add/Edit Chapters), and the
+        # loading disc's coloured trim (`ui.widgets.panels.LoadingSpinner`).
+        colors["theme_accent"] = colors[action]
         self._colors = colors
 
 
@@ -212,16 +209,11 @@ def init_theme():
 
 
 def stylesheet():
-    """The one app-wide stylesheet, generated from the active palette. Only
-    stock Qt widgets (buttons, entries, sliders, labels, scroll areas, combo
-    popups) are styled here — everything with custom geometry paints itself
-    straight from `theme`."""
+    """The app-wide stylesheet from the active palette. Only stock Qt widgets are styled here;
+    everything with custom geometry paints itself from `theme`."""
     c = theme.hex
-    # Qt sizes a slider handle's box as groove height + 2 x margin, and draws
-    # the knob into it: rounding px(16), px(4) and px(-6) separately left that
-    # box a pixel off the knob's own size at some scales (22x21 with an 11px
-    # radius), which Qt then drew as a square. Keep the knob even-sized and
-    # its margin exact, so the box is always precisely the knob.
+    # Qt's handle box is groove + 2 x margin; rounding px() separately left it a pixel off the
+    # knob and drawn square. Keep the knob even and the margin exact.
     groove = px(4)
     knob = px(16) + (px(16) - groove) % 2
     knob_margin = (groove - knob) // 2

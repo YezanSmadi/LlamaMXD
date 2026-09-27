@@ -1,34 +1,26 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Finds the external command-line tools this app launches -- `ffmpeg`,
-`ffprobe`, `yt-dlp` and `deno` -- as absolute paths.
+"""Finds the external tools (`ffmpeg`, `ffprobe`, `yt-dlp`, `deno`) as absolute paths, cached.
 
-Releases ship all of them beside the app (the setup wizard copies them in),
-so a bundled copy always wins over whatever happens to be on PATH. Search
-order, first hit wins:
-
-1. Beside the frozen app's own exe, or in a `dependables/` folder next to it
-   (either installer layout works).
-2. The repo's own `dependables/` folder -- the same binaries, for running
-   from source with `python main.py`. Gitignored; see CLAUDE.md.
-3. PATH.
-
-**Absolute paths are the point, not a nicety.** yt-dlp silently ignores a
-relative `--js-runtimes deno:dependables/deno.exe` (reported "no JS runtime
-found"; the same path made absolute worked -- confirmed directly), and a bare
-`ffmpeg` handed to yt-dlp or subprocess is left to Windows' own search order,
-which only happens to hit the app's folder when frozen. Nothing here touches
-the UI. Results are cached per process -- the tools don't move mid-run.
-"""
+Search order: beside the frozen app's exe or in a `dependables/` folder next to it, then the
+repo's own `dependables/` (running from source), then PATH. Absolute paths matter: yt-dlp
+silently ignores a relative `--js-runtimes` path, and a bare `ffmpeg` is left to Windows'
+search order. `run_tool` / `ffprobe_json` run one without a console window."""
 
 import functools
+import json
 import os
 import shutil
+import subprocess
 import sys
+
+from core import winproc
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BUNDLE_DIR_NAME = "dependables"
 _EXE_SUFFIX = ".exe" if os.name == "nt" else ""
+# Keeps a launched tool from flashing a console window (Windows-only flag).
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _search_dirs():
@@ -54,16 +46,29 @@ def find_tool(name):
 
 
 def tool_path(name):
-    """What to put in an argv for tool `name`: its absolute path, or the bare
-    name when it can't be found anywhere -- so launching it still raises the
-    usual FileNotFoundError that every caller already turns into a readable
-    "isn't installed" message, rather than a None blowing up mid-argv."""
+    """What to put in an argv for tool `name`: its absolute path, or the bare name when it can't
+    be found, so launching still raises the usual FileNotFoundError callers handle."""
     return find_tool(name) or name
 
 
 def tool_dir(name):
-    """The folder holding tool `name`, or None when it can't be found. What
-    yt-dlp's `--ffmpeg-location` wants (it pairs ffmpeg with the ffprobe
-    beside it)."""
+    """The folder holding tool `name`, or None: what yt-dlp's `--ffmpeg-location` wants."""
     path = find_tool(name)
     return os.path.dirname(path) if path else None
+
+
+def run_tool(name, *args, timeout=10):
+    """Run tool `name` with `args`, no console window, capturing text output; the
+    CompletedProcess. Raises like `subprocess.run` (OSError, SubprocessError)."""
+    return winproc.run([tool_path(name), *args], timeout=timeout, text=True)
+
+
+def ffprobe_json(*args, timeout=10):
+    """`ffprobe -v error <args> -of json`, parsed ({} for no output). Raises like `run_tool`, and
+    ValueError for output that isn't JSON."""
+    completed = run_tool("ffprobe", "-v", "error", *args, "-of", "json", timeout=timeout)
+    try:
+        return json.loads(completed.stdout or "{}")
+    except ValueError:
+        # ffprobe exits mid-output when it can't open a stream's decoder, printing only "{".
+        raise ValueError(f"ffprobe exited with code {completed.returncode} without finishing its output") from None

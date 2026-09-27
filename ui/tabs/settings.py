@@ -1,12 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Settings: theme (with a live hover preview), appearance mode, default save
-location, the output file-naming format, hardware acceleration, job priority
-"When Done" and the startup tab — all persisted to settings.json.
-
-A theme change is live **without a rebuild**: `ThemeManager.changed`
-repaints everything in place, which is also why hovering the list can
-preview a palette across the whole window."""
+"""Settings: Appearance, Output, Performance, Shortcuts and About pages, persisted to
+settings.json. A theme change repaints everything in place, so hovering the theme list previews
+a palette across the whole window."""
 import html
 
 from PySide6.QtCore import QRectF, Qt, QTimer, QUrl
@@ -27,18 +23,10 @@ from ui import scale
 from ui import theme as T
 from ui.scale import fpx
 from ui.tabs.media_tab import hrow, set_line_text
-from ui.widgets.controls import (
-    CheckBox,
-    ClickableLabel,
-    Dropdown,
-    ScaledLabel,
-    ScaledLineEdit,
-    Switch,
-    button,
-    button_width_for,
-    field_label,
-    restyle,
-)
+from ui.widgets.controls import button, button_width_for, field_label, restyle
+from ui.widgets.dropdown import Dropdown
+from ui.widgets.text import ClickableLabel, ScaledLabel, ScaledLineEdit
+from ui.widgets.toggles import CheckBox, Switch
 from ui.keymap import canonical
 from ui.widgets.dialogs import ask_yes_no, show_message
 from ui.widgets.keyfield import KeyField, display_key
@@ -46,14 +34,11 @@ from ui.widgets.panels import VERSION, BorderedFrame, SubTabBar
 from ui.widgets.tooltip import tip
 
 SETTINGS_PAGES = ("Appearance", "Output", "Performance", "Shortcuts", "About")
-# Left/right padding of every row on this tab — the same 10px MediaTab's root
-# layout uses, so the tab bar and content line up with Muxing/Encoding's.
+# Side padding of every row, matching MediaTab's, so the tab bar lines up with Muxing/Encoding's.
 _SIDE_PAD = 10
-# ... and the 5px above the tab bar (MediaTab's root top margin), so the bar sits
-# at the same height on every tab.
+# ... and the padding above the tab bar, likewise.
 _TOP_PAD = 5
-# The About page's license notice, in reference pixels: as wide as the page's content column
-# (664px less the 10px side pads).
+# The About notice's width in reference px (the page's 664 less the side pads).
 _ABOUT_NOTICE_W = 644
 
 _GPU_TIP = ("Uses your GPU's built-in encoder (NVENC/Quick Sync/AMF) when available — "
@@ -85,8 +70,7 @@ _OPEN_LOG_TIP = "Opens the folder holding LlamaMXD's log file and the saved outp
 _SHORTCUTS_HELP = ("Click a shortcut, then press the key you want it on (click anywhere else to leave it "
                    "as it is). Turn a shortcut off with its switch.")
 
-# "Available space" on the Default Save Location's drive turns red at or
-# below this, in binary GB (matching system_info.format_bytes's units).
+# Free space on the save drive turns red at or below this (binary GB, as format_bytes shows).
 _LOW_DISK_BYTES = 25 * 1024 ** 3
 
 
@@ -113,8 +97,7 @@ class SettingsTab(QWidget):
         """An empty, top-left-anchored settings page: `(widget, layout)`."""
         page = QWidget()
         lay = QVBoxLayout(page)
-        # Small top margin: the header row is as tall as the (three-line) system
-        # info, well past the tab bar, so it already supplies most of the gap.
+        # A small top margin: the three-line system info already makes the header tall.
         scale.margins(lay, _SIDE_PAD, 6, _SIDE_PAD, 10)
         lay.setSpacing(0)
         lay.setAlignment(Qt.AlignTop | Qt.AlignLeft)
@@ -125,51 +108,29 @@ class SettingsTab(QWidget):
         self.app = app
         self._committed = T.theme.name
 
-        # Three sub-tabs (the same SubTabBar Muxing/Encoding use), each page a
-        # short list so nothing is overwhelming. **Each page has its own scroll
-        # area**, not one shared around the whole stack: a plain `QStackedWidget`
-        # (or a shared `QScrollArea` wrapping it) sizes itself to its *tallest*
-        # ever-shown page via its internal `QStackedLayout` — which forces its
-        # own `setMinimumSize`/`sizeHint` on the container widget at the C++
-        # layout-activation level, a layer overriding `sizeHint()`/
-        # `minimumSizeHint()` in a Python subclass can't reach (confirmed: even
-        # `widget.resize(widget.sizeHint())` right after switching pages snapped
-        # straight back to the tallest page's height). Measured before this fix:
-        # `self.pages.height()` was a constant 505 (Shortcuts' own height) on
-        # *every* sub-page, so Appearance (244) scrolled inside a box it never
-        # needed to. Giving each page its own `QScrollArea` sidesteps the whole
-        # class of problem — each one only ever sizes itself off *its own*
-        # single child, so switching sub-tabs genuinely changes whether a
-        # scrollbar shows: Shortcuts (many keybind rows) still gets one, short
-        # pages like About don't. Reset / Save stay pinned below, outside the
-        # stack entirely.
+        # Each page has its own scroll area rather than one around the stack: a stacked
+        # widget sizes to its tallest ever-shown page, so every page scrolled like the tallest.
+        # Reset / Save stay pinned below the stack.
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # System info (read-only: CPU / GPU / RAM) — a fixed-width corner
-        # label, not a row in the main column: a bare CPU name can run past
-        # 30 characters, and letting it size to its own content could grow
-        # wider than the tab frame on a smaller screen or a DPI change from
-        # dragging the window to another monitor, spilling text past the
-        # frame's rounded border. It sits in the tab bar's own full-width row
-        # after a stretch, so it lands at the frame's real right edge.
+        # System info (CPU / GPU / RAM): a fixed-width label at the header's right, since a long
+        # CPU name sized to content could spill past the frame.
         self._header_row, hl = hrow(spacing=0, align_bottom=False)
         scale.margins(hl, _SIDE_PAD, _TOP_PAD, _SIDE_PAD, 0)
         self.sub_tab_bar = SubTabBar(SETTINGS_PAGES)
         hl.addWidget(self.sub_tab_bar, 0, Qt.AlignTop)
         hl.addStretch(1)
         ram_text = f"{system_info.format_bytes(system_info.ram_total_bytes())} RAM"
-        # One paragraph per line so `line-height` can open them up a little (a
-        # plain newline-joined label has no spacing knob). Escaped: a device
-        # name is arbitrary text.
+        # One paragraph per line so `line-height` can space them; escaped (device names are
+        # arbitrary text).
         sys_lines = (system_info.cpu_name(), gpu.display_name(), ram_text)
         sys_info = ScaledLabel("".join(
             f'<p style="margin:0; line-height:125%;">{html.escape(line)}</p>' for line in sys_lines))
         sys_info.setTextFormat(Qt.RichText)
         sys_info.setProperty("role", "muted")
-        # 12px like the option names (the `muted` role is 11px); a widget-level rule
-        # so the role's theme-driven colour still applies.
+        # 12px like the option names; a widget-level rule keeps the role's theme colour.
         sys_info.setStyleSheet("font-size: 12px;")
         sys_info.setAlignment(Qt.AlignRight | Qt.AlignTop)
         sys_info.setWordWrap(True)
@@ -192,8 +153,8 @@ class SettingsTab(QWidget):
         self.sub_tab_bar.changed.connect(self._on_subtab_changed)
         outer.addWidget(self.pages, 1)
 
-        # ================= Appearance =================
-        # -- Theme
+        # --- Appearance page ---
+        # Theme
         pa.addWidget(field_label("Theme:"), 0, Qt.AlignLeft)
         scale.spacer(pa, 4)
         row, rl = hrow(spacing=0, align_bottom=False)
@@ -212,7 +173,7 @@ class SettingsTab(QWidget):
         self._show_swatches(self._committed)
         scale.spacer(pa, 18)
 
-        # -- Appearance mode
+        # Appearance mode
         pa.addWidget(field_label("Appearance Mode:"))
         scale.spacer(pa, 4)
         self.appearance_menu = Dropdown(["System", "Light", "Dark"], width=150)
@@ -221,7 +182,7 @@ class SettingsTab(QWidget):
         pa.addWidget(self.appearance_menu)
         scale.spacer(pa, 18)
 
-        # -- Window mode (Borderless adds a Fullscreen box underneath)
+        # Window mode (Borderless adds a Fullscreen box underneath)
         pa.addWidget(field_label("Window Mode:"))
         scale.spacer(pa, 4)
         self.window_mode_menu = Dropdown(window_mode.MODES, width=150)
@@ -236,14 +197,13 @@ class SettingsTab(QWidget):
         self.fullscreen_check.clicked.connect(self._on_fullscreen_toggle)
         tip(self.fullscreen_check, _FULLSCREEN_TIP)
         fsl.addWidget(self.fullscreen_check)
-        # Parent first, then visibility: a still-parentless widget made visible is
-        # its own top-level window, which flashed on screen at every Borderless launch.
+        # Parent first, then visibility: a parentless widget made visible is its own window.
         pa.addWidget(self.fullscreen_row, 0, Qt.AlignLeft)
         self.fullscreen_row.setVisible(app.window_mode == window_mode.BORDERLESS)
         scale.spacer(pa, 18)
 
-        # ================= Output =================
-        # -- Default save location
+        # --- Output page ---
+        # Default save location
         po.addWidget(field_label("Default Save Location:"))
         scale.spacer(po, 4)
         loc, ll = hrow(spacing=8, align_bottom=False)
@@ -264,7 +224,7 @@ class SettingsTab(QWidget):
         scale.spacer(po, 10)
         self._refresh_disk_usage()
 
-        # -- Downloader's own save location, off by default
+        # The Downloader's own save location, off by default
         self.downloader_separate_check = CheckBox(
             "Separate Save for Downloader", checked=bool(app.downloader_separate_save))
         self.downloader_separate_check.clicked.connect(self._on_downloader_separate_toggle)
@@ -286,7 +246,7 @@ class SettingsTab(QWidget):
         self.downloader_loc_row.setVisible(bool(app.downloader_separate_save))
         scale.spacer(po, 18)
 
-        # -- Output file naming (the tabs autofill their Save field from this)
+        # Output file naming (the tabs autofill their Save field from it)
         po.addWidget(field_label("File Naming:"))
         scale.spacer(po, 4)
         self.naming_entry = ScaledLineEdit()
@@ -305,10 +265,8 @@ class SettingsTab(QWidget):
         po.addWidget(self.naming_hint)
         scale.spacer(po, 18)
 
-        # ================= Performance =================
-        # -- Hardware acceleration (a global preference every Encode inherits)
-        # With no dedicated GPU the switch is off and greyed out (`app.gpu_enabled`
-        # is already False then), caption included, with the status line saying why.
+        # --- Performance page ---
+        # Hardware acceleration: off and greyed with no dedicated GPU, the status line says why.
         self._gpu_available = gpu.has_dedicated()
         self.gpu_label = field_label("Hardware Acceleration (GPU):")
         self.gpu_label.setEnabled(self._gpu_available)
@@ -328,7 +286,7 @@ class SettingsTab(QWidget):
         scale.spacer(pp, 18)
         self._refresh_gpu_status()
 
-        # -- Priority level (how hard encodes/downloads compete with other apps)
+        # Priority level
         pp.addWidget(field_label("Priority Level:"))
         scale.spacer(pp, 4)
         self.priority_menu = Dropdown(priority.LEVELS, width=Dropdown.width_for(priority.LEVELS))
@@ -338,7 +296,7 @@ class SettingsTab(QWidget):
         pp.addWidget(self.priority_menu)
         scale.spacer(pp, 18)
 
-        # -- When Done (what happens once the queue empties)
+        # When Done (once the queue empties)
         pp.addWidget(field_label("When Done:"))
         scale.spacer(pp, 4)
         self.when_done_menu = Dropdown(power.ACTIONS, width=Dropdown.width_for(power.ACTIONS))
@@ -354,7 +312,7 @@ class SettingsTab(QWidget):
         pp.addWidget(self.when_done_reset_check)
         scale.spacer(pp, 18)
 
-        # -- Startup tab (which of the four main tabs the app opens on)
+        # Startup tab
         pp.addWidget(field_label("Startup Tab:"))
         scale.spacer(pp, 4)
         self.startup_tab_menu = Dropdown(startup_tab.TABS, width=Dropdown.width_for(startup_tab.TABS))
@@ -364,7 +322,7 @@ class SettingsTab(QWidget):
         pp.addWidget(self.startup_tab_menu)
         scale.spacer(pp, 18)
 
-        # -- LlamaLog (the app's log: how much it records, and where it is)
+        # LlamaLog: detail level and the log folder
         pp.addWidget(field_label("LlamaLog:"))
         scale.spacer(pp, 4)
         log_row, log_l = hrow(spacing=10, align_bottom=False)
@@ -380,10 +338,10 @@ class SettingsTab(QWidget):
         pp.addWidget(log_row, 0, Qt.AlignLeft)
         scale.spacer(pp, 18)
 
-        # ================= Shortcuts =================
+        # --- Shortcuts page ---
         self._build_shortcuts(pk)
 
-        # ================= About =================
+        # --- About page ---
         self._build_about(pab)
 
         self._actions_row, actions_l = hrow(spacing=10, align_bottom=False)
@@ -398,19 +356,12 @@ class SettingsTab(QWidget):
         outer.addWidget(self._actions_row, 0, Qt.AlignLeft)
 
     def style_scope(self):
-        """Only what's actually on screen right now: the header row, whichever
-        of the five sub-pages is showing, and the Reset/Save row — not the
-        other four pages `self.pages` keeps alive underneath. See
-        `MainWindow._style_tab` for why this is safe here specifically (this
-        page stack is given a layout stretch rather than sized to its own
-        content, so a hidden page's stale size hint has no visible effect,
-        unlike Muxing/Encoding's own sub-tab stack)."""
+        """What's on screen: the header row, the current page and the Reset/Save row (see
+        `MainWindow._style_tab`)."""
         return (self._header_row, self.pages.currentWidget(), self._actions_row)
 
     def _on_subtab_changed(self, name):
-        """Switch sub-pages, then catch the newly-shown one up to the live
-        stylesheet/scale — it was skipped by the live-resize restyle while it
-        was the hidden one (see `style_scope`/`MainWindow._style_tab`)."""
+        """Switch pages, then catch the new one up to the current stylesheet and scale."""
         self.pages.setCurrentIndex(SETTINGS_PAGES.index(name))
         self.app.style_now(self.pages.currentWidget())
 
@@ -418,8 +369,8 @@ class SettingsTab(QWidget):
     #  Shortcuts
     # ------------------------------------------------------------------ #
     def _build_shortcuts(self, page):
-        """The Shortcuts page: one row per action — its name, a field showing (and taking) its key,
-        and a switch that turns it on or off."""
+        """One row per action: its name, a field showing (and taking) its key, and an on/off
+        switch."""
         hint = ScaledLabel(_SHORTCUTS_HELP)
         hint.setProperty("role", "hint")
         hint.setWordWrap(True)
@@ -461,10 +412,8 @@ class SettingsTab(QWidget):
     #  About
     # ------------------------------------------------------------------ #
     def _about_link_row(self, page, label_text, url):
-        """One row: a bold caption ("GitHub:") beside the address itself, shown as a plain
-        hyperlink — underlined, in the theme's secondary colour, restyled live on a theme
-        change — rather than a button, so the URL is genuinely visible, not just named in a
-        tooltip."""
+        """A bold caption ("GitHub:") beside the URL as a hyperlink in the theme's secondary
+        colour, so the address is visible rather than hidden behind a button."""
         row, row_l = hrow(spacing=6, align_bottom=False)
         row_l.addWidget(field_label(label_text), 0, Qt.AlignVCenter)
         link = ClickableLabel(url)
@@ -480,10 +429,8 @@ class SettingsTab(QWidget):
         page.addWidget(row, 0, Qt.AlignLeft)
 
     def _build_about(self, page):
-        """The About page: the version, links to the project (as plain hyperlinks, not buttons),
-        the license notice (GNU's short one) with buttons to the full texts, and a trademark
-        disclaimer trailing under all of it, uncaptioned, as fine print. Nothing here is a
-        setting, so nothing is saved."""
+        """The version, the project links, GNU's short license notice with buttons to the full
+        texts, and the trademark / logo notice as fine print. Nothing here is saved."""
         version_row, version_l = hrow(spacing=6, align_bottom=False)
         version_l.addWidget(field_label("Version:"), 0, Qt.AlignVCenter)
         version = ScaledLabel(f"LlamaMXD™ {VERSION}")
@@ -499,38 +446,16 @@ class SettingsTab(QWidget):
 
         page.addWidget(field_label("License:"))
         scale.spacer(page, 4)
-        # A little tighter than Muxing's TrackListBox's own (9, 7, 5, 7): this page's own scroll
-        # area needs the notice box to fit inside 385 reference px with real margin, not just
-        # barely — Qt's own scrollbar-visibility check turned out racy within a few px of that
-        # edge (measured: identical content and viewport heights showed the scrollbar after one
-        # resize round-trip and not after another), so "fits, just" isn't good enough here.
+        # Tighter margins than TrackListBox's: the page must fit its 385px viewport with room,
+        # since Qt's scrollbar check is unreliable within a few px of the edge.
         notice_box = BorderedFrame(color_key="secondary")
         scale.fixed(notice_box, w=_ABOUT_NOTICE_W)
         notice_l = QVBoxLayout(notice_box)
-        scale.margins(notice_l, 9, 5, 5, 5)
-        # A stock QLabel, not ScaledLabel — see the identical note in MessageDialog
-        # (ui/widgets/dialogs.py) for why: real text selection needs Qt's own text
-        # control, which only agrees with what's on screen when Qt paints it itself.
-        # This label just accepts whole-pixel font stepping during a drag in exchange
-        # for a text control that's actually usable.
-        #
-        # `set_font_px` does NOT work here (CLAUDE.md already documents it as a no-op
-        # on any label: the base `QWidget` stylesheet rule's font-size wins back over
-        # a plain `.setFont()` call the moment Qt polishes the widget — confirmed with
-        # a throwaway repro: right after `set_font_px` the font reads 12px, and after
-        # the very next `ensurePolished()` it's back to the app-wide 13px). The fix
-        # `sys_info` above already uses works because it sets the font through the
-        # label's own *instance* stylesheet, which — unlike a bare `.setFont()` —
-        # keeps priority over anything an ancestor's stylesheet reapplies later. Here
-        # that override has to be re-applied on every scale change too (`sys_info`
-        # doesn't need that, being a `ScaledLabel`, which reinterprets its own
-        # unchanging "12px" as reference units instead).
-        # Rich text only to turn the closing "https://www.gnu.org/licenses/." into a real
-        # link — everything else about the wording and layout stays exactly `about.NOTICE`'s
-        # own verbatim GPL text: escaped whole, then `\n` swapped for `<br>` one for one (so
-        # a blank `\n\n` line becomes `<br><br>`, matching plain-text QLabel's own rendering
-        # of it) before the one known substring — the escaped URL — is wrapped in an anchor.
-        # `about.NOTICE` itself stays plain text in `core/about.py` (no Qt/HTML in `core/`).
+        pad_left, pad_right = 9, 5
+        scale.margins(notice_l, pad_left, 5, pad_right, 5)
+        # A stock QLabel so the text is selectable (see MessageDialog). Its font is an
+        # instance stylesheet re-bound on every rescale: a plain setFont is overridden at the
+        # next polish. Rich text only to link the GNU URL; the wording is about.NOTICE verbatim.
         notice_url = "https://www.gnu.org/licenses/"
 
         def notice_html():
@@ -546,18 +471,17 @@ class SettingsTab(QWidget):
                                        | Qt.LinksAccessibleByMouse | Qt.LinksAccessibleByKeyboard)
         notice.setCursor(Qt.IBeamCursor)
         notice.linkActivated.connect(self._open_url)
-        # The anchor's colour is baked into the text (inline style, not a stylesheet rule --
-        # rich text doesn't take link colour from CSS), so a theme change needs the text
-        # rebuilt, not just restyled.
+        # The link colour is inline (rich text ignores CSS), so a theme change rebuilds the text.
         T.theme.changed.connect(lambda: notice.setText(notice_html()))
         scale.bind_style(notice, lambda: f"font-size: {scale.font_px(12)}px;")
-        scale.fixed(notice, w=_ABOUT_NOTICE_W - 14)
+        # The box's rounded width less its rounded margins: scaling `W - 14` alone rounds a pixel
+        # wider at some scales and squeezes the box.
+        scale.bind(notice, lambda: notice.setFixedWidth(
+            scale.px(_ABOUT_NOTICE_W) - scale.px(pad_left) - scale.px(pad_right)), "fixed-w")
         notice_l.addWidget(notice)
         page.addWidget(notice_box, 0, Qt.AlignLeft)
         scale.spacer(page, 6)
         licenses, licenses_l = hrow(spacing=10, align_bottom=False)
-        # Each sized to its own text, not to the wider of the two — "View License" doesn't need
-        # to match "Third-party Licenses"' width.
         view_btn = button("View License", width=button_width_for(["View License"]))
         view_btn.clicked.connect(self._open_license)
         tip(view_btn, "Opens the full text of the GNU General Public License (LICENSE.txt).")
@@ -570,22 +494,15 @@ class SettingsTab(QWidget):
         page.addWidget(licenses, 0, Qt.AlignLeft)
         scale.spacer(page, 6)
 
-        # No caption of its own, unlike the rows above -- a trailing disclaimer under the
-        # license, not a fourth thing to label alongside GitHub/Issue Tracker/License. The
-        # `hint` role (muted colour, smaller than the rest of this page's 12px) is what
-        # already reads as fine print elsewhere (the naming-format hint, the GPU status line).
-        # The logo's own copyright comes before the trademark claim -- two separate facts
-        # (copyright protects the artwork, trademark protects the names) in one fine-print block.
+        # Uncaptioned fine print (the `hint` role) under the license: trademark and logo
+        # copyright.
         branding_notice = ScaledLabel(f"{about.TRADEMARK_NOTICE} {about.LOGO_COPYRIGHT_NOTICE}")
         branding_notice.setProperty("role", "hint")
         branding_notice.setWordWrap(True)
         scale.fixed(branding_notice, w=_ABOUT_NOTICE_W)
         page.addWidget(branding_notice)
 
-        # This page has its own scroll area now, sized off nothing but this page's own content
-        # (see the note on `self.pages` in `__init__`) — this stretch just keeps the content
-        # hugging the top rather than being spread out once the scroll area stretches the page
-        # to fill whatever room it's given.
+        # Keeps the content at the top of its scroll area.
         page.addStretch(1)
 
     def _open_local(self, path, title, message):
@@ -623,7 +540,7 @@ class SettingsTab(QWidget):
             self._key_switches[action.id].setChecked(on)
 
     def _on_key_captured(self, action_id, spec):
-        """The user pressed a key for `action_id`: take it unless another shortcut that could fire
+        """A key was pressed for `action_id`: take it unless an enabled shortcut that can fire
         at the same time already has it."""
         keys = self.app.keymap
         spec = canonical(spec)
@@ -642,8 +559,8 @@ class SettingsTab(QWidget):
         self.autosave()
 
     def _on_shortcut_toggled(self, action_id):
-        """A row's switch. Turning one on is refused while its key has since been taken by
-        another shortcut that is on."""
+        """A row's switch. Refused when turning on a row whose key another enabled shortcut
+        has since taken."""
         keys = self.app.keymap
         switch = self._key_switches[action_id]
         on = switch.isChecked()
@@ -678,8 +595,7 @@ class SettingsTab(QWidget):
             "theme": self._committed,
             "appearance_mode": self.appearance_menu.value(),
             "default_save_location": location or self.app.default_save_location,
-            # The saved choice, not the (possibly forced-off) switch -- see
-            # `MainWindow.gpu_preference`.
+            # The saved choice, not the possibly forced-off switch.
             "gpu_enabled": self.app.gpu_preference,
             "naming_template": self.app.naming_template,
             "priority_level": self.app.priority_level,
@@ -690,11 +606,9 @@ class SettingsTab(QWidget):
             "startup_tab": self.app.startup_tab,
             "log_detail": self.app.log_detail,
             "keybinds": self.app.keymap.to_dict(),
+            "confirm_clear_selection": self.app.confirm_clear_selection,
             "downloader_separate_save": separate,
-            # While separate-save is off, the entry just displays the shared
-            # default as a fallback (see __init__) — that display text is
-            # never itself a real separate location, so it must not get
-            # persisted as one on the next autosave.
+            # With separate-save off the entry only displays the shared default: don't save it.
             "downloader_save_location": (
                 downloader_location if separate and downloader_location
                 else self.app.downloader_save_location
@@ -727,17 +641,16 @@ class SettingsTab(QWidget):
         self.when_done_menu.close()
         self.startup_tab_menu.close()
         self.log_detail_menu.close()
-        # A format left half-typed and invalid isn't kept around: show the one
-        # actually in use when the tab is next opened.
+        # A half-typed, invalid format isn't kept: show the one in use.
         if naming.template_error(self.naming_entry.text()):
             set_line_text(self.naming_entry, self.app.naming_template)
             self._validate_naming_text(self.app.naming_template)
         self.autosave()
 
     def on_enter(self):
-        """Free disk space can change while the app sits on another tab —
-        refresh it every time Settings is shown, not just at startup."""
+        """Refresh free disk space (it changes while the app is elsewhere)."""
         self._refresh_disk_usage()
+        self.when_done_menu.set(self.app.when_done)      # the Queue tab can change it too
 
     # ------------------------------------------------------------------ #
     #  Theme
@@ -772,8 +685,8 @@ class SettingsTab(QWidget):
         self.autosave()
 
     def _on_window_mode_change(self, mode):
-        """Apply the window mode at once; the Fullscreen box only exists for
-        Borderless (its own choice is remembered while another mode is on)."""
+        """Apply the window mode; the Fullscreen box shows only for Borderless (and keeps its
+        choice meanwhile)."""
         self.fullscreen_row.setVisible(mode == window_mode.BORDERLESS)
         self.app.set_window_mode(mode, self.fullscreen_check.isChecked())
         self.autosave()
@@ -811,10 +724,8 @@ class SettingsTab(QWidget):
             self.autosave()
 
     def _refresh_disk_usage(self):
-        """Total/free space for the drive under the save-location entry —
-        "" falls back to the app's own default, same as `_settings_snapshot`.
-        Only the "___ free" half renders in STOP_RED when space is low at or
-        below `_LOW_DISK_BYTES` — the total figure stays neutral either way."""
+        """Total / free space of the save location's drive ("" means the app default); only the
+        free figure turns red when at or below `_LOW_DISK_BYTES`."""
         location = self.save_location_entry.text().strip() or self.app.default_save_location
         total, free = system_info.disk_usage(location)
         if total is None:
@@ -826,17 +737,15 @@ class SettingsTab(QWidget):
         self.disk_label.setText(f"{system_info.format_bytes(total)} total, {free_text}")
 
     def _validate_naming_text(self, text):
-        """Live feedback while typing the naming format: the token help, or
-        what's wrong with it in STOP_RED. Nothing is applied until Enter /
-        focus leaves (`_commit_naming`), and never while it's invalid."""
+        """Live feedback on the naming format: the token help, or what's wrong in red. Applied
+        only on Enter / focus out, and never while invalid."""
         error = naming.template_error(text)
         self.naming_hint.setText(error or _NAMING_HELP)
         self.naming_hint.setProperty("role", "error" if error else "hint")
         restyle(self.naming_hint)
 
     def _commit_naming(self, save=True):
-        """Adopt the typed naming format if it's valid and changed — every
-        tab's autofilled Save field re-derives from it at once."""
+        """Adopt the typed naming format if valid and changed; autofilled Save fields follow."""
         text = self.naming_entry.text().strip()
         if naming.template_error(text) or text == self.app.naming_template:
             return
@@ -853,12 +762,12 @@ class SettingsTab(QWidget):
         self.autosave()
 
     def _on_startup_tab_change(self, tab):
-        """Only what the *next* launch opens on: the current session stays put."""
+        """Only the next launch's tab; the current session stays put."""
         self.app.startup_tab = tab
         self.autosave()
 
     def _on_log_detail_change(self, level):
-        """Normal or Detailed: the log follows at once; ffmpeg and yt-dlp pick it up on the next job."""
+        """Normal or Detailed: the log follows at once, ffmpeg / yt-dlp from the next job."""
         self.app.log_detail = level
         llamalog.set_detail(level)
         self.autosave()
@@ -894,8 +803,8 @@ class SettingsTab(QWidget):
             self.app, "Reset to Default?",
             "This resets the theme, appearance mode, window mode, default save location, "
             "Downloader save location, file naming, hardware acceleration, "
-            "priority level, When Done, Startup Tab, log detail and keyboard shortcuts back to their "
-            "defaults. Continue?",
+            "priority level, When Done, Startup Tab, log detail, keyboard shortcuts and the Clear "
+            "confirmation back to their defaults. Continue?",
         ):
             return
         self._committed = DEFAULT_THEME_NAME
@@ -936,6 +845,7 @@ class SettingsTab(QWidget):
         llamalog.set_detail(llamalog.DEFAULT_LEVEL)
         self.app.keymap.reset()
         self._refresh_shortcut_rows()
+        self.app.confirm_clear_selection = True
         self._refresh_disk_usage()
         self.autosave()
         llamalog.get("settings").info("Settings reset to their defaults")

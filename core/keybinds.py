@@ -41,6 +41,11 @@ ACTIONS = (
     Action("fullscreen", "Fullscreen Window", "F11", (WINDOW,),
            "Fills the screen; press it again to go back. In Borderless mode this is Settings' "
            "Fullscreen box."),
+    Action("undo", "Undo", "Ctrl+Z", (WINDOW,),
+           "Undoes the last change on whichever Video/Audio/Subtitles sub-tab is showing "
+           "(Muxing or Encoding)."),
+    Action("redo", "Redo", "Ctrl+Shift+Z", (WINDOW,),
+           "Redoes what Undo just took back."),
 )
 
 BY_ID = {a.id: a for a in ACTIONS}

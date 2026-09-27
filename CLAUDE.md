@@ -6,7 +6,7 @@ PySide6 (Qt 6). Wraps ffmpeg and yt-dlp behind a tabbed interface. Repo:
 text; every `.py` file starts with `# SPDX-License-Identifier: GPL-3.0-or-later` and `# Copyright (C)
 2026 Yezan Smadi` — **put the same two lines on any new source file**, as the "or later" is stated there).
 It was the Unlicense up to v0.5.0-beta.3 (beta.4 is the first GPL release); those releases stay public domain. Currently
-v0.5.0-beta.4 (the sidebar footer — `VERSION` in `ui/widgets/panels.py`).
+v0.5.0-beta.5 (the sidebar footer — `VERSION` in `ui/widgets/panels.py`).
 
 ## Running
 
@@ -88,8 +88,8 @@ picturing Pak the Llama and (the animation) the coined "PAK-RW"/"LlamaDisc" word
 actual branding — Copyright (c) 2026 Yezan Smadi, all rights reserved (may not be copied, modified,
 redistributed, or used to represent a modified/unofficial build of LlamaMXD, without permission) — the
 same reason Mozilla/Blender/GNOME/VLC keep their own logos out of their code's open-source license —
-while the cable graphic, purely decorative, is Copyright (c) 2026 Yezan Smadi under CC Attribution 4.0
-(CC BY 4.0), reusable with credit. **"LlamaMXD" and "Pak the
+while the cable graphic and the Queue's search icon (`search.svg`), purely decorative, are Copyright (c)
+2026 Yezan Smadi under CC Attribution 4.0 (CC BY 4.0), reusable with credit. **"LlamaMXD" and "Pak the
 Llama"** (`core.about.MASCOT_NAME` — the llama pictured in `LlamaMXD-Logo.svg`) **are unregistered
 trademarks of Yezan Smadi** (`core.about.TRADEMARK_NOTICE`), claimed by use rather than registered with
 a trademark office — hence "LlamaMXD™"/"Pak the Llama™", not the registered-mark "®" — stated in both
@@ -97,6 +97,84 @@ a trademark office — hence "LlamaMXD™"/"Pak the Llama™", not the registere
 than the rest of the page) trailing under the License section's own notice box and buttons — fine print
 under everything else, not a fourth row alongside GitHub/Issue Tracker/License. A build with
 `--enable-nonfree` must never be bundled.
+
+## Tests
+
+```bash
+python tests/run_all.py
+```
+
+**Run it before and after any change that isn't comment-only** (~30s; `--update` re-records the
+goldens after an *intended* change; `python tests/run_all.py ui jobs` runs a subset). Each check runs
+in its own process against a sandbox: the log goes to `%TEMP%\llamamxd-tests`, the UI check uses its
+own settings.json / presets.json, and fixture clips are generated there by the bundled ffmpeg.
+- `check_commands` — golden ffmpeg argv for 26 Encode + 6 Mux settings, and the yt-dlp plan + argv for
+  all 259 Downloader dropdown combinations on a stand-in YouTube format list. `-fps_mode`,
+  libplacebo, the GPU (NVIDIA / NVENC) and tool paths are pinned, so the goldens hold on any machine.
+- `check_core` — goldens of `formats` (the whole cascade), `naming`, `keybinds`, and `probe_media` /
+  `probe_duration` / preview frames on the fixtures (SDR, multi-audio, HDR10, audio-only, VP9, cover
+  art, a late-start MKV, and `keys.mp4` / `sparse.mp4` for the keyframe path and its exact redos):
+  each frame's seek, that repeating it gives the same picture, and the tone-mapped set at those seeks.
+
+- `check_leaks` — each user action repeated after a warm-up (importing video and audio, dialogs,
+  toasts, queue rows and their details, theme / tab switches, expanding the preview, a dropdown's
+  popup, a Downloader fetch, an HDR import with HDR->SDR on, a real Mux job through the queue): live QObjects, widgets, top-level windows, threads, theme-signal
+  connections and scale bindings must not grow. Deferred deletes are flushed and dead bindings swept
+  first (the harness pumps events outside a real event loop, where deleteLater never runs). Memory
+  isn't compared; measured by hand it plateaus (imports: +39MB at 20 rounds, +40MB at 60 — the
+  spinner's frames filling in; resizes +5.5MB either way; 25 HDR round-trips 152 -> ~195MB by round 10, then
+  flat; 25 real jobs flat at 202MB). The job action waits out the batch's "All queued jobs finished." toast,
+  which is otherwise alive at the count (a constant +4 objects, the same at 6 and 18 rounds). ~110s.
+
+UI checks end through `harness.finish()` (`TerminateProcess` once their results are printed): Qt's
+native teardown crashes at exit now and then (3 of 10 runs on one check, before and after any
+change here), and even `os._exit` runs the DLLs' unload code where it happens.
+- `check_ui` — the real `MainWindow` offscreen: every visible widget's rect on 17 pages (Overview /
+  Video / Audio / Subtitles / Chapters on both tabs, the Downloader, the Queue, Settings' five; plus
+  the no-file state) at 1.0 / 1.5 / 2.0x, the squeeze scan, the Muxing / Encoding preview invariant, and
+  that no sub-tab page is taller than Overview at 8 scales on both tabs (Encoding's Audio and
+  Subtitles pages come out a pixel over at 0.95 / 1.45 / 1.95 / 2.45, a known one, so those scales are
+  left out). It once covered only Overview / Video / Audio, which is how a Subtitles or Chapters page
+  could grow past Overview unnoticed.
+- `check_hover` — the cursor and hover state under a resting pointer, offscreen (`QCursor.setPos` posts a
+  real mouse move there): disabled controls show an arrow; a widget that moves out from under a still
+  pointer takes its cursor and hover flag with it (through HoverSync's real timer); the expanded preview's
+  hand goes with its chevron; nothing is sent while nothing changes or a drag holds the cursor.
+- `check_media` also drives the Edit Subs, Add Chapter and Edit Chapters popups (one undo step, Cancel,
+  the one-default rule, refused times, the exact start kept), Muxing's subtitle-format narrowing and
+  Encoding's burn-in, as the settings a job would get.
+- `check_media` — the selected-file pipeline (`MediaSession`): load, a cache-hit reselect (no
+  second probe), the HDR preview (an import tone-maps frames 0-2 and stops, scrubbing to 6 adds 6-8, the
+  switch completes the set and the carousel shows it, off shows the raw set, a file change drops or
+  cancels it), the Wave Loop for audio, an unreadable file rejected, "No Preview", and the scrub index.
+  Then the spinner's frame release (below, under LoadingSpinner), with its waits cut to 1s / 3s: big
+  frames gone after the grace once the window shrank, a same-size set kept until the idle time, and
+  the first 13 always present at the size needed.
+- `check_orphans` — the real app (`main.main`, sandboxed, offscreen) as a child process imports the HDR
+  fixture and turns HDR->SDR on, then closes its window, and a second run is killed outright
+  (`Popen.kill`, like a crash or End Task) — each at the moment tone-map ffmpegs are running (a run
+  where none was is itself a failure, since it proves nothing). None of the app's descendants may be
+  alive afterwards. Before `core/winproc.py`, both runs left 3 ffmpegs running on for seconds.
+- `check_runners` — the runners' lifecycle offline: a real `YtDlpJob` (its job object included)
+  runs `tests/fake_ytdlp.py`, a stand-in speaking yt-dlp's marker lines — a merge, pause / resume,
+  priority, Stop killing the tree (a child process too) and removing the work folder, a failure,
+  no file, a missing exe, an unmakeable folder — plus `FfmpegJob`'s early failures and its
+  controls once ended.
+- `check_jobs` — real Mux / Encode jobs through `FfmpegJob`, their outputs probed (streams, languages,
+  length, each stream's start time); stop() mid-run; a failing job's reason. **Subtitles and chapters**
+  are checked by what a player sees: each track's cues read back as SRT, its language and flags, the
+  chapter list, a picture track's packet times and burned-in pixels (a trimmed mux to .mp4 with a source
+  and a prepared external .srt, an untrimmed .mkv copy, a trimmed external .sup, strip, a trimmed text
+  burn-in, a scaled picture burn-in, a burn-in from a path with `'[],;`). Fixtures `subs.mkv` (SRT eng
+  Default + ASS spa Forced + two chapters, a keyframe a second), `subs.srt`, `bar.sup` and `pgs.mkv` (720p
+  video + the 1080p bar) come from `harness` — the .sup is written by `harness._sup`, since ffmpeg can't
+  make pictures from text. Shown to fail with the prep step switched off (the external cues at 0-3 / 4-8).
+
+Each check was shown to fail on a deliberate one-line break. There are no KNOWN exceptions: the About
+license box's 1px squeeze at 1.5x is fixed (the notice's width is now the box's rounded width less its
+rounded margins; scaling `644 - 14` on its own came out a pixel too wide at 39 of 241 scales from 0.6x
+to 3.0x). `check_runners` also reads back each job's CPU class, I/O and memory priority. The jobs
+check's `stream_starts` guards the trim + Passthru fix below.
 
 ## Architecture
 
@@ -116,15 +194,23 @@ core/keybinds.py          the remappable shortcuts: action table, default keys, 
 core/theme.py             brand palettes, contrast helpers, settings.json read/write
 core/about.py             Settings' About page: repo / issue-tracker URLs, the GPL short notice, paths to LICENSE.txt and licenses/
 core/llamalog.py          LlamaLog: the rotating log file, crash hooks, URL scrubbing, per-job output ring buffer
-core/utilities.py         ffprobe media probe + duration, capability checks, preview frame decode
-core/ffmpeg_vars.py       one queued job's settings flattened into module globals (raw + *_ARG)
+core/probe.py             ffprobe: probe_media, a file's real length, the HDR colour-tag check
+core/capabilities.py      what the bundled ffmpeg can do: -fps_mode, libplacebo/Vulkan, AV1 presets
+core/previews.py          preview frames (OpenCV, else ffmpeg) and the HDR tone-mapped set
+core/ffmpeg_vars.py       one queued job's settings -> a frozen JobVars of ffmpeg-ready values
 core/ffmpeg_build.py      builds a Mux or Encode job's ffmpeg-python Stream / full argv
+core/process_job.py       ProcessJob, the base of both runners: launch, pause/resume, priority, stop,
+                          events, the job log; set_suspended, replace_output
 core/ffmpeg_runner.py     runs one ffmpeg job off the GUI thread (progress, suspend/resume, stop)
 core/tools.py             resolves ffmpeg/ffprobe/yt-dlp/deno to absolute paths (bundled, then PATH)
+core/winproc.py           the kill-on-close "tools job" every tool joins; run(): a contained subprocess.run;
+                          set_suspended (NtSuspendProcess / NtResumeProcess)
 core/downloader.py        Downloader logic: fetch (-J), format model + option lists, resolve, argv
 core/ytdlp_runner.py      runs one download off the GUI thread (job object, stages, time progress)
-ui/app.py                 MainWindow — the hub: shared state, file-selection broadcast, background
-                          work, tab routing, keybinds, toasts, close prompt
+ui/app.py                 MainWindow — the hub: shared state, background work, tab routing,
+                          keybinds, toasts, close prompt
+ui/media_session.py       MediaSession (`app.media`): the selected file, its probe, preview frames,
+                          HDR render and scrub index, broadcast to the media tabs
 ui/theme.py               ThemeManager (live theme + System/Light/Dark) + the generated stylesheet
 ui/scale.py               the one UI scale factor: px()/fpx(), bound setters, design-space painting
 ui/workers.py             run_async: daemon thread → result delivered on the GUI thread; pil_to_qimage
@@ -132,21 +218,32 @@ ui/qt_log.py              routes Qt's own warnings/errors into the log
 ui/single_instance.py     InstanceLock: a per-user lock file so only one LlamaMXD runs (main.py checks it first)
 ui/keymap.py              KeyMap: the live shortcuts + matching a QKeyEvent against them
 ui/keynav.py              KeyNav: Tab / Enter selection of a tab's controls (the ring) + an open dropdown's keys
+ui/hover.py               HoverSync: the cursor and hover state under a pointer that isn't moving
 ui/tips.py                shared hover-tooltip copy (codec / container / audio-format explanations)
-ui/widgets/controls.py    Dropdown, CheckBox, Switch, SegmentedButton, TimeSpinner, MarqueeLabel,
-                          IconButton (✕ / ▲ / ▼ / select-all / deselect-all / undo / redo), ScaledLabel / ScaledButton /
-                          ScaledLineEdit (stock text painted through the scaled painter — see
-                          "UI scale") + helpers
-                          (button, labeled, set_enabled, draw_cross)
+ui/widgets/controls.py    button / labeled / field_label / set_enabled / restyle / anim / draw_cross helpers, IconButton
+                          (✕ / ▲ / ▼ / select-all / deselect-all / undo / redo)
+ui/widgets/text.py        ScaledLabel / ScaledButton / ScaledLineEdit / ClickableLabel (text painted through the scaled
+                          painter — see "UI scale"), ui_font, set_font_px
+ui/widgets/dropdown.py    Dropdown, NO_OPTION
+ui/widgets/toggles.py     CheckBox, Switch, SegmentedButton
+ui/widgets/timespinner.py TimeSpinner (+ its _TimeField)
+ui/widgets/marquee.py     MarqueeLabel, MarqueeGroup
 ui/widgets/panels.py      SubTabBar, DropBox, LoadingSpinner, BorderedFrame, SummaryPanel, Sidebar, TabIndicator
+ui/widgets/chapters.py    ChapterEditor — the Chapters sub-tab Muxing and Encoding share
+ui/widgets/edit_dialogs.py  the Add/Edit Subs / Add/Edit Chapters popups (edit a copy; OK hands it back)
 ui/widgets/tracklist.py   TrackListBox — Muxing's checkable, scrollable track picker
-ui/widgets/carousel.py    ThumbnailCarousel + WaveLayer + the info tooltip
+ui/widgets/carousel.py    ThumbnailCarousel
+ui/widgets/wave.py        WaveLayer: the Wave Loop (rlottie) and its artwork fixes
+ui/widgets/info_badge.py  the preview's info badge painters + _InfoTooltip
+ui/widgets/preview_overlay.py  _ExpandedPreviewOverlay: the expanded preview
 ui/widgets/dialogs.py     MessageDialog, show_message / ask_yes_no / ask_text,
                           confirm_output_path, AudioStreamPickerDialog, ExternalStreamPickerDialog
 ui/widgets/toast.py       Toast / ToastManager
 ui/widgets/frameless.py   ResizeGrips (the borderless window's eight native-resize handles) +
                           WindowControls (its close / maximise / minimise icons)
 ui/widgets/tooltip.py     tip(widget, text) — the shared themed hover tooltip
+ui/widgets/svg.py         svg_renderer(name, color, mode): SVG assets recoloured by text, cached
+ui/widgets/queue_controls.py  Queue's SortButton (cycling), SearchToggle + SearchBar (unrolling), SlideHost (details panel)
 ui/widgets/keyfield.py    KeyField — Settings' click-then-press-a-key box
 ui/tabs/media_tab.py      MediaTab — the frame Muxing and Encoding share
 ui/tabs/muxing.py, encoding.py, downloader.py, queue.py, settings.py
@@ -266,10 +363,31 @@ app's exe or in a `dependables/` folder next to it (both installer layouts
 work), then the repo's `dependables/`, then PATH. Cached per process.
 
 **Every** ffmpeg/ffprobe call goes through it — `ffmpeg_build.compile_command`'s
-argv[0], and all eight `subprocess.run`s in `core/utilities.py` (probe,
-duration, HDR metadata/tag checks, the `supports_*` capability checks, the
-HDR preview frames). Verified by running a real Mux and Encode job with every
+argv[0], and `run_tool(name, *args)` / `ffprobe_json(*args)` (also here: no console window,
+text output), which every query in `core/probe.py` and `core/capabilities.py` uses; the preview
+frames in `core/previews.py` launch through `tool_path` with their own flags (binary output,
+below-normal priority). Verified by running a real Mux and Encode job with every
 ffmpeg folder removed from PATH: both launched `dependables\ffmpeg.exe`.
+
+**No tool outlives the app (`core/winproc.py`).** Windows doesn't end a child with its parent, so a
+close, a crash or End Task used to leave a preview grab or a tone-map ffmpeg running (found by
+`check_orphans`: 3 ffmpegs ran on after both a close and a kill). Every tool the app runs now joins
+one app-wide **kill-on-close job object** (`_tools_job`, made on first use; its handle is never
+closed, so the process exiting — however it exits — closes it and Windows ends everything in it).
+`winproc.run(args, timeout=...)` is the one way to run a tool to completion: `subprocess.run`'s
+shape (`text=True` decodes as **UTF-8 with `errors="replace"`, never the system code page**: ffprobe writes
+tags as UTF-8, and cp1252 has undefined bytes, e.g. 0x8f in `台` and `я`, whose decode error kills the pipe's
+reader thread and leaves empty output and no exception, so a whole probe came back "no streams" and the
+file was rejected as unreadable; fixed after `Mulan.mkv` and two other real files hit it, with a fixture and
+a check in `check_core`), no console window, started `CREATE_SUSPENDED` so it joins the job before it can start a child
+of its own, then resumed; killed on a timeout or any exception. Every such call uses it —
+`tools.run_tool` (so every probe and capability check), the preview grabs and tone-mapped frames,
+Deno's version check and the Downloader's fetch, the GPU queries, the log header's version lines.
+`FfmpegJob` joins it right after launch (`ProcessJob.CONTAIN`; ffmpeg starts no children);
+`YtDlpJob` keeps its own kill-on-close job (`CONTAIN = False`), which it also uses for pause / stop of
+the whole tree. **Deliberately not contained**: what the user asked to open — Explorer's
+`/select`, the log folder (`os.startfile`), the license files, the browser — and `core/power.py`'s
+shutdown / sleep, none of which should die with the app.
 
 **Absolute paths are load-bearing for yt-dlp**, not tidiness: a relative
 `--js-runtimes deno:dependables/deno.exe` made yt-dlp report "no JS runtime
@@ -281,22 +399,22 @@ frozen.
 
 `MainWindow` owns the shared state every tab reads through `self.app`:
 
-- `current_file_path` — the single globally-selected input file.
+- `media` — the `MediaSession` (`ui/media_session.py`): the selected file and everything
+  derived from it — `current_file_path`, `info` (the ffprobe result, below; `info_path` is
+  the file it came from), `thumb_frames` / `thumb_frames_path` (its ten preview QImages),
+  `hdr_frames` / `hdr_frames_path` (the tone-mapped set, if rendered), `tabs` (Muxing and
+  Encoding, registered by `MediaTab.__init__` through `register_tab` as the targets of the
+  broadcast). Only `MediaSession` writes any of it; tabs read `self.app.media.<name>`.
 - `default_save_location`, `gpu_enabled` — from `settings.json`; the save
   folder is created at startup (best-effort).
 - `downloader_separate_save`, `downloader_save_location` — also from
   `settings.json`; the Downloader's own optional save folder, off by
   default. `downloader_default_location()` is what `DownloaderTab` actually
   autofills into — see "Tabs → Settings" below.
-- `media_info` — the ffprobe result for the selected file (below).
-- `thumb_frames` / `thumb_frames_path` — its ten preview frames (QImages).
-- `hdr_frames` / `hdr_frames_path` — the tone-mapped preview set, if rendered.
 - `ytdlp_cache` (`{"url", "info", "thumb"}`), `deno_missing`.
 - `tabs` — name → tab (`Muxing`, `Encoding`, `Downloader`, `Queue`,
   `Settings`), all built once at startup and stacked in a `QStackedWidget`.
   `Queue` is constructed first since the others hand jobs to it.
-- `media_tabs` — Muxing and Encoding, registered by `MediaTab.__init__`
-  (`register_media_tab`) as the targets of the file-selection broadcast.
 
 **Window**: starts at 35% of the screen's width at the reference aspect
 ratio (896:540 — `scale.window_size`), centred; a 2560x1440 screen gives
@@ -348,7 +466,7 @@ applied live by `MainWindow._apply_window_mode` (also at launch, and
   before (1.0, 1.1, 1.14, 1.16 — the default size worst), 0 after, and all four sides
   match. Judge icons like this by their real pixels: a 1px line magnified with smooth
   scaling *looks* grey. The three SVGs ship in three colours (black, near-black, navy), so
-  `_tinted_svg` swaps every painted `fill` in the file text and renders it as a vector
+  `svg_renderer(..., "fills")` swaps every painted `fill` in the file text and renders it as a vector
   (smooth at any scale) — not a rendered-then-tinted bitmap. Shown in Borderless only
   (`MainWindow._sync_window_chrome`), fullscreen included. Close is `MainWindow.close`,
   so the unfinished-jobs prompt still applies; Maximise toggles `showMaximized` /
@@ -419,8 +537,8 @@ would otherwise prompt a second time.
 
 Any DropBox (drop, double-click or Browse), the carousel (drop or a
 double-click reselect), or the file label's double-click calls
-`app.update_global_file(path)` — the *only* place the selected file changes.
-It resets the shared scrub index and `media_info` when the path actually
+`app.media.select_file(path)` (`ui/media_session.py`) — the *only* place the selected file changes.
+It resets the shared scrub index and `info` when the path actually
 changed — also calling `carousel.clear_preview()` on every media tab at that
 point, so the *outgoing* file's frames are dropped immediately rather than
 sitting on screen until the newly-picked file's own frames finish decoding
@@ -472,12 +590,12 @@ once made the next autofill mistake the name for a folder.
 - **Miss** → bumps `_thumb_token`; one worker runs `probe_media` first and
   delivers it early through `emit_progress` (the ~50ms probe settles the
   tabs' defaults long before the frame seeks finish), then
-  `extract_video_thumbnails(path, count=10)` — ten frames at the video's
-  *interior* (fractions 1/11 … 10/11, skipping a black first / end-credits
-  last frame): OpenCV first, and **ffmpeg if OpenCV produced nothing at all**
-  (see "A file that reads fine but decodes to no preview frames" below). A
-  result whose token is stale (the user picked another file mid-decode) is
-  dropped.
+  `extract_preview_frames(path, count=10, info=...)` — ten frames at the video's
+  *interior* (fractions 1/11 … 10/11 of the real length, skipping a black first /
+  end-credits last frame), with the seek that reached each (see "Preview frames are
+  keyframes" below). The probe result is passed in, so its length and `previewable`
+  aren't asked for again. A result whose token is stale (the user picked another file
+  mid-decode) is dropped.
 
 `_broadcast_media_info` calls each media tab's `on_media_info` and its
 carousel's `set_media_info`; `_broadcast_thumbnails` hands frames to each
@@ -485,33 +603,61 @@ tab's `on_thumbnails` (Encoding wraps it for the HDR preview) and re-applies
 the shared scrub index.
 
 **A file that probes to neither video nor audio at all is rejected, not
-broadcast as an empty file.** `_deliver_media_info` treats
+broadcast as an empty file** (any probe failure, timeouts and unreadable output included, lands here
+too, since `has_video` is then `None`: audited over the 3,184 media files under the user's Editing
+folder, the only real rejections were the three UTF-8 decode failures, a truncated .ogg, and a 4K H.264
+mp4 whose AAC track has a bogus config — ffprobe fails to open that stream's decoder, prints `{` and exits 1,
+whichever streams are selected; the log now names the exit code, and no fallback exists for it). `_deliver_media_info` treats
 `has_video in (None, False) and has_audio in (None, False)` as the
 signature of ffmpeg's demuxer failing outright (a corrupt file, or a
 container variant this build's demuxer doesn't parse — some vendors' MXF
 headers, confirmed) rather than a legitimate audio-only or video-only
 input (which always has the *other* kind `True`), and routes it to
 `_reject_file` before it ever reaches a tab: the selection is undone
-entirely — `current_file_path`, `media_info`, both thumbnail caches, and
+entirely — `current_file_path`, `info`, both thumbnail caches, and
 every media tab's carousel/DropBox (`MediaTab.clear_selected_file`,
 `DropBox.reset`) go back to their pristine pre-import state, any in-flight
 HDR render for it is cancelled, and a "Couldn't Read This File" dialog
 explains why — rather than a tab silently showing zeroed-out fields for a
 file that was never actually usable.
 
+**Preview frames are keyframes** (`core/previews.py`, `extract_preview_frames`). Landing on an
+exact frame means decoding from the keyframe before it up to the target — hundreds of 4K frames per
+preview — and OpenCV did that in-process with a decoder thread per core (each holding its own
+frames). Now each preview is **the keyframe at or before its target**: one ffmpeg per frame with
+`-noaccurate_seek`, **one decoder thread each** (a frame threaded across every core only slows and
+bloats a single-frame decode), `preview_workers()` of them at once, as **rgb24** PPM over a pipe
+(`format=rgb24` is load-bearing: a 10-bit source otherwise gives a 16-bit PPM, ~100x slower for
+Pillow), shrunk in Python exactly as before (`_shrink`, `INTER_AREA`). ffmpeg's colour conversion
+honours the stream's tags, where OpenCV's used BT.601 on at least one BT.709 file. Measured on the
+user's files, probe + ten previews, time and the app's peak commit (old -> new): 4K AV1 15.8s 776MB
+-> 1.0s 345MB; 4K HDR AV1 10.8s 804MB -> 1.4s 305MB; 1080p AV1 6.2s 333MB -> 0.5s 137MB; 4K HDR HEVC
+4.5s 1174MB -> 1.5s 295MB; 4K H.264 1.6s 738MB -> 1.0s 350MB; 1080p H.264 0.42 -> 0.41s, 291 ->
+132MB. Tried and rejected: several OpenCV readers in parallel (+500-900MB each, and no faster at 4 or
+8 CPUs — the single reader already fills them), and capping OpenCV's decoder threads (saves memory
+on HEVC / H.264 only, and costs time on any machine with more than 8 cores). The rules, in order:
+- `previewable` False (audio, or a first video stream that is cover art) -> no frames, and no decode
+  at all. That also retired OpenCV's hang on an audio file (below).
+- **Keyframes** (`_extract_keyframes`) unless the sample gap (length / 11) is under
+  `_MIN_KEYFRAME_GAP` (2s — keyframes are rarely closer, so a clip under ~22s would share them). A
+  sample landing at or before the previous one's keyframe (ffmpeg's `showinfo` reports where it
+  landed) is redone at its **exact** frame; past `_MAX_EXACT_REDOS` (2) of those it stops early and
+  hands the file on.
+- **OpenCV** at exact frame indices, as before — the short clips and sparse-keyframe files (a 13s
+  Gladiator clip: 1.9s, unchanged).
+- **Exact ffmpeg grabs** (`_extract_exact`) as the last resort: a file OpenCV can't seek, e.g. the
+  late-start MKV below (its frame count comes from an end timestamp).
+
+Each frame comes with its **seek** — `(seconds from the file's start, exact)` — which `MediaSession`
+keeps (`_thumb_seeks`) and the HDR render repeats (see "HDR preview thumbnails"), so the two sets are
+the same frames by construction: repeating a keyframe seek gives the identical picture (checked on
+every file). Not the landed time: `showinfo` prints 6 significant digits, and an exact seek a hair
+before a keyframe starts from the previous one and decodes the whole gap (the HDR render ran 11.5s
+instead of 8s that way). The OpenCV route's seeks are its index / fps, as the HDR render always used.
+
 **A file that reads fine but decodes to no preview frames is kept, not rejected.**
-`extract_video_thumbnails` is OpenCV, then — only if that produced *zero* frames —
-`_extract_thumbnails_ffmpeg`: one short ffmpeg process per frame at the same fractions of
-the file's real length (`probe_duration`, corrected — see "A file's real length" below), as
-input-side `-ss` seeks (which count from the file's own start whatever its timestamps say),
-scaled to at most 1920 wide, as **rgb24** PPM over a pipe. `format=rgb24` is load-bearing: a
-10-bit source otherwise comes out as a 16-bit PPM, which Pillow needs ~1.4s a frame to read
-(0.01s as 8-bit; 21.7s for ten frames became 5.9s). It gives up after three misses in a row
-with none found, and skips a file whose first video stream is cover art
-(`_has_previewable_video`, `attached_pic`) so an audio file keeps its Wave Loop. OpenCV's own
-loop stops after three failed seeks in a row for the same reason (each failed seek was ~0.3s).
-Only if *both* come back empty does `_deliver_thumbnails` get an empty list for something that
-isn't audio-only (`_is_audio_only` — an audio file legitimately has no frames and gets the Wave
+Only if every route above comes back empty does `_deliver_thumbnails` get an empty list for
+something that isn't audio-only (`_is_audio_only` — an audio file legitimately has no frames and gets the Wave
 Loop instead). The file **stays selected and fully usable** — the previews failing says nothing
 about whether ffmpeg can mux/encode it — so nothing is undone: each media tab's
 `show_no_preview()` puts the drop box back over the carousel, now reading **"No Preview
@@ -524,7 +670,7 @@ properly." once. A later file that does have frames reveals the carousel normall
 `populated` fires once per carousel, and with the flag left set the drop box stayed up over a
 file that had loaded.
 
-**A file's real length can differ from its header** (`utilities._effective_duration`, used by
+**A file's real length can differ from its header** (`probe._effective_duration`, used by
 both `probe_media`'s `duration` and `probe_duration`). Found with `GladiatorName.mkv`, a 35s
 clip cut from a film with its original timestamps kept: it starts at 5465.5s and its header
 Duration is 5501.162s — the END timestamp, not the length. ffmpeg itself is unaffected (it
@@ -552,19 +698,21 @@ keeps cv2's count and its tone-mapped set stays index-for-index aligned with the
 jump that never re-emits, so it can't loop). The index resets only when the
 input file actually changes.
 
-**What the probe gives the tabs** (`core.utilities.probe_media`, best-effort
+**What the probe gives the tabs** (`core.probe.probe_media`, best-effort
 ffprobe; every field may be None and every failure returns Nones rather than
 raising — it only ever *improves* defaults): container, video/audio codec,
 video profile/level, width/height, fps, HDR, duration, file size, the
 container's `title` / chapter count / overall `bit_rate` / `creation_time`
 (the output-name tokens below), per-stream
-video and audio (`video_streams`/`audio_streams`), HDR static metadata, and
+video, audio and subtitle streams (`video_streams`/`audio_streams`/`subtitle_streams`: a subtitle's
+codec, picture or text, canvas size, language, title, Default / Forced), the chapters (`chapter_list`:
+start, end, title), the container's `start_time`, HDR static metadata, and
 `has_video`/`has_audio`. It lets Encoding auto-resolve Encoder, Profile,
 Level and every per-stream audio control, caps the Resolution and FPS
 ladders to the source's own height/rate, lets Muxing populate its track
 boxes (`ui/tabs/muxing.py`), lets both tabs default the output container to
 the source's, and lets Muxing work out which containers the file can be
-remuxed into. `fps` (`core.utilities._parse_frame_rate`) converts ffprobe's
+remuxed into. `fps` (`core.probe._parse_frame_rate`) converts ffprobe's
 rational `r_frame_rate` string (`"24000/1001"`) into a plain float (23.976),
 since neither `formats.fps_values_for` nor the UI wants to parse a fraction
 string itself.
@@ -575,7 +723,7 @@ times for HEVC (confirmed empirically — raw `120` is "4.0", not "12.0"), a
 `seq_level_idx` table lookup for AV1 (confirmed: a 720p30 clip's raw `5` is
 "3.1"), and a named-level code for MPEG-2 (mirrors
 `ffmpeg_vars._LEVEL_ARGS["MPEG-2"]` in reverse) — see
-`core.utilities._ffprobe_level`. Audio Channels/Sample Rate match a probed
+`core.probe._ffprobe_level`. Audio Channels/Sample Rate match a probed
 value exactly against `formats.channels_display_for` /
 `sample_rate_display_for` (a 7.1 or 22050 Hz source has no option to land on);
 Bitrate *snaps to the closest* `formats.AUDIO_BITRATES` entry
@@ -589,46 +737,48 @@ into the `"<n>k"` ffmpeg wants.
 independent of whether its codec was recognised: `False` only once a probe
 genuinely ran and found none; `None` (unknown) must never read as absent.
 
-**Audio-only inputs.** `extract_video_thumbnails` returns `[]` for an audio
-file. `_is_audio_only(path)` (the probe says audio-but-no-video, or with no
+**Audio-only inputs.** `extract_preview_frames` returns `[]` for an audio
+file, without decoding anything. `_is_audio_only(path)` (the probe says audio-but-no-video, or with no
 probe the extension is in `formats.AUDIO_EXTENSIONS`) triggers
 `set_audio_only(True)` on every carousel — from the probe delivery, the
 cached-probe branch of `_load_thumbnails` (a re-selected audio file has no fresh probe
 to deliver it) and the empty frame delivery — which reveals the carousel and shows the Wave
 Loop visualiser with navigation disabled. Real frames arriving clear it again.
-**Do not wait on the frame decode for an audio file: OpenCV's `cap.read()` never returns on
-an audio-only file** (m4a, mp3 and flac all hang, 5/5 runs, with no frame count reported), so
-its worker thread is stuck for good and `_deliver_thumbnails` never fires — the Wave Loop
-comes from the probe, not from that decode. Harmless while the probe path reveals the
-carousel; it is why the cached path above must not rely on the decode, or the import spinner
-would spin forever. (Each audio import leaks one such daemon thread.)
+The Wave Loop still comes from the probe, not from the frame delivery. **Never hand an audio file to
+OpenCV: its `cap.read()` never returns there** (m4a, mp3 and flac all hung, 5/5 runs), which stranded
+a worker thread per audio import until previews checked `previewable` first.
 
-**HDR→SDR preview renders** (`start_hdr_render`, `_deliver_hdr`): one
-tone-mapped render per file (`extract_hdr_tonemapped_thumbnails`), cached on
-the app and token-guarded; a no-op when already cached or already running for
-that path. Delivered to any tab with `on_hdr_frames_ready` (which only re-applies the
-frames when the HDR→SDR switch is on — the render now lands while the raw previews are
-being scrubbed, and re-applying them would reset the carousel).
-
-**The render starts on import, not on the switch.** `_prerender_hdr(path)` runs right after
-the raw previews are broadcast (`_deliver_thumbnails`, and the cached-frames branch of
-`_load_thumbnails`) and starts `start_hdr_render` when the probe says `hdr` is `True` — so
-only an HDR file pays for it, the raw previews are never delayed, and the switch is
-instant once the set is ready (0.4ms measured). A switch pressed earlier just waits for the
-rest of the render already in flight. It runs **alongside a running queue job** by design
-(the user can multitask); it is not held while one is active. Measured on a real 4K HDR10
-file (Beauty and the Beast HDR, 210s): raw previews 4.5s, then the tone-mapped set 8-10s
-after them (it was 14.6s, sequential, before). **A render in
-flight is interrupted the instant the file changes**, not left to finish for
-a file nobody's looking at any more: `update_global_file` calls
-`_cancel_hdr_render` (a `threading.Event` passed into
-`extract_hdr_tonemapped_thumbnails` as `should_cancel`, checked between
-per-frame ffmpeg calls) and every media tab's `reset_hdr_preview` (turns its
-HDR→SDR switch back off without the raw/tone-mapped frame swap flashing,
-since the carousel's about to be cleared for the new file anyway) — the
-outgoing file's render never silently finishes into a cache entry nobody
-asked for any more, and the new file never inherits a switch state or a
-preview that was never actually about it.
+**HDR→SDR preview renders are frame by frame, and mostly wait for the switch** (`MediaSession`,
+"HDR→SDR preview renders"). One tone-mapped frame is one ffmpeg + libplacebo run (`previews.hdr_tonemap_frame`,
+~0.7-1.3s a 4K frame, most of it Vulkan / libplacebo start-up), so a frame that isn't ready when the switch
+flips is a visible wait, and rendering all ten on every HDR import was a burst (~23-26s of CPU plus GPU per
+import, three at a time). So:
+- **An HDR import tone-maps only the frame on screen and the next two**, one at a time, in the background
+  (`_prerender_hdr`, `_around`), after the raw previews; **scrubbing** adds the new frame and the next two
+  (`sync_preview_index`). With the switch off nothing else renders (`hdr_idle`).
+- **The switch** (`start_hdr_render`) renders every frame not yet done, nearest the one on screen first,
+  `preview_workers()` at a time; each lands in `hdr_frames` (a list, None for frames not rendered) and is
+  handed to the tabs at once (`on_hdr_frames_ready(path, index)`), so the carousel swaps it in while the rest
+  render. `_hdr_begin` works out the filter (`hdr_tonemap_filter`: libplacebo check + static metadata) and
+  the seeks (the raw set's, else `hdr_seeks`) on a worker, once per file; `_hdr_pump` keeps the queue moving.
+- Measured on real 4K HDR files: the frame on screen is tone-mapped **the instant the switch flips** (at frame
+  0 after an import, and at frame 6 after scrubbing there), the whole set follows in 4-7s; an import's CPU
+  (raw previews + HDR render) went from 25.5s to 8.4s (HEVC) and 23.0s to 7.2s (AV1). Only a switch flipped
+  straight after an import, before its first frame is done, waits (1.8-2.5s).
+- It runs **alongside a running queue job** by design (the user can multitask), at below-normal priority.
+  **A file change cancels it** (`_cancel_hdr_render` drops the render; a frame already rendering finishes and
+  is discarded by its token), and every media tab's `reset_hdr_preview` turns the switch back off.
+- **The import's short CPU / GPU burst was left as it is — every way to soften it was measured and none
+  helped.** Tried on the real window (4K AV1 then 4K HDR import, 3 runs each, medians; the machine is a
+  Ryzen 9 9950X + NVIDIA, no efficiency cores): Efficiency mode (EcoQoS, `SetProcessInformation`
+  ProcessPowerThrottling) on the preview grabs and tone-map ffmpegs; tone-map `-threads 2` instead of 4
+  and 2 spinner decode threads instead of 3; both together; and OpenCV's pool at 1 or 2 threads. Time to
+  previews stayed 1.13-1.20s (AV1) / 1.54-1.59s (HDR), the first three tone-mapped frames 5.7-5.9s — but
+  the CPU's boost (`% Processor Performance`, 126-128% peak, 121% mean over the first 4s, 118-121% idle),
+  peak cores (4.4-7.4, run-to-run noise larger than any difference) and GPU power (~51W) didn't move
+  either. The burst is ~1s of real work finishing fast, which is the cheaper way to spend it; EcoQoS on a
+  hybrid CPU would move it onto efficiency cores and slow the import instead. Revisit only with a
+  machine where one of these measurably helps.
 
 **Downloader fetches** (`fetch_ytdlp_info`): `downloader.fetch_info` +
 `download_thumbnail` on a worker, token-guarded so a superseded fetch is
@@ -718,6 +868,28 @@ before the click is delivered to its real target — clicking a genuinely
 focusable widget (another line edit, a `_TimeField`) still works exactly as
 Qt's own default already handled it, since `setFocus()` on the new widget
 clears the old one anyway.
+
+### The cursor and hover under a resting pointer (`ui/hover.py`)
+
+**Qt re-evaluates the cursor and the hover state only when the mouse moves**, so a widget that moves,
+resizes or goes away under a still pointer (a layout shift, an animation, the carousel's last chevron)
+left the old cursor behind — a hand over nothing — and a stale hover highlight, until the next move.
+Reproduced offscreen (a button moved off the pointer kept a hand; the expanded preview's chevron went at the last
+frame and left one). Not a cause, tested: **a disabled control already shows an arrow** (Qt clears it
+itself), for tip-less buttons, track rows, text fields and the time field alike.
+
+`HoverSync` (`MainWindow.hover`) looks every 120ms while the app is the active one. If nothing holds the
+pointer (no button down, no override cursor such as a track drag's, no open popup list) and it hasn't
+moved since the last look, but the widget under it has changed or the window's cursor isn't what that widget
+wants (`wanted_cursor`: its own, else its nearest ancestor's, an arrow if disabled), it sends the window
+one `QMouseEvent.MouseMove` to the same spot — which makes Qt redo enter / leave, the hover flags and the
+cursor. At most one per resting spot; none while a modal dialog blocks the widget. The timer is owned by
+the `QApplication`. A look costs ~5us on the 733-widget window (0.005% of a core at 8 a second, measured
+with `widgetAt` swapped for `childAt`; on Windows `widgetAt` adds one native call), and none run while the
+app is in the background. **The carousel sets its own cursor from what it has drawn**, which HoverSync can't
+see (its `cursor()` property is the stale one), so `_sync_hover` also re-reads its cursor. The small
+preview's hand is deliberately everywhere over it (a double-click anywhere re-selects the file); only the
+expanded one is a hand over its controls alone. `tests/check_hover.py` is mutation-tested for both fixes.
 
 ### UI scale (`ui/scale.py`)
 
@@ -1213,7 +1385,7 @@ codec controls at all. "Copy video, re-encode audio" is an *Encoding* job with
 the encoder auto-resolved to the source's own codec. Encoding is the superset.
 
 They share one frame, `MediaTab`, top to bottom:
-- **Header**: a `SubTabBar` (Overview / Video / Audio) and the `Selected
+- **Header**: a `SubTabBar` (Overview / Video / Audio / Subtitles / Chapters) and the `Selected
   File:` `MarqueeLabel` (double-click to reselect).
 - **Preview**: a `QStackedLayout` holding the `DropBox` (its loading spinner, once a file
   is picked) until the carousel's
@@ -1237,9 +1409,15 @@ They share one frame, `MediaTab`, top to bottom:
   re-checking this — see the sizing rule and its two concrete
   worked examples (`TrackListBox`'s fixed height on Muxing, the
   Video-panel layout on Encoding) below.
-- **Save row** (entry + Browse) and the **actions** (`Queue Task` secondary,
-  `Mux` / `Encode` primary — queue *and* start; by role `queue` / `action`, which a
-  theme can swap — see Theming).
+- **Save row** (entry + Browse) and the **actions**: **Clear** (small, `role="danger"`, left
+  edge) then `Queue Task` secondary, `Mux` / `Encode` primary — queue *and* start; by role
+  `queue` / `action`, which a theme can swap — see Theming. **Clear** drops the selected file
+  and everything decoded from it (`app.media.clear_selection()` — `MediaSession._clear_state()`,
+  shared with a rejected import's own teardown, minus that dialog) without touching the file on
+  disk; it asks first (`ask_yes_no_remember`, a Yes/No dialog with a **"Don't ask again"**
+  checkbox) unless `app.confirm_clear_selection` is already off (`settings.json`, default on,
+  a Settings-less preference only this checkbox can turn off — `SettingsTab`'s Reset to Default
+  turns it back on). All three action buttons grey out with no file selected, same as before.
 
 Subclasses set `TAB`, `ACTION_TEXT`, `OUTPUT_SUFFIX` (`_muxed` / `_encoded` — now only
 the fallback when the naming format would name the output after the input itself),
@@ -1287,26 +1465,26 @@ every checked one mapped into the output. This replaced the original single
 file's own tracks, not just one at a time. The box carries no caption of its
 own (the sub-tab's own "Video"/"Audio" label already says what it's a box
 of) and **fills the row**, stopping only where a narrow column sits to its
-right: `Select All` / `Deselect All` — two **icon buttons** (`IconButton` kinds
-`select-multiple` / `deselect-multiple`, `assets/select-multiple.svg` /
-`deselect-multiple.svg`, recoloured to the button's own text colour by string-replacing
-the SVG's black `stroke` — `controls._icon_svg`, same trick as the carousel's
-`fill="currentColor"` swap; each has a hover tooltip, since there's no caption)
-sharing a line on top (checks/unchecks
-every row in the box — `TrackListBox.item_ids()`, every row regardless of
-current state, vs. `checked_ids()`'s already-checked-only — without adding
-or removing anything, the non-destructive counterpart to `Remove
-Stream(s)`), then `Add Stream(s)` beneath them, then `Remove Stream(s)`
-(`role="danger"`, STOP_RED) at the same width, then on the bottom line
-**`Undo` / `Redo`** — two more icon buttons (`undo.svg` / `redo.svg`, kinds `undo` /
-`redo`) with the **Strip checkbox to their right**. The two-button rows
-(`Select All`/`Deselect All`, `Undo`/`Redo`) each share one line rather than each getting
-their own full row, which is what keeps this four-row column short enough to still fit
-under the box's own fixed height (see the panel-height paragraph below for why that
-specifically breaks). `Add Stream(s)`/`Remove Stream(s)` share one width
-(`button_width_for`); each icon pair is half that width less half a 4px gap, so the pair
-lines up under them and sits as tight as the rows do (4px between the buttons, the same as
-the column's vertical gap — it was 8).
+right, stacked **Select / Deselect All, Add Stream(s), Remove Stream(s), Undo / Redo** —
+top to bottom, one row each except the two icon-button pairs, which share a line: `Select
+All` / `Deselect All` — two **icon buttons** (`IconButton` kinds `select-multiple` /
+`deselect-multiple`, `assets/select-multiple.svg` / `deselect-multiple.svg`, recoloured to
+the button's own text colour by string-replacing the SVG's black `stroke` —
+`svg_renderer(..., "ink")`, same trick as the carousel's `fill="currentColor"` swap; each
+has a hover tooltip, since there's no caption) on top (checks/unchecks every row in the box
+— `TrackListBox.item_ids()`, every row regardless of current state, vs. `checked_ids()`'s
+already-checked-only — without adding or removing anything, the non-destructive counterpart
+to `Remove Stream(s)`), then `Add Stream(s)`, then `Remove Stream(s)` (`role="danger"`,
+STOP_RED) at the same width, then **`Undo` / `Redo`** at the bottom — two more icon buttons
+(`undo.svg` / `redo.svg`, kinds `undo` / `redo`) sharing the last line. **There is no Strip
+checkbox anywhere in this column**: a kind with nothing checked — whether the source never
+had one, every track was removed, or the user simply deselected them all — is this tab's one
+"no ___ in the output" signal (see "`_sync_controls`" below); removing the checkbox freed the
+width and the row it used to share with Undo/Redo. `Add Stream(s)`/`Remove Stream(s)` share
+one width (`button_width_for`, now measured across every kind's button text including
+Subtitles' — see below — so it doesn't change size between sub-tabs); each icon pair is half
+that width less half a 4px gap, so the pair lines up under them and sits as tight as the rows
+do (4px between the buttons, the same as the column's vertical gap).
 
 **Icon sizes.** `IconButton` draws its SVG in a square of `_ICON_FRACTION` × the button's
 shorter side (default 56%, 72% for a `compact` button). Undo/redo override it to **100%**
@@ -1321,22 +1499,23 @@ text (`stop_disabled_text`, `disabled_text_on(STOP_RED)`) — the danger rule us
 override `QPushButton:disabled`, so a disabled Remove Stream(s) looked enabled.
 
 **Even four rows only just fit**: Overview is 118px, and 28 + 28 (Add, Remove) +
-24 (the Undo/Redo/Strip row — the checkbox's own height) + 12 (three 4px gaps) leaves 26 for
+24 (Undo/Redo — the icon buttons' own height) + 12 (three 4px gaps) leaves 26 for
 Select/Deselect All. So Undo/Redo and Select/Deselect All are `role="compact"` (stylesheet
 `min-height: 22px` — the stock 28px `min-height` defeats any fixed height, so a
-shorter button needs its own role), the column's gaps are 4px (they were 6 with three rows),
-and Select/Deselect All take whatever height the box has left
-(`size_box`: `box.height() − 2·px(28) − px(24) − 3·px(4)`, floor `px(22)`; a fixed
-row height with Expanding buttons, since the button's own `min-height` overrides a
-`setFixedHeight`). **The gap change is what makes it safe, not cosmetic**: with 6px
-gaps the column had 0px to spare at 1.0x and, at 1.25x, five independently-rounded
-`px()` lengths made it 3px taller than the box — the whole page 3px taller than
-Overview, i.e. a smaller preview on Muxing than on Encoding. With 4px, the Video and
-Audio pages are never taller than Overview at any of 42 scales checked from 0.8x to
-2.6x (re-checked after Strip moved onto the Undo/Redo row). Re-run that scan (Video/Audio
-`sizeHint().height()` against Overview's, showing
+shorter button needs its own role), the column's gaps are 4px, and Select/Deselect All take
+whatever height the box has left (`size_box`: `box.height() − 2·px(28) − px(24) − 3·px(4)`,
+floor `px(22)`; a fixed row height with Expanding buttons, since the button's own
+`min-height` overrides a `setFixedHeight`). **The gap change is what makes it safe, not
+cosmetic**: with 6px gaps the column had 0px to spare at 1.0x and, at 1.25x, five
+independently-rounded `px()` lengths made it 3px taller than the box — the whole page 3px
+taller than Overview, i.e. a smaller preview on Muxing than on Encoding. With 4px, the Video
+and Audio pages are never taller than Overview at any of 42 scales checked from 0.8x to
+2.6x. Re-run that scan (Video/Audio `sizeHint().height()` against Overview's, showing
 each page before measuring — a hidden page is restyled lazily, so its hint is stale)
-after touching this column.
+after touching this column. **This same four-row shape (Select/Deselect All, Add[/Edit],
+Remove, Undo/Redo) is now shared by Subtitles' and Chapters' columns too** — see "Subtitles
+and Chapters" below — since combining Subtitles' Add and Edit buttons into one, and dropping
+every Strip checkbox, brought every kind down to exactly this row count.
 
 **Row text marquees, the checkbox doesn't.** Each row is a `_TrackRow`
 (`ui/widgets/tracklist.py`): a text-less `CheckBox` plus a `MarqueeLabel`
@@ -1401,7 +1580,7 @@ removing a track renumbers the ones below it) and a track from another file says
 `External: <name>` after the number. **Video details are `codec · profile · level ·
 size · fps · HDR kind · bit depth + chroma · bit rate · language`**
 (`H.265 · Main 10 · L3.1 · 1280x720 · 23.976 fps · HDR10 · 10-bit 4:2:0 · eng`), from
-`core.utilities._describe_video_stream` — which now also asks ffprobe for `pix_fmt` /
+`core.probe._describe_video_stream` — which now also asks ffprobe for `pix_fmt` /
 `bits_per_raw_sample` and reuses the codec-aware `_ffprobe_level`. `hdr_display` is
 `HDR10` (PQ), `HLG` or `SDR` — anything that isn't PQ/HLG, the same call
 `probe_media`'s `hdr` makes; a stream's own bit rate is absent from most Matroska
@@ -1411,7 +1590,7 @@ checkbox captions, so it gets `compact=True` (codec · profile · size · HDR on
 it is · language) and its "Track N" is the stream's number in *its own file*.
 
 `Add Stream(s)` browses a second file, probes it off the GUI thread
-(`core.utilities.probe_media` via `run_async` — never on the GUI thread,
+(`core.probe.probe_media` via `run_async` — never on the GUI thread,
 same rule as everywhere else), and either adds its lone matching-kind stream
 straight away or — when it has more than one — opens
 `ExternalStreamPickerDialog` (`ui/widgets/dialogs.py`) to choose which. Each
@@ -1423,7 +1602,7 @@ so switching the primary file later doesn't clear it.
 "source": "primary" | "external", "file", "index", "stream", "name"}` (`index` is
 0-based among that file's own streams of the kind — what `-map` addresses;
 `stream` is the probe's description of it, kept so a label can be re-rendered
-whenever the number changes). `_reseed_tracks` builds it from `media_info` —
+whenever the number changes). `_reseed_tracks` builds it from `app.media.info` —
 the source's streams first, any external entries kept after — whenever a **new
 probe result** arrives (`info is not self._tracks_info`: the object changes per file,
 not per broadcast), and clears the undo history with it, since its snapshots describe
@@ -1460,13 +1639,18 @@ too, consumed by the next `_sync_controls`) — an earlier version left survivin
 they were, which was right only while ticks weren't tracked. A returning row
 lands **where it was**: `set_items` orders the rows to match its item list (it used to
 append), and `checked_ids()` follows that order. The buttons enable from the stacks
-in `_sync_controls` and are also off while the panel is stripped/absent.
+in `_sync_controls` and are also off while the panel is absent (the source never had that
+kind — an *emptied* one, all its own tracks removed, keeps them live, same as before).
 Settings keys `video_tracks`, `strip_video`, `audio_tracks`, `strip_audio` — each
 `*_tracks` a list of `{"source": "primary"/"external", "file": path|None,
 "index": N}`, one entry per *checked* row, `N` 0-based among that file's own
 streams of that kind (what `-map <input>:v:<index>` / `:a:<index>`
-addresses). The Queue's details popup therefore shows a track's number *in its
-file*, which after a removal differs from the number the box showed.
+addresses). **`strip_video`/`strip_audio` are still real settings keys** (`ffmpeg_build.py`
+and the Queue's details popup read them unchanged), just no longer a checkbox: Muxing derives
+each as `not bool(*_tracks)` — exactly equivalent to "the list ended up empty", which is all
+`build_mux_command` ever checked anyway, so nothing downstream needed to change. The Queue's
+details popup therefore shows a track's number *in its file*, which after a removal differs
+from the number the box showed.
 
 **The sizing rule, stated generally (this is what the INVARIANT above rests
 on): neither tab's Video or Audio page may size taller than that tab's own
@@ -1528,7 +1712,7 @@ same `_on_control_change`/`changed` wiring every other control uses) never
 disturbs another row — and puts the rows in the order of the list it was given
 (a row is moved only when it isn't already in place). It only tears every row down
 and rebuilds from scratch
-(`reset=True`) when `app.current_file_path` itself changed since the last
+(`reset=True`) when `app.media.current_file_path` itself changed since the last
 sync — a new file's stream indices don't mean what the old file's meant, so
 a same-named `src:0` row from a *different* file must never be mistaken for
 a carried-over pick. A brand new row (first appearance, whether from a reset
@@ -1574,7 +1758,7 @@ all derive from the encoder (`formats.profiles_for` / `levels_for` /
 `quality_for`; `_apply_speed`, `_apply_quality`). A Speed retarget snaps to
 the encoder's own recommended default (`speed_default_for`), not the first
 — most extreme — entry. AV1's speed list comes from a live probe
-(`core.utilities.av1_preset_range`), since SVT-AV1's preset ceiling varies by
+(`core.capabilities.av1_preset_range`), since SVT-AV1's preset ceiling varies by
 ffmpeg build (confirmed: 0–8 before an update, -2 to 13 after). The slider
 keeps its value across a codec switch while it still fits the new range.
 
@@ -1699,11 +1883,75 @@ makes the stream a copy, so Bitrate / Channels / Sample Rate mirror the
 source's real values as display overrides (`_apply_passthru_values`) and
 disable.
 
-**HDR→SDR preview** (Encoding only): `on_thumbnails` records the raw frames and
-`_apply_preview_frames` shows the app's tone-mapped set instead whenever the
-switch is on and a render for this file is cached — keeping the scrub index
-across the swap. Turning it on for an unrendered file starts
-`app.start_hdr_render`.
+**HDR→SDR preview** (Encoding only): `on_thumbnails` records the raw frames and, with the switch on,
+`_apply_preview_frames` shows each frame's tone-mapped version where it's rendered and the raw one until
+then, keeping the scrub index; `on_hdr_frames_ready` re-applies as frames land. The switch drives the
+render (`_follow_hdr_switch`: `start_hdr_render` on, `hdr_idle` off). **The swap goes through
+`carousel.replace_frames`, never `set_frames`**: `set_frames` treats the list as a new file — it zeroed
+the chevrons' opacity (they stayed hidden until the pointer left and re-entered), cancelled a slide and
+jumped to frame 0 — at every tone-mapped frame that landed. `replace_frames` swaps the pictures of the
+frames on show (same count; else it falls back to `set_frames`) and drops only their cached pixmaps.
+`check_media` watches the chevrons stay at full opacity and the position hold while frames land.
+
+#### Subtitles and Chapters (both tabs)
+
+**Subtitles** is each tab's own Audio pattern. **Muxing**: a `TrackListBox` (`_track_panel("subtitle")`,
+sharing Video / Audio's list, undo and Add code, and the identical four-row column shape — `_tracks`,
+`_history` and `_boxes` are keyed by kind). **Add Subs and Edit Subs are one button, "Add/Edit Subs"** —
+opening `EditSubtitlesDialog` (`ui/widgets/edit_dialogs.py`) with a leading **Add** button of its own
+(`_build_leading_buttons`, the same hook `StreamPickerDialog` uses): a Track dropdown (— while there are
+none — the button is always live once a file's loaded, since it's also how you add the first track) with
+that track's Language, Default and Forced below it, edited on a copy of the entries; Add browses another
+file, probes it off the GUI thread and appends its stream(s) (`ExternalStreamPickerDialog` if it offers
+more than one), selecting the newest track. OK is **one undo step** for everything changed in the session
+— edits and any tracks added — (Cancel, or an OK that changed nothing, adds none). A subtitle entry
+carries its own `language` / `default` / `forced` (seeded from the stream); turning Default on clears it
+on every other track (one default). **There is no Strip Subtitles checkbox**: nothing checked in the box
+— the source never had a subtitle, every track was removed, or they were simply deselected — is this
+page's one "no subtitles in the output" signal, the same rule Video and Audio now use (see
+"`_sync_controls`" below). **Encoding**: Subtitle Track + Choose
+Stream(s) (the generalised `StreamPickerDialog` / `choose_streams(parent, "subtitle", ...)`, which may
+end with none ticked, unlike audio) on row one; Language, Default, Forced, **Burn In** on row two;
+Strip Subtitles right. State mirrors audio (`_sub_list`, `_sub_included`, `_active_sub_id`,
+`_sub_settings[id]`) plus `_burn_id`: at most one track is burned; it leaves the soft list (it's in the
+picture), its language / flags grey out, and Burn In is off while the video is stripped or absent.
+Only formats in `formats.FFPROBE_SUBTITLE` become rows (teletext and closed captions don't).
+**A picture track (PGS / VobSub / DVB) that goes into the output narrows the format to .mkv** — by
+request, the same rule as codecs: Muxing intersects `containers_for` with
+`formats.containers_for_subtitles(ticked codecs)`; Encoding retargets its format list
+(`_retarget_format`, the first thing its pass does, since the container is the root). Both toasts name
+the format ("... .mp4 can't hold PGS subtitles."). Neither page adds a rundown row (a fourth row would
+make Overview, and so every page, taller).
+
+**Chapters** is one widget, `ChapterEditor` (`ui/widgets/chapters.py`), built by `MediaTab` and synced by
+`_sync_chapters()` in each tab's pass: a `TrackListBox(reorderable=False, empty_text="No chapters")` — every
+new chapter starts **ticked**, matching Muxing's tracks — with the same four-row column as Muxing's track
+boxes: **Select / Deselect All**, **Add/Edit Chapters**, **Remove Chapter(s)**, **Undo / Redo**. **A ticked
+chapter is included in the output; deselecting or removing them all is this page's one "strip" signal, the
+same as Muxing's track boxes** — there is no Strip Chapters checkbox. `checked_ids()` is genuinely load-
+bearing here now, not just "which rows Edit/Remove act on" as before: `gather()`'s `chapters` list is built
+from the *ticked* chapters only (`_included()`), and `strip_chapters` is derived as `bool(self._source) and
+not included` (`self._source`, the file's own chapters at the last probe, stands in for "does this kind
+exist at all" the way `has_video`/`has_audio` do for Muxing's tracks). **Add/Edit Chapters** opens
+`AddEditChaptersDialog` (`ui/widgets/edit_dialogs.py`) on a copy of every chapter (ticked or not — this
+popup doesn't care which are checked): a Chapter dropdown (— while there are none) with that one's Time
+and Name below it, plus a separate **Add At** + **Name** + **Add** row (the new chapter's name follows Add
+At the same way a fresh one always has, until the user types one; blank falls back to the default), which
+stays greyed with the reason underneath while its own time is past the end of the file or already taken —
+independent of the Edit fields' own greying/validation, so you can fix one time while the other still has a
+problem. A newly-added chapter is selected and the dropdown re-worded at once, `Add At` moves on to the
+next free second so several can be added in one sitting, and OK hands back the whole edited list (added
+chapters included) as one undo step; Cancel changes nothing. A time left alone on an *existing* chapter
+keeps its exact start, since the spinner only shows whole seconds. Four rows come to the same 118px budget
+as Muxing's track columns (28+28+24+3×4, 26px left for the top row) now that Subtitles and Chapters both
+dropped to two action buttons (Add/Edit, Remove) — see above. It reseeds on a new probe result (`load()`
+sets a flag `refresh()` consumes to reset the box, so a same-numbered chapter from a *different* file is
+never mistaken for a carried-over tick, the same rule Muxing's track boxes already followed). A stripped
+Subtitles / Chapters page marks its sub-tab red.
+
+**Both pages fit the preview INVARIANT**: every page's hint is at most Overview's (118 at 1.0), which
+`check_ui` now scans at 8 scales on both tabs. Measure `layout().totalMinimumSize()` per page after any
+change here.
 
 #### `_sync_controls` — the single constraint pass
 
@@ -1807,23 +2055,32 @@ The Downloader's equivalent lives in its own `_sync_controls`
 this helper, since it isn't a `MediaTab`
 subclass.
 
-Muxing's rules: the same stream-presence rule; the track boxes carrying the
-source's own streams plus any browsed-in external ones (see "Muxing / Video"
-above for the reset-on-file-change/diff-otherwise logic); **the container
-inversion** — the source's own codecs decide which containers are reachable
-(`formats.containers_for`), with a toast when the pick snaps and the save
-path's extension following it; a stripped or absent stream disables its
-panel — and so does an **emptied** one (the user removed every track of a kind the source
-has; only once the probe says `has_video`/`has_audio` is `True`, since the lists are empty
-before it lands): the sub-tab goes red, the carousel shows the Wave Loop (video) / mute
-badge (audio) exactly as for Strip, the box, Select/Deselect All and Remove grey out and
-the rundown reads `— removed —`. `Add Stream(s)` and Undo/Redo stay live on an emptied
-panel — they are the ways back, and disabling them as Strip does would strand it — and the
-*other* kind's Strip checkbox is disabled (an output can't drop both); a job left with no
-track to map anywhere is refused by `_validate_specific`. The rundown (`copy · H.264 · 1 track` — the codec is the first *checked* track's, not
-the source's first stream — or `· 2 tracks` once more than
-one is checked, and the trim with a `· keyframe` caveat, since a copied
+Muxing's rules: the track boxes carrying the source's own streams plus any browsed-in
+external ones (see "Muxing / Video" above for the reset-on-file-change/diff-otherwise logic);
+**the container inversion** — the source's own codecs decide which containers are reachable
+(`formats.containers_for`), with a toast when the pick snaps and the save path's extension
+following it; **nothing checked in a box is this tab's one "stripped" signal** — whether the
+source never had that kind, every track of it was removed, or the user simply deselected them
+all, the effect (and the settings dict's `strip_video`/`strip_audio`/`strip_subtitles`, each
+derived as `not bool(that kind's checked tracks)`) is identical: the sub-tab goes red, the
+carousel shows the Wave Loop (video) / mute badge (audio), and the rundown reads
+`— removed —`. `Add Stream(s)` and Undo/Redo stay live regardless — they're the ways back
+for an emptied-but-not-absent panel — and only a *genuinely absent* stream (the source never
+had it) disables the whole panel including Add; a job left with no track to map anywhere at
+all is refused by `_validate_specific` ("Nothing to Mux"). The rundown (`copy · H.264 · 1
+track` — the codec is the first *checked* track's, not the source's first stream — or `· 2
+tracks` once more than one is checked, and the trim with a `· keyframe` caveat, since a copied
 stream can only be cut on a keyframe).
+
+**A saved preset's strip preference has no checkbox to write any more, so it deselects
+instead.** `MuxingTab` overrides `_apply_strip_flags`/`_gather_strip_subtitles` (the hooks
+`MediaTab._apply_common`/`_gather_common` call, whose default implementation still reads
+Encoding's own checkboxes unchanged): applying a preset with `strip_video: true` sets
+`_restore_checked["video"] = set()` — the same one-shot mechanism undo/redo already uses —
+so the *next* `_sync_controls` pass deselects every video track, rather than toggling a
+widget that no longer exists; `ChapterEditor.apply()` does the identical thing for
+`strip_chapters`. Saving a preset needs no such translation (`_gather_settings` already
+computes the derived value directly).
 
 Encoding's `_validate_specific` blocks a present-or-unknown stream left on
 `Select` (Encoding never falls back to a silent copy — that's Muxing's job),
@@ -1860,7 +2117,7 @@ status column. Clicking a row opens its details; the ✕ removes it.
   front of `rest`; returns `started` / `next` / `paused`.
 - **Removing the active row kills its process first** — a process must never
   outlive its row — and continues with the next job if the queue was running.
-- `_process_next` loads `ffmpeg_vars` and compiles the argv **on the GUI
+- `_process_next` derives the job's `JobVars` and compiles the argv **on the GUI
   thread** (workers only ever see a plain list), prints it, and starts an
   `FfmpegJob`; Downloader tasks go to `_start_download` (a `YtDlpJob` from the
   task's `download` plan).
@@ -1879,6 +2136,18 @@ status column. Clicking a row opens its details; the ✕ removes it.
   keeps moving.
 - When a batch ends, "All queued jobs finished." is toasted and Settings'
   "When Done" action runs (see "Tabs → Settings").
+
+**Row info, sort, search (revamp).** A row reads thumbnail | title | length | resolution | HDR/SDR | audio codec + channels (`AAC 2.0`) | status | ✕ (11px, status shown without its trailing dots).
+`QueueTab._row_meta` works the last three out at add time from the settings *as they will leave the file*
+(length = the trim applied to the probed duration, so 1h minus 15s from the start reads 00:59:45; resolution =
+the Encoding downscale pick if it is below the source, else the source height; audio = Encoding's first stream
+codec / Muxing's first track's), from `app.media.info` (which is still the task's file when `add_task` runs) or,
+for a download, `ytdlp_cache` + the settings; `—` where there is none. Column widths are measured from the widest
+value each can hold (`_measure_columns`), so only the title can be cut: it scrolls (the queue's shared
+`MarqueeGroup`) past 25 characters or when it overflows its box. Callers now pass just the title as `description`.
+Each row records `"added"` (time.time()). **Sort By:** is a `SortDropdown` (face `Sort By: | A to Z`, the open list shows only options; A to Z default / Z to A / Recent = newest added first / Latest = oldest added first) in the middle of the bottom row, and `_apply_sort` reorders `_rows` (so run order follows), the layout and the active job's `rest` — on every pick and every add. Beside it the round `SearchToggle` opens `SearchBar`, which floats over the bottom of the list just above the buttons (placed by `QueueTab._place_search`, not in the layout, so a long queue runs on beneath it and no band cuts the rows off): it only ever grows horizontally from the middle out to both sides (and back in), takes no room at all, filters rows by title as you type and clears when closed; the X inside the box (secondary colour) only clears the text. To the right of Start Queue, `WhenDoneButton` (a small square `Dropdown` filled like Start Queue, 3px from it, with a triangle; its list is wider than the button, always opens to its left, with the current choice highlighted) sets Settings' `app.when_done`, kept in step both ways (`Queue.on_enter` / `Settings.on_enter`). The details panel is a `SlideHost`: it floats over the bottom of the list (placed by `QueueTab._place_search`, not in the layout — the list keeps its full height and runs on beneath it, nothing behind the panel but the panel), rises once, and picking another row while it is open only swaps the contents. Opening the search row with the panel open shortens the panel from the bottom (`SlideHost.set_inset`; its list `_DetailScroll` prefers 140px but gives way to 40) while its top edge stays put. The tab layout has no spacing of its own (spacers and the `GAP`), so nothing pops when the search row appears. It omits Start Time when the trim is the whole file, and Duration is
+always the output length. The sort/search SVGs need the "ink" mode's `#231f20` recolour; the A/Z letters were
+converted from `<text>` to outlines (Oswald) since live text rendered with colour fringes.
 
 **Details popup** (below the list, fixed 140px scroll area so a long Encode
 list scrolls): `_DETAIL_FIELDS` drives which settings keys show and how
@@ -1934,8 +2203,9 @@ Completed` removes Done and Failed rows.
 Top: the Deno warning (shown only when the startup check found no usable
 Deno — warn-only), the URL row (entry, `Paste` — fills from the clipboard
 *and* fetches — and `Fetch`; Enter fetches too), and the preview box
-(`BorderedFrame`: placeholder text, then the fitted thumbnail over a
-`MarqueeLabel` title and an "uploader · length" line). **Only a single http(s)
+(`_LinkDropFrame(BorderedFrame)`, `color_key="secondary"` — the same border colour DropBox
+itself uses, not `BorderedFrame`'s own `primary` default: placeholder text, then the fitted
+thumbnail over a `MarqueeLabel` title and an "uploader · length" line). **Only a single http(s)
 link can be dropped on the box** (`_dropped_link`); files and other text are
 refused. Bottom: `Mode` (`SegmentedButton`: Video + Audio / Video Only /
 Audio Only), `Video Codec` / `Audio Codec` (Video + Audio only) /
@@ -2073,7 +2343,7 @@ two spacers (10→6) and the notice box's own margins (9,7,5,7→9,5,5,5) and th
 it at 379/385 — a real 6px margin, not a coin flip. **Re-run that stress sequence (several scale round-trips,
 switching through every sub-tab at each one, watching each page's own `verticalScrollBar().isVisible()`) after
 touching any spacer on a page that's meant to fit — a single "fits" measurement at one scale, once, is not
-enough to trust near this edge.** On a relicense change `about.LICENSE_NAME`, `COPYRIGHT` and `NOTICE`
+enough to trust near this edge.** On a relicense change `about.COPYRIGHT` and `NOTICE`
 together. Nothing on the page is a setting. **The About page ends in
 `addStretch(1)`**: now that this page has its own scroll area sized off nothing but its own content, this
 just keeps the content hugging the top rather than being spread out once the scroll area stretches the page
@@ -2143,7 +2413,15 @@ Enter/focus-out, and never while invalid) holds `app.naming_template`.
 **Priority Level** (High / Above Normal / Normal / Below Normal / Low,
 default Normal) is applied to every ffmpeg / yt-dlp job at launch
 (`creationflags`) and immediately to a running one (`job.set_priority` via
-`QueueTab.apply_priority`). Realtime is deliberately not offered. yt-dlp's
+`QueueTab.apply_priority`). Realtime is deliberately not offered. **Below Normal and
+Low also lower the job's disk I/O and memory priority** (`priority.io_memory_for`: I/O low / very low
+via `NtSetInformationProcess` class 33, which has no documented API; memory 4 / 2 of 5 via
+`SetProcessInformation`), set right after launch (`ProcessJob._launch`, since the creation flag only
+carries the CPU class) and on every change; Normal and up put both back to normal. Measured with two
+unbuffered readers on one hard disk: the other reader got 70MB/s beside a job at normal I/O priority
+and 174MB/s (185 alone) beside one at low. The HDR preview render keeps its fixed Below Normal CPU
+class on purpose: under a High job it yields, under a Low one it outranks the job, which is right for
+work the user is looking at. yt-dlp's
 whole process tree is set, and re-set about once a second in `poll_events`
 while the level isn't Normal, since a child only inherits a Low/Below Normal
 parent's class (its ffmpeg merge would otherwise run at Normal under a High
@@ -2263,7 +2541,7 @@ autosave when the tab is left and on close.
   on drag-over; `collapse()` — once a file is chosen — drops the border, prompt *and* Browse
   and shows the **`LoadingSpinner`** (below) in their place, until the carousel takes over,
   `reset()` is the reverse — back to its pristine pre-import state, used
-  when a picked file turns out to be unreadable (`app._reject_file`, see
+  when a picked file turns out to be unreadable (`app.media._reject_file`, see
   "File selection is a broadcast" above) rather than leaving the box
   stranded mid-import. `show_no_preview()` is the third state: the border
   and Browse with "No Preview Available" in place of the prompt, for a file that
@@ -2272,15 +2550,45 @@ autosave when the tab is left and on close.
   **LoadingSpinner** (`panels.py`) — `assets/LlamaDiscLoading/000.png`…`142.png`: a spinning CD-R
   (label side "PAK-RW"/"LlamaDisc" plus a llama head, flipping to a rainbow holographic underside),
   a 143-frame, 60fps, **640px PNG sequence** (exported at 2000px from Expressive Animator and
-  downscaled with Pillow LANCZOS; ~14MB on disk, ~234MB decoded). Drawn in its own full colour —
+  downscaled with Pillow LANCZOS; ~14MB on disk, 234MB decoded at 640px — so it is decoded at the size it is drawn, see below). Drawn in its own full colour —
   branded art (Pak the Llama, the wordmark), not a monochrome icon. It replaced a Lottie version
   (`LlamaDisc-Loading.json`) that rlottie couldn't render correctly (no blend-mode support, a
   precomp size bug, missing keyframe end values), which had grown a keyframe rewriter, a precomp
   fix and a 306MB baked rainbow sprite sheet; **none of that exists any more** — a raster
   sequence has no renderer to work around. rlottie is still used by the Wave Loop.
-  `_ensure_frames` decodes the sequence once on a `run_async` worker (~2s; `QImage`s cross
-  threads, as everywhere) at the first `LoadingSpinner`; until then, or if a frame is missing, the
-  spinner draws a plain ring tinted in `subtab_active`, so it is never blank. Plays only while
+  `_request_frames` decodes the sequence on a `run_async` worker (`QImage`s cross threads, as
+  everywhere) **at the size the spinner is drawn** (`_frame_side`: its width in device pixels
+  rounded up to a multiple of 64, at most 640) — ~37MB at the default window size (256px) against
+  234MB at 640. A spinner asks on its first size change (a one-off jump such as fullscreen starts at
+  once), again when a drag settles (`set_side` -> a 100ms single-shot) and when shown, **only while
+  its drop box is on screen** (a tab never shown has an unlaid-out 640x480 box, which once started a
+  second, 512px decode), so the frames are ready before the first import. **A new size upgrades frame
+  by frame** (`_request_frames`): frames are decoded in playing order from two past the one on
+  screen, and each replaces its old-size frame the moment it's ready (`emit_progress`), so a spinner
+  that grew is sharp at once rather than playing stretched frames until the whole set is done — the
+  decode (~110 frames/s at 640) outruns playback (60). A newer size bumps a generation that cancels
+  the frames not yet started; a frame of a superseded size is still kept when its slot is empty. It
+  can't starve: each decode starts at the frame about to play and every finished frame stays until
+  replaced — a size change every 150ms for 4s from a cold start (27 decodes, each cancelling the
+  last) loaded 44 / 72 / 105 / 133 / 143 frames by each half second, with blanks only in the first
+  60ms, before any frame existed. Each frame's scoring doesn't depend on the size, so it's kept after the
+  first decode (`_LOADING["scores"]`, 5MB with compact types) and a re-decode only resizes. Measured
+  growing a spinner from 256 to 640px: stretched frames shown 94 (1.55s) -> 2 (0.03s), the whole set
+  1.55s -> 0.9s; frames byte-identical to the previous code at 256 / 384 / 640, cold and cached; a
+  live drag up and back ends on one size with every frame present, at about the same total CPU.
+  **Frames are released once no spinner is showing** (`_Release`, two single-shot timers owned by the
+  `QApplication`, armed by the last hide and stopped by any show; `_release_frames`). "Needed" is
+  `_LOADING["need"]`, the decode size of the last spinner whose drop box is on screen, kept up to date
+  while hidden (a window leaving fullscreen re-lays out the box and restarts the grace). **After 5s**
+  (`_RELEASE_GRACE_MS`) every frame past the first `_LOADING_KEEP` (13 — what a hidden prewarm decodes,
+  `_LOADING_LOOKAHEAD` + 1) that isn't the needed size goes, and the first 13 are re-decoded at that size
+  if they aren't; **after 2 minutes** (`_RELEASE_IDLE_MS`) with no spinner shown, everything past the
+  first 13 goes whatever its size, fullscreen included. The next import then starts on the kept frames
+  at once and decodes the rest as it plays (the paced path above). Measured (private bytes, offscreen,
+  2.0x = 512px frames, 1.0x = 256px): played at 2.0x 284MB, hidden and shrunk to 1.0x 265MB, after the
+  grace 121MB (13 frames at 256); played at 1.0x 157MB, kept through the grace, 120MB after the idle
+  time; at 2.0x 288MB -> 144MB after the idle time. Frame 0 was present at every following show.
+  Until a frame arrives, or if the frames cannot be loaded, it draws nothing (there is no fallback ring). Plays only while
   shown (`showEvent`/`hideEvent`, one single-shot timer re-armed for each frame's due time) and is
   transparent to the mouse.
   **Two things on the label side are themed**, both recoloured at paint time: the pink divider
@@ -2297,12 +2605,20 @@ autosave when the tab is left and on close.
   *and the hub collar* (the collar was missing at first, and left a thin pink line where the
   stripe meets the hub — its edge pixels are pink-to-collar blends), the ring against the collar
   and the overlay. A pixel goes to the stroke it matches best. Scoring runs on each frame's
-  distinct colours (`np.unique`) rather than every pixel, ~2x faster (load ~4s on a worker).
+  distinct colours (`np.unique`), and only for pixels inside `_candidate_box()` — the RGB bounds of
+  every blend line out to where it leaves the colour cube, widened by the tolerance, derived from the
+  constants so it can't drift — which rules out ~75% of pixels with no change to the result. Frames
+  decode on up to half the CPUs (at most 3), leaving the rest to the window being built. Load at the
+  default size 4.9s -> 0.9s (640px: 6.1s -> 1.3s), every frame's image and themed data byte-identical.
   A frame with fewer than 100 strong stripe pixels (the whole rainbow side, and the edge-on
-  frames 36-39 / 108) has nothing themed — anything that matched there is a look-alike. Only
-  the themed pixels' indices, weights, kinds and original colours are stored; `_recolor` copies the
-  frame and shifts them by `weights × move[kind]` — ~0.5ms, done every paint, so a theme switch
-  needs no cache invalidation. Checked on Lemon, Vaporwave, black and green themes; on the
+  frames 36-39 / 108) has nothing themed — anything that matched there is a look-alike.
+  **Weights are scored at the full 640px and shrunk with the image** (`cv2.INTER_AREA`, in
+  premultiplied space): recolouring is linear, so the small frame equals recolouring at 640 and then
+  scaling down (measured: within 1/255 on every frame, 4 themes, 256/384/640). Scoring the
+  already-shrunk frame instead left a pink fringe on the thin rim, whose pixels blend three colours.
+  Stored per frame: the premultiplied image and, for its themed pixels only, their indices, per-stroke
+  deltas and original colours; `_recolor` copies the frame and shifts them by `deltas @ moves` (clipped
+  to the pixel's alpha) — done every paint, so a theme switch needs no cache invalidation. Checked on Lemon, Vaporwave, black and green themes; on the
   narrow squashed frames a faint dotted fringe can remain on the ring's edge.
 
   **It fills the DropBox's own height, not a fixed reference size**: `DropBox._resize_spinner`
@@ -2415,7 +2731,7 @@ autosave when the tab is left and on close.
   - **Badges**: the mute badge (`assets/audio-mute.svg`, 14% of the short
     side, top-left) while audio is stripped; the info badge (9%,
     bottom-left) once a probe lands. Both are SVGs rendered through a cached
-    `QSvgRenderer` (`_svg_renderer`), not a scaled bitmap — a raster PNG
+    `QSvgRenderer` (`svg_renderer`), not a scaled bitmap — a raster PNG
     downscaled to the badge's actual ~20-40px on-screen size showed a
     visible stepped edge even through `SmoothPixmapTransform`, which an SVG
     doesn't have at any size. The mute badge renders `audio-mute.svg`
@@ -2531,7 +2847,12 @@ autosave when the tab is left and on close.
   - Signals: `reselect`, `populated` (first frames or audio-only — the tab
     reveals the carousel), `indexChanged` (user scrubs only), `fileDropped`,
     `expandToggled(bool)`. `step(delta)` is the keybind stepper; `sync_index`
-    jumps silently.
+    jumps silently; `replace_frames` swaps pictures without resetting anything (see HDR→SDR preview).
+  - **While expanded, a blank widget holds the carousel's place in the tab's preview stack**
+    (`MediaTab._on_expand_toggled`, `_expand_slot`). Taking the carousel out left the stack showing its
+    other page, the drop box, still collapsed from the import: its spinner played (and decoded frames)
+    the whole time, and in the render check it painted a square through the expanded picture.
+    `check_media` asserts no spinner is showing while expanded.
 - **Dialogs** — `MessageDialog` (a `QDialog`: bold title, wrapped **selectable** message,
   optional entry, buttons right-aligned; the **first button is the affirmative
   one** and gets the `action` role — primary — the rest the `queue` role, i.e.
@@ -2562,7 +2883,9 @@ autosave when the tab is left and on close.
   Verified on the real desktop: no `WS_CAPTION`, `frameGeometry == geometry`.
   The OS file pickers (`QFileDialog`) are Windows' own and stay native. `show_message`,
   `ask_yes_no` (True only on an explicit Yes), `ask_text` (stripped text or
-  None), `confirm_output_path`. `AudioStreamPickerDialog` /
+  None), `confirm_output_path`. **`show_modal` deletes the dialog** (`deleteLater` after `exec`,
+  so callers still read its entry or picks first): the window owns every dialog, so each one used
+  to live as long as the window — about 0.45MB and 23 objects per popup, found by `check_leaks`. `AudioStreamPickerDialog` /
   `choose_audio_streams` — Encoding's **Choose Stream(s)**, which holds nothing but the
   tracks: no title and no explanation (`MessageDialog.SHOW_HEADER = False` skips both), a
   `TrackListBox` (one checkbox per audio stream, drag a row to reorder, marquee for a long
@@ -2608,12 +2931,14 @@ picks the toast. **Only one ffmpeg runs at a time.**
 
 **Jobs are real ffmpeg processes.** The pipeline is four pieces:
 
-- **`core/ffmpeg_vars.py`** — `load(settings, source_tab)` flattens one job's
-  settings dict into module globals (`INPUT_FILE`, `START_TIME`,
-  `VIDEO_CODEC_ARG`, …). Each comes in its raw UI form and, where they
-  differ, an ffmpeg-ready `*_ARG` form. Read them through the module
-  (`from core import ffmpeg_vars as v`), never `from … import NAME`, which
-  copies the value once.
+- **`core/ffmpeg_vars.py`** — `derive(settings, source_tab)` returns a frozen
+  `JobVars` (`input_file`, `start_time`, `video_codec_arg`, …) of ffmpeg-ready
+  values, passed explicitly to every `ffmpeg_build` function
+  (`compile_command(job, output_path, loglevel)`, `uses_hdr_tonemap(job)`). It
+  replaced module globals set by a `load()`, which every builder read
+  implicitly; the ~25 values nothing read (the old single-track picker's
+  `VIDEO_TRACK*`, the unused raw forms, `END_TIME`) went with them. Upper-case
+  names below (`AUDIO_STREAMS`, `SCALE_VF`, `FPS_ARG`, …) are its lower-case fields.
 
   **`AUDIO_STREAMS` is the one list-shaped variable here, not a scalar** —
   the direct consequence of Encoding no longer describing "the audio" as one
@@ -2730,7 +3055,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
   a real video encode. **`-fps_mode` isn't universal** — added in ffmpeg 5.1
   (mid-2022); an older install (this app's own dev machine runs a 2020
   build) doesn't recognize it at all and would fail *every* Encoding job
-  outright with A/V Sync on by default. `core.utilities.supports_fps_mode()`
+  outright with A/V Sync on by default. `core.capabilities.supports_fps_mode()`
   checks once per process (parses `ffmpeg -h full`'s own option listing,
   cached — a subprocess per job would be wasted work for an answer that
   can't change mid-run) and `build_encode_command` falls back to the older,
@@ -2750,10 +3075,10 @@ picks the toast. **Only one ffmpeg runs at a time.**
     translated) the moment GPU acceleration resolves a hardware encoder —
     see above.
   - **HDR→SDR** — when `HDR_TO_SDR` and the video isn't stripped, adds
-    `-vf` from `core.utilities.libplacebo_tonemap_vf(peak_detect=...)`
+    `-vf` from `core.capabilities.libplacebo_tonemap_vf(peak_detect=...)`
     (`libplacebo=apply_dolbyvision=true:peak_detect=<bool>:tonemapping=
     bt.2390:colorspace=bt709:color_primaries=bt709:color_trc=bt709:
-    format=yuv420p` — moved to `core/utilities.py`, not `ffmpeg_build.py`,
+    format=yuv420p` — moved to `core/probe.py`, not `ffmpeg_build.py`,
     specifically so the HDR *preview* thumbnails, below, can share the exact
     same filter string with the real encode without a circular import) plus
     explicit `-color_primaries bt709 -color_trc bt709 -colorspace bt709`
@@ -2767,14 +3092,18 @@ picks the toast. **Only one ffmpeg runs at a time.**
     confirmed via `ffmpeg -h filter=tonemap`, no BT.2390 among them) was
     tried first and removed once a real Vulkan/libplacebo setup was
     confirmed working (see below) — don't reintroduce it as a fallback.
-    `core.utilities.supports_libplacebo()` gates this two ways instead. It is
+    `core.capabilities.supports_libplacebo()` gates this two ways instead. It is
     `libplacebo_problem() is None`, and that is **two checks, not one**: the
     filter is listed by `ffmpeg -filters` (else `LIBPLACEBO_MISSING`), *and* a
     one-frame probe of the real `libplacebo_tonemap_vf()` on an explicit
     `VULKAN_DEVICE_FLAGS` device actually runs (else `LIBPLACEBO_NO_VULKAN` —
     a build with the filter but no usable Vulkan driver). Cached per process
-    behind a lock; the probe is a real ffmpeg run (~0.7s here), so `MainWindow`
-    warms it on a worker at startup. Verified against a real failure by
+    behind a lock; the probe is a real ffmpeg run (~0.7s here, and it wakes the GPU), so it
+    runs on a worker **only once a file probes as HDR** (`MediaSession._check_hdr_support`,
+    which re-syncs the tabs when it answers) — never at launch or for an SDR file. Until it
+    has answered (`capabilities.libplacebo_checked()`), Encoding greys the switch with a
+    "checking" note rather than ask, since asking runs the probe on the GUI thread; measured:
+    enabled 0.58s after an HDR import, worst GUI stall 6ms. Verified against a real failure by
     pointing `VK_DRIVER_FILES` / `VK_ICD_FILENAMES` at a nonexistent driver
     (ffmpeg exits nonzero → `vulkan`; a crash or hang counts the same).
     `libplacebo_problem_text()` is the one wording used by the switch's
@@ -2795,7 +3124,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     way.** libplacebo's `peak_detect` (on by default) dynamically estimates
     each frame's true peak brightness by analysing pixel values over a
     ~100-frame smoothing window, meant to compensate for a source with no
-    static metadata to trust. `core.utilities._probe_hdr_static_metadata`
+    static metadata to trust. `core.probe._probe_hdr_static_metadata`
     reads the source's ST 2086 mastering-display luminance and MaxCLL/MaxFALL
     (a separate, frame-level ffprobe query — confirmed neither value shows up
     in ffprobe's *stream*-level output, only a full `-show_frames` on the
@@ -2810,13 +3139,13 @@ picks the toast. **Only one ffmpeg runs at a time.**
     `ThumbnailCarousel._mastering_text` uses) came out measurably *dimmer and
     lower-contrast*, the opposite of an improvement, when the peak alone was
     trusted the same way. `EncodingTab._gather_settings` snapshots
-    `mastering_max_nits`/`max_cll` from `app.media_info` into the job's
+    `mastering_max_nits`/`max_cll` from `app.media.info` into the job's
     settings dict at queue time — a fact about the input, not a user choice —
     and `ffmpeg_vars.derive()` carries them through as `MASTERING_MAX_NITS`/
     `MAX_CLL` for `build_encode_command` to read.
 
     **A post-encode safety net re-verifies the real output, not just the
-    filter in isolation.** `core.utilities.verify_hdr_sdr_tag(path)` re-probes
+    filter in isolation.** `core.probe.verify_hdr_sdr_tag(path)` re-probes
     the finished file's own `color_transfer` after an HDR→SDR job completes;
     `FfmpegJob` (see `core/ffmpeg_runner.py` below) reports the task **Failed**
     — file still saved, for inspection, never deleted — rather than Done if
@@ -2837,15 +3166,16 @@ picks the toast. **Only one ffmpeg runs at a time.**
     BT.2020) source has no color management at all — it clips/rescales the
     wide-range values into 8-bit RGB, producing a washed-out picture of the
     *untouched* HDR data rather than a preview of what the export will look
-    like. `core.utilities.extract_hdr_tonemapped_thumbnails` instead runs one
+    like. `core.previews.extract_hdr_tonemapped_thumbnails` instead runs one
     short-lived real ffmpeg + libplacebo process **per frame** (an input-side
     `-ss` approximate seek, then a single-frame decode through the identical
-    `libplacebo_tonemap_vf` filter the real encode uses), targeting the exact
-    same frame indices `extract_video_thumbnails`'s cv2 seek samples
-    (`_interior_sample_frames`, shared by both) so the two sets stay
-    index-for-index aligned. Ten short seeks measured well under the cost of
-    one full linear decode on a real multi-GB HDR10 source. **The frames render in parallel**
-    (`hdr_preview_workers`: 3 processes at once with 8 or more logical CPUs, else 2 — never 1),
+    `libplacebo_tonemap_vf` filter the real encode uses), **repeating the raw
+    set's seeks** (`seeks=`, from `extract_preview_frames` — see "Preview frames
+    are keyframes") so the two sets are the same frames; with no seeks it falls
+    back to OpenCV's frame indices (`_interior_sample_frames`). A keyframe seek
+    decodes one frame, so the render got faster too: 4K HDR AV1 8.2 -> 5.3s, 4K
+    HDR HEVC 9.8 -> 7.5s. **The frames render in parallel**
+    (`preview_workers`: 3 processes at once with 8 or more logical CPUs, else 2 — never 1),
     each at `-threads 4` (or the CPU count if lower) and **below-normal priority**, with a 90s
     per-frame timeout (a frame that times out is a hole in a set that must stay aligned with
     the raw one, and a frame sharing the machine with an encode takes far longer than the
@@ -2859,16 +3189,16 @@ picks the toast. **Only one ffmpeg runs at a time.**
     `shader_cache` (no cache file written, no speedup), hardware decode (no change — decode
     is ~6 of the 14.6s, the other ~9s is per-process libplacebo/Vulkan start-up and tone
     mapping), one ffmpeg with ten `-ss/-i` inputs (slower, 8.4s, and pixels differ by up to
-    5/255 from separate processes), and downscaling the output (no time saved; the frames
-    stay full 4K anyway, since the expanded preview shows them that large). **Alongside an
+    5/255 from separate processes), and downscaling in ffmpeg (no time saved; frames are shrunk
+    after decoding instead, see below). **Alongside an
     encode** (12s slice of the same file, encode at normal priority; single run each, so the
     percentages are indicative): software H.265 13.5s alone / 16.0s with the render running (+18%),
     the render 9.9s alone / 13.5s with it (+37%); HDR->SDR + x264 6.5s / 8.7s (+32%), render 9.6s /
     12.6s (+32%); NVENC HEVC 3.1s / 3.8s (+22%), render 9.9s / 11.0s (+11% — the encode ended
     first, so most of that render ran alone). **Memory, measured on real 4K HDR files** (Mulan,
     3600x2160, and Beauty and the Beast; process memory from `GetProcessMemoryInfo`, the render's
-    ffmpegs sampled every 80ms): every preview frame is a `Format_RGBA8888` QImage —
-    **29.7MB at 3600x2160** (`pil_to_qimage`, 4 bytes a pixel), so a set of ten is **297MB**. An HDR file
+    ffmpegs sampled every 80ms), **before frames were capped**: every preview frame was a `Format_RGBA8888`
+    QImage — **29.7MB at 3600x2160** (4 bytes a pixel), so a set of ten was **297MB**. An HDR file
     therefore holds two sets (raw + tone-mapped) = ~594MB of frames: the app went from 811MB private
     (a window with no file) to 1146MB with the raw previews (+335MB) and 1442MB once the tone-mapped
     set landed (+296MB), and stayed there — turning the switch on, scrubbing all ten frames and
@@ -2876,23 +3206,33 @@ picks the toast. **Only one ffmpeg runs at a time.**
     the 3 ffmpeg processes hold ~2.7GB private between them (~0.9GB each on a 10-bit 3600x2160 HEVC
     source; 0.73GB measured earlier on Beauty and the Beast) and the app's own peak commit reached
     ~2GB (the worker's transient PIL images beside the QImages), for the ~10s the render takes.
-    **The tone-mapped set of the previous file is not released when the next file is an SDR one**:
-    `hdr_frames` is only replaced by the next *render*, so after an HDR file an SDR clip still held
-    the old 316MB (1232MB private with a 9MB clip loaded); it is never reused either (returning to
-    that file re-rendered it, because the cache holds one set). Not changed — reported. Empty (no preview
+    **Frames are now stored no bigger than they can be drawn**: `_preview_max_size` (`ui/media_session.py`) is the
+    biggest screen in device pixels, and `extract_preview_frames` / `extract_hdr_tonemapped_thumbnails`
+    take it as `max_size`, shrinking each frame as it is decoded (`previews._shrink`, `cv2.INTER_AREA`
+    — 3.7ms per 4K frame against Pillow LANCZOS's 57ms); `pil_to_qimage` stores an image without alpha
+    as `Format_RGB32` (Qt's native format; see below). A 4K frame on a 1440p screen is 14MB.
+    **The previous file's frames — raw and tone-mapped — are dropped when the file changes**
+    (`select_file`, and Encoding's own `_raw_frames` in `reset_hdr_preview`); only a reselect of the
+    same file reuses them. The raw set used to wait for the next file's frames to replace it, so a
+    file with none (audio, cover art, no preview) kept the old video's: 141MB of a 4K file's frames
+    held behind an audio file (269MB committed -> 128MB, idle 121MB). The tone-mapped set
+    used to stay until the next render (316MB held behind an SDR clip) and was never reused anyway.
+    Measured on a real display, working set (before -> after): idle with the spinner ready 376 ->
+    173MB, a 1080p file 464 -> 241, 4K 703 -> 288, 4K HDR with both sets 1022 -> 398, back to 1080p 785
+    -> 246. Queue rows keep a thumbnail scaled to cover 240x160 (4x the slot), not the whole frame.
+    `main.py` sets `OPENBLAS_NUM_THREADS=1` before numpy loads: OpenBLAS otherwise starts a thread per
+    core, each reserving a buffer — ~740MB of commit (not working set) on 32 threads. Empty (no preview
     change) whenever `supports_libplacebo()` is false or the geometry probe
     fails — callers must check the former themselves to tell "no HDR to show"
     apart from "libplacebo isn't available".
 
     **Encoding's preview carousel actually shows this tonemapped set once
     HDR→SDR is on**, not just the raw HDR frames with a switch flipped
-    elsewhere. The render and its cache (`start_hdr_render`,
-    `hdr_frames`/`hdr_frames_path`, token-guarded like the thumbnails) live
-    on `MainWindow`, one render per file. `EncodingTab._apply_preview_frames`
-    picks the cached tone-mapped set over the raw one whenever the switch is
-    on, it's ready, and it matches the currently-shown file; flipping the
-    switch off (or switching files) swaps back to the raw set instantly
-    without waiting on a fresh render. This preview path is Encoding-only —
+    elsewhere. The render and its frames (`hdr_frames`/`hdr_frames_path`) live on
+    `MediaSession` (`app.media`), frame by frame (see "HDR→SDR preview renders are frame by
+    frame"). `EncodingTab._apply_preview_frames` shows each tone-mapped frame that's rendered
+    while the switch is on; flipping it off (or switching files) swaps back to the raw set
+    instantly. This preview path is Encoding-only —
     Muxing has no HDR control at all.
 
     **Being *listed* as compiled in is not enough to trust libplacebo,
@@ -3051,13 +3391,13 @@ picks the toast. **Only one ffmpeg runs at a time.**
     suspended) and deletes the temp file.
   - **Output goes to `<stem>.partial<ext>` first** (`partial_path`) and is
     replaced onto the real path only when ffmpeg exits 0, via
-    `_replace_output` rather than a bare `os.replace`. **A bare
+    `process_job.replace_output` rather than a bare `os.replace`. **A bare
     `os.replace` can fail with a genuine, reproducible Windows "Access is
     denied" (WinError 5)** — confirmed two real causes directly (not just
     from a bug report): the destination file has the read-only attribute
     set, or something else (a media player, thumbnail/preview generation, an
     antivirus scan reacting to the just-closed temp file) has it open for a
-    moment. `_replace_output` clears the read-only bit first (best-effort)
+    moment. `replace_output` clears the read-only bit first (best-effort)
     and retries the rename for a few seconds before actually giving up —
     verified against both a transient lock (released mid-retry: the job
     still succeeds) and a permanent one (never released: the job still
@@ -3090,7 +3430,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
     this can't fire spuriously.
 
   Row thumbnails reuse the app's already-decoded frames
-  (`app.thumb_frames`) or decode on a worker, never on the GUI thread.
+  (`app.media.thumb_frames`) or decode on a worker, never on the GUI thread.
 
 **Encoding can no longer produce a silent byte-for-byte copy.** `Select`
 (the Encoder/Audio Codec placeholder — see "Option compatibility" above)
@@ -3165,6 +3505,72 @@ means "to the end of the file". A derived dropdown showing the `—`
 placeholder reports `""` rather than the dash (`_menu_value`), so a settings
 dict never carries a placeholder around as if it were a real choice.
 
+## Subtitle and chapter flow
+
+**Settings.** Both tabs: `subtitle_tracks` (the output's soft tracks, in order: `{"source", "file",
+"index" (among that file's subtitle streams), "codec_name" (ffprobe's), "language", "default", "forced",
+"start_time" (an external file's own)}`), `strip_subtitles`, `chapters` (None, or `[{"start", "title"}]`),
+`strip_chapters`, `source_duration`, `source_has_chapters`. Encoding adds `burn_subtitle`
+(`{"source", "file", "index", "image", "width", "height", "start_time"}` or None), `source_width`,
+`source_start`. `ffmpeg_vars` turns them into `subtitle_tracks` (with `codec_arg`, `text_muxer`,
+`disposition`), `burn_subtitle`, and `chapters` already on the output's timeline (`_trimmed_chapters`:
+each ends where the next starts, the last at the source's length; shifted by the trim's start, cut to its
+length, and dropped when nothing is left — an all-dropped list strips).
+
+**Formats** (`formats.subtitle_codec_arg(container, codec_name)`): .mkv copies every format but
+MP4 text (-> `srt`); .mp4 / .mov convert text to `mov_text`; .webm to `webvtt`; pictures (PGS, VobSub,
+DVB) are copied into .mkv and can't go anywhere else (None). Each output track also gets
+`-metadata:s:s:N language=` and `-disposition:s:N` (`default`, `forced`, both, or `0`). **Encoding
+maps every subtitle's tags explicitly** (`-map_metadata:s:s:N <input>:s:s:<index>`) because the video's
+`-map_metadata:s:v:0 -1` switches off ffmpeg's default tag copy for every stream; **Muxing must not**
+(any `-map_metadata` of a type there would drop every copied stream's tags).
+
+**Three ffmpeg behaviours, each found on the real build and each worked around:**
+- **ffmpeg rebases every input to start at 0.** A `.sup` reports its first picture as its start, so a
+  PGS track added from a .sup came out with its first picture at 0 (1s early). An external subtitle
+  input gets `-itsoffset <its own start_time>` (`probe_media`'s new `start_time`); .srt / .ass report
+  none, so nothing changes for them.
+- **A subtitle input of its own, trimmed with `-ss`, keeps the cue in progress at the cut**, as a
+  negative timestamp, and ffmpeg then shifts the *whole output* to make it non-negative (the video
+  started 2s in). For a copied track `-copypriorss:s:N 0` drops those packets (verified: .srt and .sup
+  both land right). **For a converted track nothing does** — decoded subtitles ignore it, and every
+  variant tried (`-itsoffset -S`, `-avoid_negative_ts`, `-fix_sub_duration`) came out shifted or
+  stretched — so a trimmed external text track that must be converted goes through a **prep step**
+  (`ffmpeg_build.prepare_commands`): a copy-trim into its own text format beside the output
+  (`<output>.partial.subN.srt`, `-copypriorss 0`), which the main command reads untrimmed and converts.
+  `FfmpegJob(prepare=...)` runs the steps on a thread (contained, 600s timeout each), then launches
+  ffmpeg from there under `_launch_lock` (so `stop()` can't slip between the check and the launch), and
+  deletes the files however the job ends. A track from the source file itself needs none of this: its
+  seek happens in the demuxer with the rest. A cue that spans the cut is dropped, as ffmpeg does for
+  embedded tracks. (An external MP4-text track converted with a trim has no text muxer to copy into and
+  stays on the inline path — the one case left approximate.)
+- **ffmpeg-python over-escapes filter arguments**, so a burned-in file path (drive colon, `'`) never
+  reached the `subtitles` filter intact. The text burn-in goes in the `-vf` string, which ffmpeg-python
+  passes as is, with `_filter_path`: the option level escapes `\ ' :`, the graph level single-quotes the
+  whole value (which also protects `[ ] , ;`), an apostrophe written `'\''`. Found by testing each depth
+  against filenames with `'`, `[1],b;c` and spaces: one level and two levels both failed on this build.
+
+**Burn-in.** Text: `subtitles='<path>':si=N` after the tone-map (text drawn into HDR would be tone-mapped
+too) and before the downscale. The filter reads the file on the file's own timeline, so with a trim the
+frames are moved there and back: `setpts=PTS+<start + the source's own start>/TB,...,setpts=PTS-STARTPTS`
+(an external file: the trim's start only). Pictures: an overlay, so the video becomes a graph
+(`-filter_complex` via ffmpeg-python: `_vf_node` turns the tone-map and scale strings into filter
+nodes); the pictures are scaled from their canvas (the stream's width / height) to the source's size
+first. Checked on real outputs: the line is in the picture only while its cue is, and the 1080p bar lands
+at the right place and times on 720p video. Fonts: libass finds Windows' own.
+
+**Chapters.** Stripped (or every chapter trimmed away): `-map_chapters -1`. Edited: an FFMETADATA1
+document (`_ffmetadata`: milliseconds, titles escaped for `= ; # \` and newlines) goes in as `-f
+ffmetadata -i data:text/plain;base64,...` after the other inputs (`compile_command` inserts it; no file to
+write or delete), and `-map_chapters` names its position. Unedited: left to ffmpeg, except that with other
+files as inputs it's pinned to the source (`-map_chapters <its position>`, or -1 if it has none), since
+ffmpeg takes the first input that has any. MP4 output also gets a chapter text track (`bin_data`), which is
+how that container stores them.
+
+**MP4 marks the first subtitle track default when no track is** (the muxer's own rule for enabled
+tracks): a lone Forced track reads `default+forced` there. Not something the app can switch off; the jobs
+check expects it.
+
 ## Download flow (YT-DLP)
 
 Two modules, no UI code in either. **Everything runs through the bundled
@@ -3217,14 +3623,14 @@ without an app release; a frozen app has no `python -m yt_dlp` anyway.
   process is created `CREATE_SUSPENDED`, assigned to a kill-on-close job,
   then resumed, so nothing escapes. `stop()` = `TerminateJobObject`;
   `suspend()`/`resume()` enumerate the job's PIDs and `NtSuspendProcess`
-  each (reusing `ffmpeg_runner._set_suspended`). Verified: pause froze the
+  each (`process_job.set_suspended`). Verified: pause froze the
   byte count, ffmpeg appeared inside the job during a merge, Stop mid-
   download and mid-conversion left no process and no files, and killing the
   Python process outright took the tree with it (kill-on-close).
 - **Private work folder**: yt-dlp writes only into a hidden
   `.llamamxd-download-XXXXXXXX` beside the output (`-P`, `-o download.%(ext)s`);
   on exit 0 the file named by `--print after_move:filepath` is moved onto
-  `final_path` with `ffmpeg_runner._replace_output`'s retrying replace.
+  `final_path` with `process_job.replace_output`'s retrying replace.
   Stop/failure just deletes the folder — a user's existing file is never
   touched unless the download succeeded.
 - **One pipe** (`stderr=STDOUT`): yt-dlp prints download progress on stdout
@@ -3281,8 +3687,12 @@ without an app release; a frozen app has no `python -m yt_dlp` anyway.
   count in layout, fixed-size or paint code (see "UI scale" above): bound
   helpers for what's set once, design-space painting for what's painted,
   `px()` / `font_px()` in the stylesheet.
-- Every non-trivial method gets a one-line docstring; comments explain *why*
-  (especially verified ffmpeg / yt-dlp / Windows behaviour).
+- **Comments and docstrings.** A `"""docstring"""` says *what* a module, class or function does:
+  one line by default, three at most (a module's a short paragraph). A `#` comment sits on the
+  line it explains and says *why* a non-obvious line is there (a verified ffmpeg / yt-dlp /
+  Windows / Qt quirk), in three lines at most. Never `#` lines in place of a docstring. No
+  history, "confirmed"/"verified" narratives, measurements or "by request" in code: those belong
+  in commit messages and this file. Section banners are the three-line `# ---- #` form.
 - There are no `__init__.py` files; the subfolders work as implicit namespace
   packages. Imports are absolute from the repo root
   (`from ui.widgets.panels import DropBox`).
@@ -3304,8 +3714,14 @@ without an app release; a frozen app has no `python -m yt_dlp` anyway.
   `-ss` rebases the output timeline to 0, so an output-side `-to X` acts as a
   *duration* of X, not "stop at X" (`-ss 00:21:36 -i in -to 00:21:41` makes a
   21m41s clip, not a 5s one). `ffmpeg_build._trim_kwargs` does it the safe
-  way. `END_TIME`/`END_SECS` in `ffmpeg_vars` are only safe as an input-side
-  `-to` paired with an input-side `-ss`.
+  way; `JobVars` deliberately has no end time. An end time is only safe as an
+  input-side `-to` paired with an input-side `-ss`.
+- **A copied track in a trimmed Encode needs `-copypriorss:a:N 0`** (`build_encode_command` adds it
+  for every Passthru track when the start is trimmed). The input-side `-ss` lands on the keyframe
+  before the start; re-encoded streams drop what precedes the start, but a copied one kept those
+  packets, so an MKV came out with ~1s of audio before the picture (the muxer shifted the re-encoded
+  streams to 0.98s) and 1s too long. MP4 hid it behind an edit list. Muxing is unchanged on purpose:
+  every stream is copied there, so all start together at the keyframe (the rundown's "· keyframe").
 - **`Dropdown.hidePopup` is also called by Qt on style changes** (a live theme
   switch), which is why `popupClosed` is gated on the popup having genuinely
   been open — otherwise Settings' theme preview reverted itself on every

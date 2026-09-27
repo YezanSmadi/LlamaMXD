@@ -1,11 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Themed modal dialogs: blocking problems get one of these; things that just
-happened get a toast (ui/widgets/toast.py) instead.
-
-A QDialog's `exec()` spins a nested event loop, so timers keep firing
-underneath it. Never open one from inside a recurring
-tick — post it with `QTimer.singleShot(0, ...)` (see QueueTab._show_errors)."""
+"""Themed modal dialogs (blocking problems get one; things that just happened get a toast).
+`exec()` spins a nested event loop and timers keep firing under it: never open one from a
+recurring tick; post it with `QTimer.singleShot(0, ...)`."""
 import os
 import uuid
 
@@ -14,10 +11,12 @@ from PySide6.QtGui import QIcon, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QDialog, QFileDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from core import formats
-from core.utilities import probe_media
+from core.probe import probe_media
 from ui import scale
 from ui import theme as T
-from ui.widgets.controls import CheckBox, ScaledLabel, ScaledLineEdit, button, button_width_for
+from ui.widgets.controls import button, button_width_for
+from ui.widgets.text import ScaledLabel, ScaledLineEdit
+from ui.widgets.toggles import CheckBox
 from ui.widgets.panels import ASSETS
 from ui.widgets.tracklist import TrackListBox, describe_stream, row_label
 from ui.workers import run_async
@@ -28,35 +27,21 @@ _RADIUS = 8     # the panel's corner radius, reference px
 
 
 class MessageDialog(QDialog):
-    """A bold title, a wrapped message, an optional single-line entry, and one
-    or two buttons. The FIRST button is the affirmative one (primary); the
-    rest are declines (secondary). Enter confirms; Escape (and Alt+F4) count
-    as declining, so a dismissed confirmation can never destroy work.
-    `.result_label` is the pressed button's label or None.
-
-    **Borderless**: no OS title bar or frame, like the app's own Borderless
-    window mode. It paints its own rounded panel (the window colour, outlined
-    in the theme's primary) over a translucent window, and — with no title bar
-    to grab — a press on any part of it that a child didn't take drags it
-    (`startSystemMove`).
-
-    A subclass with a body of its own and nothing to say above it sets
-    `SHOW_HEADER = False`: no bold title and no message are built (the window
-    title is still set, for the taskbar)."""
+    """A bold title, a wrapped message, an optional entry, and buttons. The first button is
+    the affirmative one; Enter confirms, Escape and Alt+F4 decline. `.result_label` is the
+    pressed button's label or None. Borderless: it paints its own rounded panel and a press on
+    it drags the window. A subclass sets `SHOW_HEADER = False` to skip the title and message."""
 
     SHOW_HEADER = True
     WIDTH = _DIALOG_WIDTH        # reference px; a dialog with a lot on its button row is wider
+    SIDE_MARGIN = 20             # reference px; a dialog whose own content is tight can narrow this
 
     def __init__(self, parent, title, message, buttons=("OK",), entry=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        # Styled here, not left to the window's own sheets: a window restyles
-        # only what's on screen when the scale or theme changes (see
-        # `MainWindow._restyle`), and a dialog built later must not inherit a
-        # stale application-level sheet. Its `QDialog` background is cleared:
-        # `paintEvent` draws the rounded panel, and a square sheet fill would
-        # show at the corners.
+        # Styled here: a dialog built after a rescale must not inherit the stale app-level
+        # sheet. Its background is cleared, since paintEvent draws the rounded panel.
         self.setStyleSheet(T.stylesheet() + "QDialog { background: transparent; }")
         self.setWindowTitle(title)
         icon = os.path.join(ASSETS, "llama.ico")
@@ -66,9 +51,10 @@ class MessageDialog(QDialog):
         scale.fixed(self, w=self.WIDTH)
         self.result_label = None
         self._buttons = buttons
+        self._button_widgets = {}
 
         body = QVBoxLayout(self)
-        scale.margins(body, 20, 18, 20, 14)
+        scale.margins(body, self.SIDE_MARGIN, 18, self.SIDE_MARGIN, 14)
         body.setSpacing(0)
         self.message_label = None
         if self.SHOW_HEADER:
@@ -76,16 +62,9 @@ class MessageDialog(QDialog):
             heading.setProperty("role", "dialogTitle")
             body.addWidget(heading)
             scale.spacer(body, 6)
-            # A stock QLabel, not ScaledLabel: real, selectable text (drag to select, Ctrl+A,
-            # Ctrl+C, a right-click Copy menu) needs Qt's own text control, which only ever
-            # sees what Qt itself painted — a ScaledLabel's custom-scaled painter draws
-            # somewhere else, so its hit-testing would be wrong at any scale but 1.0. Safe
-            # here specifically because a dialog rebuilds its whole stylesheet fresh on every
-            # open (`T.stylesheet()` above), already baked to the current scale, and a modal
-            # dialog can't be live-resized after that — the one case a plain QLabel doesn't
-            # need ScaledLabel's continuous-rescale machinery at all. The title stays a
-            # ScaledLabel: its role's stylesheet size is a *reference* px value only ScaledLabel
-            # reinterprets, so a native QLabel would render it unscaled (correct only at 1.0x).
+            # A stock QLabel so the text is selectable (Qt's text control only matches what Qt
+            # paints). Fine here: a modal dialog is styled once at the current scale and not
+            # resized. The title stays a ScaledLabel, whose role size is in reference px.
             text = QLabel(message)
             text.setWordWrap(True)
             text.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
@@ -109,15 +88,19 @@ class MessageDialog(QDialog):
         for index, label in enumerate(buttons):
             btn = button(label, role="action" if index == 0 else "queue", width=90)
             btn.clicked.connect(lambda _=False, choice=label: self._dismiss(choice))
+            self._button_widgets[label] = btn
             row.addWidget(btn)
         body.addLayout(row)
 
     def _build_extra(self, body):
         """Hook for subclasses that need more than a message."""
 
+    def set_button_enabled(self, label, enabled):
+        """Grey out (or restore) the button labelled `label`; Enter then does nothing either."""
+        self._button_widgets[label].setEnabled(bool(enabled))
+
     def _build_leading_buttons(self, row):
-        """Hook: widgets for the *left* end of the button row (the standard buttons sit
-        at the right, after a stretch)."""
+        """Hook: widgets for the left end of the button row (the standard buttons are right)."""
 
     def paintEvent(self, _event):
         """The rounded, outlined panel a frameless window doesn't get for free."""
@@ -128,7 +111,7 @@ class MessageDialog(QDialog):
         path.addRoundedRect(QRectF(self.rect()).adjusted(border / 2, border / 2, -border / 2, -border / 2),
                             scale.fpx(_RADIUS), scale.fpx(_RADIUS))
         p.fillPath(path, T.theme.color("window"))
-        p.setPen(QPen(T.theme.color("primary"), border))
+        p.setPen(QPen(T.theme.color("theme_accent"), border))
         p.drawPath(path)
 
     def mousePressEvent(self, e):
@@ -154,7 +137,8 @@ class MessageDialog(QDialog):
 
     def keyPressEvent(self, e):
         if e.key() in (Qt.Key_Return, Qt.Key_Enter):
-            self._dismiss(self._buttons[0])
+            if self._button_widgets[self._buttons[0]].isEnabled():
+                self._dismiss(self._buttons[0])
         elif e.key() == Qt.Key_Escape:
             self._dismiss(None)
         else:
@@ -165,7 +149,11 @@ class MessageDialog(QDialog):
         self.done(0)
 
     def show_modal(self):
+        """Run the dialog; its button's label. The dialog is deleted once control returns to the
+        event loop (the window owns it, so it would otherwise live as long as the window) —
+        after the caller has read whatever it needs from it."""
         self.exec()
+        self.deleteLater()
         return self.result_label
 
 
@@ -180,19 +168,42 @@ def ask_yes_no(parent, title, message):
 
 
 def ask_text(parent, title, message, initial="", confirm="Save"):
-    """One line of text (preset names). The stripped string, or None when
-    cancelled, closed, or left blank."""
+    """One line of text; the stripped string, or None if cancelled or blank."""
     dialog = MessageDialog(parent, title, message, buttons=(confirm, "Cancel"), entry=initial)
     if dialog.show_modal() != confirm:
         return None
     return (dialog.entry.text() or "").strip() or None
 
 
+class _RememberDialog(MessageDialog):
+    """Yes/No plus a "Don't ask again" checkbox, under the message."""
+
+    def __init__(self, parent, title, message, checkbox_text):
+        self._checkbox_text = checkbox_text
+        self.dont_ask = None
+        super().__init__(parent, title, message, buttons=("Yes", "No"))
+
+    def _build_extra(self, body):
+        scale.spacer(body, 10)
+        self.remember_check = CheckBox(self._checkbox_text)
+        body.addWidget(self.remember_check)
+
+    def _dismiss(self, choice):
+        self.dont_ask = self.remember_check.isChecked()
+        super()._dismiss(choice)
+
+
+def ask_yes_no_remember(parent, title, message, checkbox_text="Don't ask again"):
+    """Yes/No with a "Don't ask again" checkbox: `(confirmed, dont_ask)` — `confirmed` True only
+    on an explicit Yes, `dont_ask` whatever the checkbox read when the dialog closed."""
+    dialog = _RememberDialog(parent, title, message, checkbox_text)
+    confirmed = dialog.show_modal() == "Yes"
+    return confirmed, bool(dialog.dont_ask)
+
+
 class CountdownDialog(MessageDialog):
-    """A confirmation that goes ahead by itself: `message` (with `{n}` standing
-    for the seconds left) counts down once a second and the dialog answers
-    "Now" at zero. The first button ("Now") acts immediately, Cancel — and
-    Escape — call it off."""
+    """A confirmation that goes ahead by itself: `message` (`{n}` = seconds left) counts
+    down and answers "Now" at zero. "Now" acts at once; Cancel or Escape calls it off."""
 
     def __init__(self, parent, title, message, seconds, now_label="Now"):
         super().__init__(parent, title, message.format(n=seconds), buttons=(now_label, "Cancel"))
@@ -216,17 +227,13 @@ class CountdownDialog(MessageDialog):
 
 
 def confirm_countdown(parent, title, message, seconds=30, now_label="Now"):
-    """True when the countdown ran out or "Now" was pressed, False when it was
-    cancelled."""
+    """True when the countdown ran out or "Now" was pressed; False if cancelled."""
     return CountdownDialog(parent, title, message, seconds, now_label).show_modal() == now_label
 
 
 def confirm_output_path(parent, output_path, input_file, claimed=False):
-    """The pre-queue checks on where a job will write. A folder or the input
-    file itself is refused; a path that exists — or that another unfinished
-    job will write (`claimed`) — asks first, and No means the job isn't
-    queued. Asking at queue time is what lets the queue run without ever
-    stopping to prompt."""
+    """Pre-queue checks on where a job writes: a folder or the input itself is refused; an
+    existing path, or one another unfinished job claims, asks first (No = not queued)."""
     if os.path.isdir(output_path):
         show_message(
             parent, "Choose a File Name",
@@ -258,44 +265,35 @@ def confirm_output_path(parent, output_path, input_file, claimed=False):
     return True
 
 
-# Audio-only, built off the app's own audio-extension list (same as Muxing's Add Stream(s));
-# "All Files" so an audio track inside a video file can be picked too.
-_AUDIO_BROWSE_FILTER = "Audio Files (%s);;All Files (*.*)" % " ".join(
-    "*" + ext for ext in sorted(formats.AUDIO_EXTENSIONS))
-_PICKER_LIST_HEIGHT = 150     # reference px: room for about five rows before it scrolls
+# Each kind's files, plus "All Files" so a track inside a video can be picked.
+BROWSE_FILTERS = {
+    "audio": "Audio Files (%s);;All Files (*.*)" % " ".join("*" + ext for ext in sorted(formats.AUDIO_EXTENSIONS)),
+    "subtitle": "Subtitle Files (%s);;All Files (*.*)" % " ".join("*" + ext for ext in formats.SUBTITLE_EXTENSIONS),
+}
+_PICKER_LIST_HEIGHT = 150     # reference px: about five rows before it scrolls
 
 
-class AudioStreamPickerDialog(MessageDialog):
-    """Encoding's "Choose Stream(s)": nothing in it but the tracks — a
-    `TrackListBox` (one checkbox per audio stream, ticked = included in the
-    output, drag a row to reorder), then **one row of buttons** — Add Stream(s),
-    Remove Stream(s), OK, Cancel, left to right (the first two at the left edge, the
-    standard two at the right). No title, no explanation.
-
-    It edits a *copy* of the list, so Cancel discards everything — ticks, added
-    and removed tracks, the order. Rows are the same shape of entry Muxing's
-    boxes use, `{"id", "source", "file", "index", "stream", "name"}`, so both
-    label them with `tracklist.row_label`. Add Stream(s) browses another file,
-    probes it off the GUI thread and appends its audio stream(s) (a file with
-    several asks which, via `ExternalStreamPickerDialog`) ticked, as in Muxing;
-    Remove Stream(s) takes every ticked row out of the list, the source file's
-    own included. The track numbers follow the order, which is the output's.
-
-    OK gives `chosen` (the ticked ids) and `result_entries` (the list as it now
-    is); with rows but none ticked, the first is ticked instead of closing — "no
-    audio" is Strip Audio's job. Cancel/Escape gives None."""
+class StreamPickerDialog(MessageDialog):
+    """Encoding's "Choose Stream(s)" (audio or subtitle): a `TrackListBox` of streams (ticked =
+    included, drag to reorder) and one button row: Add Stream(s), Remove Stream(s), OK, Cancel.
+    It edits a copy, so Cancel discards everything. Add browses a file, probes it off the GUI
+    thread and appends its stream(s) ticked; Remove takes out every ticked row. OK gives
+    `chosen` and `result_entries` — `chosen` may be empty, for either kind: the caller (Strip
+    Video/Audio/Subtitles) treats that the same as stripping the stream; Cancel gives None."""
 
     SHOW_HEADER = False
-    WIDTH = 500      # one row holds Add, Remove, OK and Cancel; 400 was two buttons short
+    WIDTH = 476           # one row holds Add, Remove, OK and Cancel — tight, see SIDE_MARGIN
+    SIDE_MARGIN = 12      # narrower than the default 20: only the button row needs the width
 
-    def __init__(self, parent, entries, included, start_dir=""):
+    def __init__(self, parent, kind, entries, included, start_dir=""):
+        self._kind = kind
         self._entries = list(entries)
         self._initial_checked = set(included)
         self._start_dir = start_dir  # where Add Stream(s)'s file dialog opens (the tab's output folder)
         self._finished = False       # an Add Stream(s) probe landing after OK/Cancel is dropped
         self.chosen = None
         self.result_entries = None
-        super().__init__(parent, "Choose Audio Streams", "", buttons=("OK", "Cancel"))
+        super().__init__(parent, f"Choose {kind.capitalize()} Streams", "", buttons=("OK", "Cancel"))
 
     def _build_extra(self, body):
         self.box = TrackListBox()
@@ -305,8 +303,7 @@ class AudioStreamPickerDialog(MessageDialog):
         self._refresh(self._initial_checked)
 
     def _build_leading_buttons(self, row):
-        """Add Stream(s) then Remove Stream(s), on the left of the one bottom row
-        (OK and Cancel follow at the right)."""
+        """Add Stream(s) and Remove Stream(s), at the left of the button row."""
         add_btn = button("Add Stream(s)", width=button_width_for(["Add Stream(s)"]))
         add_btn.clicked.connect(self._add_stream)
         row.addWidget(add_btn)
@@ -315,11 +312,11 @@ class AudioStreamPickerDialog(MessageDialog):
         row.addWidget(remove_btn)
 
     def _refresh(self, checked=None):
-        """Shows `self._entries` in the box, numbered by position; `checked` (default:
-        whatever is ticked now) says which rows are ticked."""
+        """Show `self._entries` numbered by position; `checked` (default: the current ticks)
+        says which rows are ticked."""
         if checked is None:
             checked = set(self.box.checked_ids())
-        items = [{"id": entry["id"], "label": row_label("audio", entry, number)}
+        items = [{"id": entry["id"], "label": row_label(self._kind, entry, number)}
                  for number, entry in enumerate(self._entries, start=1)]
         self.box.set_items(items, checked=checked)
 
@@ -338,51 +335,52 @@ class AudioStreamPickerDialog(MessageDialog):
         self._refresh(set(self.box.checked_ids()) - ticked)
 
     def _add_stream(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Audio Source", self._start_dir, _AUDIO_BROWSE_FILTER)
+        path, _ = QFileDialog.getOpenFileName(self, f"Select {self._kind.capitalize()} Source", self._start_dir,
+                                              BROWSE_FILTERS[self._kind])
         if path:
             run_async(probe_media, lambda info: self._stream_probed(path, info), path)
 
     def _stream_probed(self, path, info):
-        """The browsed-in file's probe landed: append its audio stream(s)."""
+        """The browsed-in file's probe landed: append its stream(s) of the kind."""
         if self._finished:
             return
-        streams = (info or {}).get("audio_streams") or []
+        streams = [stream for stream in (info or {}).get(f"{self._kind}_streams") or []
+                   if self._kind != "subtitle" or stream.get("codec_name") in formats.FFPROBE_SUBTITLE]
         if not streams:
             show_message(self, "No Matching Streams",
-                         f"\u201c{os.path.basename(path)}\u201d has no audio streams to add.")
+                         f"\u201c{os.path.basename(path)}\u201d has no {self._kind} streams to add.")
             return
         if len(streams) > 1:
-            picked = pick_external_streams(self, "audio", streams, lambda s: describe_stream("audio", s))
+            picked = pick_external_streams(self, self._kind, streams, lambda s: describe_stream(self._kind, s))
             if picked is None:
                 return
             streams = [s for s in streams if s["index"] in picked]
         name = os.path.basename(path.replace("\\", "/"))
         added = [{"id": f"ext:{uuid.uuid4().hex[:8]}", "source": "external", "file": path,
-                  "index": stream["index"], "stream": stream, "name": name}
+                  "index": stream["index"], "stream": stream, "name": name,
+                  "start_time": (info or {}).get("start_time")}
                  for stream in streams]
         self._entries += added
         self._refresh(set(self.box.checked_ids()) | {entry["id"] for entry in added})
-        # The new rows are at the bottom: bring them into view once the list has laid out.
+        # The new rows are at the bottom: scroll to them once laid out.
         bar = self.box.scroll.verticalScrollBar()
         QTimer.singleShot(0, lambda: bar.setValue(bar.maximum()))
 
     def _dismiss(self, choice):
         if choice == "OK":
-            chosen = set(self.box.checked_ids())
-            if not chosen and self.box.item_ids():
-                self.box.set_checked(self.box.item_ids()[0], True)
-                return
-            self.chosen = chosen
+            # Nothing ticked is a real, confirmable choice here — Strip Video/Audio/Subtitles
+            # picks it up as one (`EncodingTab._open_stream_picker`/`_open_sub_picker`), not a
+            # dead end the dialog has to steer the user away from.
+            self.chosen = set(self.box.checked_ids())
             self.result_entries = list(self._entries)
         self._finished = True
         super()._dismiss(choice)
 
 
-def choose_audio_streams(parent, entries, included, start_dir=""):
-    """Opens the picker on `entries` (ticked = `included`, a set of ids), its Add
-    Stream(s) browsing from `start_dir`; `(entries, chosen ids)` as edited, or None
-    if cancelled."""
-    dialog = AudioStreamPickerDialog(parent, entries, included, start_dir)
+def choose_streams(parent, kind, entries, included, start_dir=""):
+    """Open the `kind` ("audio" / "subtitle") picker on `entries` (`included` ticked), Add
+    Stream(s) browsing from `start_dir`; `(entries, chosen ids)`, or None if cancelled."""
+    dialog = StreamPickerDialog(parent, kind, entries, included, start_dir)
     dialog.show_modal()
     if dialog.chosen is None:
         return None
@@ -390,12 +388,8 @@ def choose_audio_streams(parent, entries, included, start_dir=""):
 
 
 class ExternalStreamPickerDialog(MessageDialog):
-    """Muxing's "Add Stream": shown only once a browsed-in file turns out to
-    have more than one track of the requested kind (a single match is added
-    straight away, no dialog needed). One checkbox per track, all unchecked
-    to start — unlike `AudioStreamPickerDialog`, there's no "already
-    included" set to pre-check, since every row here is brand new. OK/"Add"
-    never returns an empty set; Cancel/Escape returns None."""
+    """Muxing's "Add Stream(s)" when the browsed file has several tracks of the kind: one
+    unchecked box per track. OK never returns an empty set; Cancel / Escape returns None."""
 
     def __init__(self, parent, kind, streams, describe):
         self._streams = streams
@@ -434,9 +428,8 @@ class ExternalStreamPickerDialog(MessageDialog):
 
 
 def pick_external_streams(parent, kind, streams, describe):
-    """Opens the picker for a file just browsed in via "Add Stream"; the
-    chosen index set, or None if cancelled. `describe(stream)` renders one
-    row's label."""
+    """Open the picker for a browsed-in file; the chosen index set, or None if cancelled.
+    `describe(stream)` renders a row's label."""
     dialog = ExternalStreamPickerDialog(parent, kind, streams, describe)
     dialog.show_modal()
     return getattr(dialog, "chosen", None)

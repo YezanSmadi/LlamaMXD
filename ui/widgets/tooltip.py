@@ -1,12 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""A themed hover tooltip for option controls, attached with `tip(widget, text)`.
-
-Mirrors `carousel._InfoTooltip`'s look (dark body, primary border) but is
-shared and driven by real QWidget Enter/Leave events rather than a manual
-`mouseMoveEvent` hit-test, since every caller here is an actual widget
-(Dropdown, CheckBox, Switch, SegmentedButton, QSlider, ...). Installed as an
-event filter, so it never touches a control's own hover/paint logic."""
+"""A themed hover tooltip, attached with `tip(widget, text)`: one shared popup driven by an
+event filter, so it never touches a control's own hover or paint logic."""
 import time
 
 from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPoint, Qt, QTimer, QVariantAnimation
@@ -15,7 +10,7 @@ from PySide6.QtGui import QCursor
 from ui import scale
 from ui import theme as T
 from ui.scale import px
-from ui.widgets.controls import ScaledLabel
+from ui.widgets.text import ScaledLabel
 
 TIP_DELAY_MS = 400       # how long the cursor must sit still over a widget before its tip shows
 _DELAY_MS = TIP_DELAY_MS
@@ -26,8 +21,7 @@ _FADE_MS = 120
 
 
 class _Tooltip(ScaledLabel):
-    """The popup itself — one shared instance for the whole app. Fades in
-    (soft but quick) on every show; hides instantly, no fade out."""
+    """The one shared popup. Fades in on show; hides at once."""
 
     def __init__(self):
         super().__init__(None, Qt.ToolTip | Qt.FramelessWindowHint)
@@ -46,10 +40,7 @@ class _Tooltip(ScaledLabel):
         scale.changed.connect(self._restyle)
 
     def _restyle(self):
-        # Connected to `scale.changed` (this manager's tooltip is one shared,
-        # always-alive widget), which fires on every live-resize step
-        # regardless of which tab is showing: skip the setStyleSheet call
-        # when the text it would set hasn't actually changed.
+        # Runs on every live-resize step: skip setStyleSheet when the text is unchanged.
         css = (
             f"QLabel {{ background: {T.theme.hex('tooltip_bg')}; color: white;"
             f" border: {px(1)}px solid {T.theme.hex('primary')}; border-radius: {px(4)}px;"
@@ -66,20 +57,10 @@ class _Tooltip(ScaledLabel):
 
 
 class _TooltipManager(QObject):
-    """Installed as an event filter on every registered widget: shows the
-    shared popup once the cursor has hovered over a widget *and stopped* for
-    `_DELAY_MS`, hides it on leave / click / disable.
-
-    "Stopped" is judged by sampling `QCursor.pos()` every `_POLL_MS` rather than
-    by watching mouse-move events: a registered widget only receives those with
-    mouse tracking on, and one that is a container (the track box) never sees
-    moves over its children at all. Any move of more than `_STILL_TOLERANCE`
-    pixels restarts the wait; once the tip is up, moving within the widget does
-    not hide it (leaving, clicking or disabling still does).
-
-    `hold(True)` suspends every tooltip (hiding the one showing) until
-    `hold(False)`: a drag that starts on a *child* of a registered widget never
-    sends that widget a press, so the press-hides rule below doesn't cover it."""
+    """Shows the popup once the cursor has hovered over a registered widget and stopped for
+    `_DELAY_MS`; hides it on leave, click or disable. Stillness is sampled from `QCursor.pos()`
+    (a container never gets mouse moves over its children). `hold(True)` suspends every tip,
+    for a drag that starts on a child (the widget never sees that press)."""
 
     def __init__(self):
         super().__init__()
@@ -115,10 +96,8 @@ class _TooltipManager(QObject):
             self._pending = None
             self._hide()
         elif et == QEvent.EnabledChange:
-            # Tooltips still work greyed out (below), but a disabled control
-            # must never still look clickable -- swap the pointing-hand
-            # cursor for a plain arrow while it's disabled, restoring
-            # whatever cursor it actually had the moment it re-enables.
+            # A disabled control keeps its tip but must not look clickable: a plain arrow until
+            # it re-enables.
             self._sync_cursor(obj)
         return False
 
@@ -149,10 +128,8 @@ class _TooltipManager(QObject):
                 widget.setProperty("_tooltip_saved_cursor", None)
 
     def hold(self, held):
-        """Suspends (True) or resumes (False) the tooltips. Suspending hides the
-        popup and cancels the pending one; resuming re-arms the usual hover delay
-        if the cursor is still over the widget last hovered, so the tip comes back
-        after a pause rather than the instant a drag ends."""
+        """Suspend (True) or resume (False) the tips. Resuming re-arms the hover delay if the
+        cursor is still on the last widget, so the tip returns after a pause."""
         self._held = bool(held)
         if held:
             self._timer.stop()
@@ -166,8 +143,7 @@ class _TooltipManager(QObject):
         if self._held:
             return
         widget = self._pending
-        # Deliberately still shown for a disabled (greyed) widget -- knowing
-        # why something is unavailable is exactly when a tip helps most.
+        # Still shown on a disabled widget: that is when "why" matters most.
         if widget is None or not widget.isVisible():
             return
         text = widget.property("_tooltip_text")
@@ -175,9 +151,8 @@ class _TooltipManager(QObject):
             return
         popup = self._popup_widget()
         popup.setText(text)
-        # Width first (clamped to the maximum), then the height *at that width*:
-        # `adjustSize` works the height out at the unclamped hint width, so a
-        # long tip came out too short for the width it was then squeezed to.
+        # Width first (clamped), then the height at that width: `adjustSize` measured at the
+        # unclamped width and cut long tips short.
         width = min(popup.sizeHint().width(), popup.maximumWidth())
         popup.resize(width, popup.heightForWidth(width))
         gap = px(6)
@@ -202,8 +177,7 @@ _manager = None
 
 
 def hold_tips(held):
-    """Hides every tooltip and keeps them hidden until `hold_tips(False)` —
-    for the length of a drag."""
+    """Hide every tip and keep them hidden until `hold_tips(False)` (a drag)."""
     global _manager
     if _manager is None:
         _manager = _TooltipManager()
@@ -211,9 +185,7 @@ def hold_tips(held):
 
 
 def tip(widget, text):
-    """Attach (or update) a hover tooltip on `widget` — shown after a short
-    delay, below the widget, in the app's own themed popup rather than the
-    OS's plain tooltip box."""
+    """Attach (or update) a hover tip on `widget`, in the app's themed popup."""
     global _manager
     if _manager is None:
         _manager = _TooltipManager()
