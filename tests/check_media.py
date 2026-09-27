@@ -149,6 +149,31 @@ def run():
     return report(f"selected-file pipeline ({len(trace)} steps)", check_golden("media", trace))
 
 
+def overlay_steady():
+    """Tone-mapped frames landing swap the pictures only: the chevrons stay lit and the
+    position holds (they used to vanish at each frame until the pointer re-entered)."""
+    problems = []
+    window.show_tab("Encoding")
+    enc = tabs()[1]
+    select(fixture("hdr.mkv"))
+    wait(lambda: enc.carousel.isVisible() and enc.hdr_switch.isEnabled(), 60)
+    enc.carousel.step(5)
+    enc.carousel.enterEvent(None)             # the pointer on the preview: chevrons fade in
+    settle(0.3)
+    switch(True)
+    low, seen = 1.0, set()
+    end = time.monotonic() + 60
+    while time.monotonic() < end and len(hdr_done()) < 10:
+        settle(0.005)
+        low, seen = min(low, enc.carousel._arrow_alpha), seen | {enc.carousel.current_index()}
+    if low < 1.0:
+        problems.append(f"the chevrons dimmed to {low:.2f} while tone-mapped frames landed")
+    if seen != {5}:
+        problems.append(f"the position moved while frames landed: {sorted(seen)}")
+    switch(False)
+    return report("the preview's overlay holds while tone-mapped frames land", problems)
+
+
 def spinner_release():
     """No spinner plays behind an expanded preview. Frames of another size go after the grace,
     all but the first few after the idle time; the first ones stay, at the size needed."""
@@ -201,5 +226,6 @@ def spinner_release():
 
 if __name__ == "__main__":
     run()
+    overlay_steady()
     spinner_release()
     harness.finish()

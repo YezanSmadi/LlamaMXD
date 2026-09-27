@@ -139,6 +139,20 @@ class ThumbnailCarousel(QWidget):
         self._sync_wave()
         self.update()
 
+    def replace_frames(self, frames):
+        """Swap the pictures of the frames on show (the same count; else `set_frames`): the
+        position, chevrons, hover and a slide in progress carry on untouched."""
+        frames = [f for f in (frames or []) if f is not None and not f.isNull()]
+        if not self._frames or len(frames) != len(self._frames):
+            self.set_frames(frames)
+            return
+        changed = {i for i, (old, new) in enumerate(zip(self._frames, frames)) if old is not new}
+        if not changed:
+            return
+        self._frames = frames
+        self._scaled = {key: pix for key, pix in self._scaled.items() if key[0] not in changed}
+        self.update()
+
     def set_strip_state(self, strip_video, strip_audio):
         if (bool(strip_video), bool(strip_audio)) == (self._strip_video, self._strip_audio):
             return

@@ -320,11 +320,8 @@ class EncodingTab(MediaTab):
         if (self.hdr_switch.isChecked() and hdr and self.app.media.hdr_frames_path == self._preview_path
                 and len(hdr) == len(frames)):
             frames = [tone_mapped or raw for tone_mapped, raw in zip(hdr, frames)]
-        if not frames:
-            return
-        index = self.carousel.current_index()
-        self.carousel.set_frames(frames)
-        self.carousel.sync_index(index)
+        if frames:
+            self.carousel.replace_frames(frames)
 
     # ------------------------------------------------------------------ #
     #  The single constraint pass
