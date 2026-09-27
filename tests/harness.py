@@ -89,9 +89,80 @@ def finish():
     kernel32.TerminateProcess(kernel32.GetCurrentProcess(), 0)
 
 
+# Subtitles and chapters. Cues: 1-3s "Hello one", 5-8s "Hello two"; the ASS line 2-6s.
+_SRT = "1\n00:00:01,000 --> 00:00:03,000\nHello one\n\n2\n00:00:05,000 --> 00:00:08,000\nHello two\n"
+_ASS = ("[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n\n[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, "
+        "Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
+        "MarginL, MarginR, MarginV, Encoding\n"
+        "Style: Default,Arial,28,&H0000FFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n"
+        "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:02.00,0:00:06.00,Default,,0,0,0,,Styled line\n")
+_CHAPTERS = (";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=4000\ntitle=Intro\n"
+             "[CHAPTER]\nTIMEBASE=1/1000\nSTART=4000\nEND=10000\ntitle=Main\n")
+
+
+def _sup(width=1920, height=1080, shown=((1.0, 4.0), (6.0, 8.0))):
+    """A Blu-ray PGS (.sup): a white 400x60 bar at the bottom centre of a `width` x `height`
+    canvas, on screen for each `(start, end)` of `shown`. ffmpeg can't make one (it only
+    converts pictures to pictures), so it is written here."""
+    import struct
+
+    def segment(kind, payload, pts):
+        ticks = int(pts * 90000)
+        return b"PG" + struct.pack(">IIBH", ticks, ticks, kind, len(payload)) + payload
+
+    ow, oh = 400, 60
+    x, y = (width - ow) // 2, height - oh - 60
+    # One run of colour 1 per line (00 11LLLLLL LLLLLLLL CC), then end of line (00 00).
+    rle = bytes([0, 0b11000000 | (ow >> 8), ow & 0xFF, 1, 0, 0]) * oh
+    out = b""
+    number = 0
+    for start, end in shown:
+        pcs = struct.pack(">HHBHBBBB", width, height, 0x10, number, 0x80, 0, 0, 1) + struct.pack(">HBBHH", 0, 0, 0, x, y)
+        wds = struct.pack(">BBHHHH", 1, 0, x, y, ow, oh)
+        pds = struct.pack(">BB", 0, 0) + bytes([1, 235, 128, 128, 255])
+        ods = (struct.pack(">HBB", 0, 0, 0xC0) + (len(rle) + 4).to_bytes(3, "big") + struct.pack(">HH", ow, oh) + rle)
+        out += (segment(0x16, pcs, start) + segment(0x17, wds, start) + segment(0x14, pds, start)
+                + segment(0x15, ods, start) + segment(0x80, b"", start))
+        clear = struct.pack(">HHBHBBBB", width, height, 0x10, number + 1, 0x00, 0, 0, 0)
+        out += segment(0x16, clear, end) + segment(0x17, wds, end) + segment(0x80, b"", end)
+        number += 2
+    return out
+
+
+_WRITTEN = {"subs.srt": _SRT.encode(), "subs.ass": _ASS.encode(), "chapters.txt": _CHAPTERS.encode(),
+            "bar.sup": None}
+
+
+def _made_clips():
+    """Clips built from the written fixtures (their paths aren't known until then)."""
+    return {
+        # H.264 (a keyframe every second) + AAC, an eng SRT (Default) and a spa ASS (Forced), two
+        # chapters.
+        "subs.mkv": ["-f", "lavfi", "-i", "testsrc2=s=640x360:r=24:d=10", "-f", "lavfi", "-i", "sine=d=10",
+                     "-i", fixture("subs.srt"), "-i", fixture("subs.ass"), "-i", fixture("chapters.txt"),
+                     "-map", "0", "-map", "1", "-map", "2", "-map", "3", "-map_chapters", "4",
+                     "-c:v", "libx264", "-preset", "ultrafast", "-g", "24", "-c:a", "aac", "-c:s", "copy",
+                     "-metadata:s:s:0", "language=eng", "-metadata:s:s:1", "language=spa",
+                     "-disposition:s:0", "default", "-disposition:s:1", "forced"],
+        # 720p video + the 1080p PGS bar, which shows 1-4s and 6-8s (itsoffset: ffmpeg moves a
+        # .sup's first picture to 0 otherwise).
+        "pgs.mkv": ["-f", "lavfi", "-i", "testsrc2=s=1280x720:r=24:d=10", "-itsoffset", "1", "-i", fixture("bar.sup"),
+                    "-map", "0", "-map", "1", "-c:v", "libx264", "-preset", "ultrafast", "-g", "24", "-c:s", "copy"],
+    }
+
+
 def fixture(name):
     """The path of fixture clip `name`, generated on first use."""
     path = os.path.join(FIXTURES, name)
+    if name in _WRITTEN and not os.path.exists(path):
+        with open(path, "wb") as fh:
+            fh.write(_WRITTEN[name] if _WRITTEN[name] is not None else _sup())
+        return path
+    if name in ("subs.mkv", "pgs.mkv") and not os.path.exists(path):
+        _ffmpeg(*_made_clips()[name], path)
+        return path
     if not os.path.exists(path):
         made = path + ".raw.mkv" if name in _RETAG else path
         _ffmpeg(*_CLIPS[name], made)

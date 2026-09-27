@@ -1,20 +1,25 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
 """Encoding: Overview (container, trim, presets, rundown), Video (encoder, profile, level,
-preset, resolution, FPS, quality, HDR→SDR, Strip) and multi-stream Audio. Never a silent copy:
-`Select` resolves to the source's codec once probed, and a stream left on it blocks the job."""
+preset, resolution, FPS, quality, HDR→SDR, Strip), multi-stream Audio, Subtitles (copied or
+converted, language, Default / Forced, one burned into the picture) and Chapters. Never a silent
+copy of video or audio: `Select` resolves to the source's codec once probed, and a stream left on
+it blocks the job."""
+import os
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSlider, QVBoxLayout, QWidget
 
 from core import formats
 from core.capabilities import av1_preset_range, libplacebo_checked, libplacebo_problem_text, supports_libplacebo
 from ui import scale
-from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow
+from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow, set_line_text
+from ui.tabs.muxing import DEFAULT_TIP, FORCED_TIP, LANGUAGE_TIP
 from ui.widgets.controls import button, field_label, labeled, set_enabled
 from ui.widgets.dropdown import Dropdown, NO_OPTION
 from ui.widgets.text import ClickableLabel, ScaledLabel
 from ui.widgets.toggles import CheckBox, Switch
-from ui.widgets.dialogs import choose_audio_streams, show_message
+from ui.widgets.dialogs import choose_streams, show_message
 from ui.widgets.tooltip import tip
 from ui.tips import (
     AUDIO_CODEC_TIPS,
@@ -46,6 +51,11 @@ _RESOLUTION_TIP = ("Downscales the video, keeping its aspect ratio — the width
                     "only rungs at or below the source's own height are offered.")
 _FPS_TIP = ("Retimes the video to a lower frame rate, duplicating or dropping frames as "
             "needed. Never speeds up: only rates at or below the source's own are offered.")
+_SUBTITLE_TRACK_TIP = "The subtitle track the settings below edit."
+_CHOOSE_SUBTITLES_TIP = ("Pick which subtitle tracks the output includes and in what order (drag to reorder), "
+                         "and add tracks from other files (.srt, .ass, .vtt, .sup...).")
+_BURN_TIP = ("Paints this track into the picture, so it shows on every player and can't be turned off. "
+             "Only one track can be burned in; it isn't also kept as a separate track.")
 
 
 class EncodingTab(MediaTab):
@@ -71,6 +81,15 @@ class EncodingTab(MediaTab):
         self._audio_stream_settings = {}
         self._audio_track_ids = {}
         self._audio_streams_source = None
+        # Subtitles, as audio: the list on offer, the included ids, the one the controls show,
+        # each one's {"language", "default", "forced"} by id, and the one burned in (or None).
+        self._sub_list = []
+        self._sub_included = set()
+        self._active_sub_id = None
+        self._sub_settings = {}
+        self._sub_track_ids = {}
+        self._burn_id = None
+        self._subs_source = None
         # HDR→SDR preview: the file shown and its raw frames (the tone-mapped set is the app's).
         self._preview_path = None
         self._raw_frames = []
@@ -255,6 +274,53 @@ class EncodingTab(MediaTab):
         scale.spacer(right, 4)
         return page
 
+    def build_subtitles(self):
+        """Subtitle Track + Choose Stream(s); then Language, Default, Forced and Burn In for the
+        track shown; Strip Subtitles on the right."""
+        page, left, right = self.stream_page()
+        row1, r1 = hrow(spacing=8)
+        self.sub_track_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(
+            [f"Track 9 ({c})" for c in formats.FFPROBE_SUBTITLE.values()]))
+        self.sub_track_menu.picked.connect(self._on_sub_track_change)
+        tip(self.sub_track_menu, _SUBTITLE_TRACK_TIP)
+        box, self.sub_track_label = labeled("Subtitle Track:", self.sub_track_menu)
+        r1.addWidget(box)
+        self.choose_subs_btn = button("Choose Stream(s)", width=130)
+        self.choose_subs_btn.clicked.connect(self._open_sub_picker)
+        tip(self.choose_subs_btn, _CHOOSE_SUBTITLES_TIP)
+        r1.addWidget(self.choose_subs_btn, 0, Qt.AlignBottom)
+        left.addWidget(row1)
+
+        row2, r2 = hrow(spacing=14)
+        self.sub_language_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(
+            list(formats.SUBTITLE_LANGUAGES.values())))
+        self.sub_language_menu.picked.connect(self._on_sub_setting_change)
+        tip(self.sub_language_menu, LANGUAGE_TIP)
+        box, self.sub_language_label = labeled("Language:", self.sub_language_menu)
+        r2.addWidget(box)
+        self.sub_default_check = CheckBox("Default")
+        self.sub_default_check.clicked.connect(lambda: self._on_sub_setting_change(flag="default"))
+        tip(self.sub_default_check, DEFAULT_TIP)
+        r2.addWidget(self.sub_default_check, 0, Qt.AlignBottom)
+        self.sub_forced_check = CheckBox("Forced")
+        self.sub_forced_check.clicked.connect(self._on_sub_setting_change)
+        tip(self.sub_forced_check, FORCED_TIP)
+        r2.addWidget(self.sub_forced_check, 0, Qt.AlignBottom)
+        self.sub_burn_check = CheckBox("Burn In")
+        self.sub_burn_check.clicked.connect(self._on_burn_toggle)
+        tip(self.sub_burn_check, _BURN_TIP)
+        r2.addWidget(self.sub_burn_check, 0, Qt.AlignBottom)
+        left.addWidget(row2)
+        scale.spacer(left, 2)
+
+        self.strip_subtitles_check = CheckBox("Strip Subtitles", color_key="stop")
+        self.strip_subtitles_check.clicked.connect(self._on_control_change)
+        tip(self.strip_subtitles_check, STRIP_TIP)
+        right.addStretch(1)
+        right.addWidget(self.strip_subtitles_check, 0, Qt.AlignRight)
+        scale.spacer(right, 4)
+        return page
+
     # ------------------------------------------------------------------ #
     #  Change handlers
     # ------------------------------------------------------------------ #
@@ -349,7 +415,9 @@ class EncodingTab(MediaTab):
         self.sub_tab_bar.set_marked("Audio", stripping_audio or audio_absent)
         self.carousel.set_strip_state(stripping_video, stripping_audio or audio_absent)
 
-        # 2. A probe-only passthru codec (DTS / TrueHD) is never snapped away.
+        # 2. A picture subtitle track narrows the containers to Matroska. A probe-only passthru
+        # codec (DTS / TrueHD) is never snapped away.
+        container = self._retarget_format()
         self._retarget(self.encoder_menu, formats.video_codecs_for(container), "Encoder")
         encoder = self.encoder_menu.value()
         tip(self.encoder_menu, VIDEO_CODEC_TIPS.get(encoder, SELECT_VIDEO_CODEC_TIP))
@@ -437,6 +505,9 @@ class EncodingTab(MediaTab):
         set_enabled(self.audio_samplerate_menu, self.audio_samplerate_label,
                     audio_live and not passthru and not audio_unresolved)
 
+        self._sync_subtitles(video_live)
+        self._sync_chapters()
+
         # 6.
         self._refresh_summary()
         self._apply_import_gate(extra=(
@@ -448,13 +519,33 @@ class EncodingTab(MediaTab):
             (self.audio_bitrate_menu, self.audio_bitrate_label),
             (self.audio_channels_menu, self.audio_channels_label),
             (self.audio_samplerate_menu, self.audio_samplerate_label),
+            (self.sub_track_menu, self.sub_track_label),
+            (self.sub_language_menu, self.sub_language_label),
         ))
         # The no-file side only: each enabled state was recomputed above.
         if not self.app.media.current_file_path:
             for widget in (self.crf_slider, self.crf_label, self.crf_low_label, self.crf_high_label,
                            self.strip_video_check, self.strip_audio_check,
-                           self.choose_streams_btn, self.passthru_check, self.passthru_label):
+                           self.choose_streams_btn, self.passthru_check, self.passthru_label,
+                           self.choose_subs_btn, self.strip_subtitles_check, self.sub_default_check,
+                           self.sub_forced_check, self.sub_burn_check):
                 widget.setEnabled(False)
+
+    def _retarget_format(self):
+        """Offer only the containers that can carry every soft subtitle track, toasting a snap."""
+        codecs = [] if self.strip_subtitles_check.isChecked() else [
+            entry["stream"].get("codec_name") for entry in self._soft_subs()]
+        lost = self.format_menu.retarget(formats.containers_for_subtitles(codecs))
+        if lost:
+            stem, extension = os.path.splitext(self.save_entry.text().strip())
+            if extension:
+                set_line_text(self.save_entry, stem + self.format_menu.value())
+            blocking = next((entry["stream"].get("codec") for entry in self._soft_subs()
+                             if not formats.subtitle_codec_arg(lost, entry["stream"].get("codec_name"))), None)
+            if self._ready and blocking:
+                self.app.notify(f"Output Format switched to {self.format_menu.value()} — {lost} can't carry "
+                                f"{blocking} subtitles.", go_to_queue=False)
+        return self.format_menu.value()
 
     def _retarget(self, menu, values, what=None):
         """Point a derived dropdown at a fresh list, toasting a forced snap."""
@@ -601,7 +692,7 @@ class EncodingTab(MediaTab):
 
     def _open_stream_picker(self):
         """Choose Stream(s): the popup edits a copy; OK swaps it in, Cancel changes nothing."""
-        result = choose_audio_streams(self.app, self._audio_list, self._audio_included,
+        result = choose_streams(self.app, "audio", self._audio_list, self._audio_included,
                                      self._output_directory())
         if result is None:
             return
@@ -660,6 +751,152 @@ class EncodingTab(MediaTab):
         self._load_active_audio_stream()
 
     # ------------------------------------------------------------------ #
+    #  Subtitles
+    # ------------------------------------------------------------------ #
+    def _included_subs(self):
+        """The included subtitle entries, in list (= output) order."""
+        return [entry for entry in self._sub_list if entry["id"] in self._sub_included]
+
+    def _burn_entry(self):
+        """The track burned into the picture, if it's included and the video is kept."""
+        if self._burn_id is None or self.strip_video_check.isChecked():
+            return None
+        return next((entry for entry in self._included_subs() if entry["id"] == self._burn_id), None)
+
+    def _soft_subs(self):
+        """The included tracks that stay separate tracks (all but the burned one)."""
+        burned = self._burn_entry()
+        return [entry for entry in self._included_subs() if entry is not burned]
+
+    def _sub_args(self, entry):
+        """A soft track's settings entry (what `ffmpeg_vars` reads)."""
+        settings = self._sub_settings.get(entry["id"], {})
+        return {"source": entry["source"], "file": entry["file"], "index": entry["index"],
+                "codec_name": entry["stream"].get("codec_name"), "language": settings.get("language"),
+                "default": bool(settings.get("default")), "forced": bool(settings.get("forced")),
+                "start_time": entry.get("start_time")}
+
+    def _burn_args(self):
+        entry = self._burn_entry()
+        if entry is None:
+            return None
+        stream = entry["stream"]
+        return {"source": entry["source"], "file": entry["file"], "index": entry["index"],
+                "image": bool(stream.get("image")), "width": stream.get("width"), "height": stream.get("height"),
+                "start_time": entry.get("start_time")}
+
+    def _auto_select_subtitles(self, info):
+        """Seed the source's subtitle tracks once per file, all included with their own
+        language and flags; tracks added from other files stay."""
+        if self.app.media.current_file_path == self._subs_source:
+            return
+        self._subs_source = self.app.media.current_file_path
+        primary = [{"id": f"src:{stream['index']}", "source": "primary", "file": None,
+                    "index": stream["index"], "stream": stream, "name": None}
+                   for stream in info.get("subtitle_streams") or []
+                   if stream.get("codec_name") in formats.FFPROBE_SUBTITLE]
+        external = [entry for entry in self._sub_list if entry["source"] == "external"]
+        external_ids = {entry["id"] for entry in external}
+        kept = {i: v for i, v in self._sub_settings.items() if i in external_ids}
+        self._sub_list = primary + external
+        self._sub_settings = {entry["id"]: self._default_sub_settings(entry["stream"]) for entry in primary}
+        self._sub_settings.update(kept)
+        self._sub_included = {entry["id"] for entry in primary} | (self._sub_included & external_ids)
+        self._burn_id = self._burn_id if self._burn_id in external_ids else None
+        self._active_sub_id = None
+
+    @staticmethod
+    def _default_sub_settings(stream):
+        return {"language": formats.language_code(stream.get("language")),
+                "default": bool(stream.get("default")), "forced": bool(stream.get("forced"))}
+
+    def _open_sub_picker(self):
+        """Choose Stream(s) for subtitles: OK swaps the edited list in, Cancel changes nothing."""
+        result = choose_streams(self.app, "subtitle", self._sub_list, self._sub_included, self._output_directory())
+        if result is None:
+            return
+        entries, chosen = result
+        present = {entry["id"] for entry in entries}
+        for entry in entries:
+            self._sub_settings.setdefault(entry["id"], self._default_sub_settings(entry["stream"]))
+        self._sub_settings = {i: v for i, v in self._sub_settings.items() if i in present}
+        self._sub_list = entries
+        self._sub_included = chosen & present
+        if self._burn_id not in self._sub_included:
+            self._burn_id = None
+        self._sync_controls()
+
+    def _on_sub_track_change(self, label):
+        self._active_sub_id = self._sub_track_ids.get(label)
+        self._sync_controls()
+
+    def _on_sub_setting_change(self, *_args, flag=None):
+        """Language / Default / Forced edited: saved on the active track. Only one track can be
+        the default."""
+        if self._active_sub_id is None:
+            return
+        name = self.sub_language_menu.value()
+        code = next((c for c, n in formats.SUBTITLE_LANGUAGES.items() if n == name), name)
+        default = self.sub_default_check.isChecked()
+        if flag == "default" and default:
+            for settings in self._sub_settings.values():
+                settings["default"] = False
+        self._sub_settings[self._active_sub_id] = {"language": code, "default": default,
+                                                   "forced": self.sub_forced_check.isChecked()}
+        self._sync_controls()
+
+    def _on_burn_toggle(self, *_):
+        on = self.sub_burn_check.isChecked()
+        self._burn_id = self._active_sub_id if on else (None if self._burn_id == self._active_sub_id else self._burn_id)
+        self._sync_controls()
+
+    def _sync_subtitles(self, video_live):
+        """The Subtitles page's part of the constraint pass: the Track list, the active track's
+        settings, and what's live (Burn In needs the video)."""
+        has_file = bool(self.app.media.current_file_path)
+        stripping = self.strip_subtitles_check.isChecked()
+        live = has_file and not stripping
+        included = self._included_subs()
+        self._sub_track_ids = {}
+        labels = []
+        for number, entry in enumerate(self._sub_list, start=1):
+            if entry["id"] in self._sub_included:
+                label = f"Track {number} ({entry['stream'].get('codec') or '?'})"
+                self._sub_track_ids[label] = entry["id"]
+                labels.append(label)
+        self.sub_track_menu.set_values(labels or [NO_OPTION])
+        if self._active_sub_id not in self._sub_track_ids.values():
+            self._active_sub_id = included[0]["id"] if included else None
+        active = next((l for l, i in self._sub_track_ids.items() if i == self._active_sub_id), None)
+        if active:
+            self.sub_track_menu.set(active)
+        settings = self._sub_settings.get(self._active_sub_id, {})
+        languages = list(formats.SUBTITLE_LANGUAGES.values())
+        if self._active_sub_id is not None:
+            name = formats.language_name(settings.get("language"))
+            if name not in languages:
+                languages.append(name)
+            self.sub_language_menu.set_values(languages)
+            self.sub_language_menu.set(name)
+        else:
+            self.sub_language_menu.set_values([NO_OPTION])
+        burned = self._active_sub_id is not None and self._active_sub_id == self._burn_id
+        self.sub_default_check.setChecked(bool(settings.get("default")) and not burned)
+        self.sub_forced_check.setChecked(bool(settings.get("forced")) and not burned)
+        self.sub_burn_check.setChecked(burned and video_live)
+
+        editable = live and self._active_sub_id is not None
+        set_enabled(self.sub_track_menu, self.sub_track_label, editable)
+        self.choose_subs_btn.setEnabled(live)
+        # A burned track is part of the picture: no language or flags of its own.
+        set_enabled(self.sub_language_menu, self.sub_language_label, editable and not burned)
+        self.sub_default_check.setEnabled(editable and not burned)
+        self.sub_forced_check.setEnabled(editable and not burned)
+        self.sub_burn_check.setEnabled(editable and video_live)
+        self.strip_subtitles_check.setEnabled(has_file and bool(self._sub_list))
+        self.sub_tab_bar.set_marked("Subtitles", stripping)
+
+    # ------------------------------------------------------------------ #
     #  Rundown
     # ------------------------------------------------------------------ #
     def _refresh_summary(self):
@@ -690,6 +927,8 @@ class EncodingTab(MediaTab):
                 bits.append(f"{self.fps_menu.value()}fps")
             if self.hdr_switch.isChecked():
                 bits.append("SDR")
+            if self._burn_entry() is not None:
+                bits.append("subs burned in")
             video = (" · ".join(bits), None)
 
         if self.strip_audio_check.isChecked():
@@ -747,6 +986,7 @@ class EncodingTab(MediaTab):
         self._sync_controls()
         self._auto_select_codecs(info)
         self._auto_select_audio_streams(info)
+        self._auto_select_subtitles(info)
         self._sync_controls()
 
     def _auto_select_codecs(self, info):
@@ -790,6 +1030,10 @@ class EncodingTab(MediaTab):
             "max_cll": self.app.media.info.get("max_cll"),
             "strip_video": self.strip_video_check.isChecked(),
             "strip_audio": self.strip_audio_check.isChecked(),
+            "source_width": self.app.media.info.get("width"),
+            "source_start": self.app.media.info.get("start_time"),
+            "subtitle_tracks": [self._sub_args(entry) for entry in self._soft_subs()],
+            "burn_subtitle": self._burn_args(),
             # In output order; `source` / `file` say which input a stream is read from.
             "audio_streams": [
                 dict(self._audio_stream_settings.get(entry["id"], {}), id=entry["id"],

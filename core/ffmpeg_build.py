@@ -2,7 +2,11 @@
 # Copyright (C) 2026 Yezan Smadi
 
 """Builds the ffmpeg-python Stream for a job (`core.ffmpeg_vars.JobVars`): one builder per tab
-(Muxing is always `-c copy`), plus `compile_command()` for the full argv. Runs nothing."""
+(Muxing is always `-c copy`), plus `compile_command()` for the full argv and
+`prepare_commands()` for the steps that must run first. Runs nothing."""
+
+import base64
+import os
 
 import ffmpeg
 
@@ -65,6 +69,172 @@ def _input_positions(streams):
     return {node: position for position, node in enumerate(inputs)}
 
 
+# --------------------------------------------------------------------------- #
+#  Subtitles
+# --------------------------------------------------------------------------- #
+def _prepares(job, track):
+    """Whether an external text track goes through a prep step: trimmed and converted. ffmpeg
+    only drops the cues before a trim's start from a copied stream; converted from a trimmed
+    input of its own, the cues came out shifted by the one in progress at the cut."""
+    return (track["source"] == "external" and bool(track["file"]) and bool(job.start_secs)
+            and track["codec_arg"] != "copy" and track["text_muxer"] is not None)
+
+
+def _prepared_path(output_path, position, extension):
+    """The prep step's output for subtitle track `position`, beside the job's own output."""
+    root, _ext = os.path.splitext(output_path)
+    return f"{root}.sub{position}{extension}"
+
+
+def prepare_commands(job, output_path):
+    """`[(argv, path)]`: the steps to run before `compile_command`'s argv (same `output_path`),
+    each writing `path`, which the job deletes when it ends. A trimmed external text track is
+    first cut by a copy into its own format; the main command then converts that file."""
+    if job.strip_subtitles:
+        return []
+    out = []
+    for position, track in enumerate(job.subtitle_tracks):
+        if not _prepares(job, track):
+            continue
+        muxer, extension = track["text_muxer"]
+        path = _prepared_path(output_path, position, extension)
+        argv = [tool_path("ffmpeg"), "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
+                "-ss", job.start_time]
+        if track["start_time"]:
+            argv += ["-itsoffset", str(track["start_time"])]
+        argv += ["-i", track["file"]]
+        if job.duration_secs:
+            argv += ["-t", job.duration_time]
+        argv += ["-map", f"0:s:{track['index']}", "-c", "copy", "-copypriorss", "0", "-f", muxer, path]
+        out.append((argv, path))
+    return out
+
+
+def _subtitle_input(job, track, position, primary, input_kwargs, cache, output_path):
+    """`(input, index)` a subtitle track reads from: the primary; a prepared file; or an external
+    file of its own, trimmed like the primary and moved back to its own start (ffmpeg rebases
+    every input to 0, which moved a .sup's first picture to the start)."""
+    if track["source"] != "external" or not track["file"]:
+        return primary, track["index"]
+    if _prepares(job, track):
+        path, kwargs, index = _prepared_path(output_path, position, track["text_muxer"][1]), {}, 0
+    else:
+        path, kwargs, index = track["file"], dict(input_kwargs), track["index"]
+        if track["start_time"]:
+            kwargs["itsoffset"] = track["start_time"]
+    key = ("subtitle", path, tuple(sorted(kwargs.items())))
+    if key not in cache:
+        cache[key] = ffmpeg.input(path, **kwargs)
+    return cache[key], index
+
+
+def _map_subtitles(job, primary, input_kwargs, output_path, streams, output_kwargs, cache):
+    """Append every subtitle track's `-map` and its codec, language and Default / Forced flags.
+    Returns `[(output position, input, index)]` for their tags."""
+    mapped = []
+    if job.strip_subtitles:
+        return mapped
+    for i, track in enumerate(job.subtitle_tracks):
+        source, index = _subtitle_input(job, track, i, primary, input_kwargs, cache, output_path)
+        streams.append(source[f"s:{index}"])
+        mapped.append((i, source, index))
+        output_kwargs[f"c:s:{i}"] = track["codec_arg"]
+        output_kwargs[f"metadata:s:s:{i}"] = f"language={track['language']}"
+        output_kwargs[f"disposition:s:{i}"] = track["disposition"]
+        # A copied track from a trimmed input of its own keeps the cue in progress at the cut
+        # (and ffmpeg then shifts the whole file) unless the packets before it are dropped.
+        if track["source"] == "external" and job.start_secs and track["codec_arg"] == "copy":
+            output_kwargs[f"copypriorss:s:{i}"] = 0
+    return mapped
+
+
+def _filter_path(path):
+    """A file path as a filtergraph option value: the option level escapes \\ ' :, and the
+    graph level quotes it (which also covers [ ] , ;), an apostrophe as '\\''."""
+    value = path.replace("\\", "/")
+    for char in "\\':":
+        value = value.replace(char, "\\" + char)
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _text_burn_vf(job, burn):
+    """The `subtitles` filter for a burned text track. It reads the file itself, on the file's
+    own timeline, so a trimmed picture is moved back there for it and returned after."""
+    path = burn["file"] if burn["source"] == "external" and burn["file"] else job.input_file
+    offset = job.start_secs + (0 if burn["source"] == "external" else (job.source_start or 0))
+    parts = [f"subtitles={_filter_path(path)}:si={burn['index']}"]
+    if offset:
+        parts = [f"setpts=PTS+{offset:g}/TB", *parts, "setpts=PTS-STARTPTS"]
+    return ",".join(parts)
+
+
+def _vf_node(stream, vf):
+    """`stream` through a `-vf` style chain ("name=k=v:k=v,name=a:b") as ffmpeg-python filters,
+    for a graph that needs `-filter_complex` (an overlay)."""
+    for part in vf.split(","):
+        name, _, options = part.partition("=")
+        args, kwargs = [], {}
+        for option in options.split(":") if options else []:
+            key, sep, value = option.partition("=")
+            if sep:
+                kwargs[key] = value
+            else:
+                args.append(option)
+        stream = stream.filter(name, *args, **kwargs)
+    return stream
+
+
+def _image_burn(job, burn, video, primary, input_kwargs, cache):
+    """`video` with a picture subtitle track painted over it, the pictures scaled from their own
+    canvas to the video's size."""
+    if burn["source"] == "external" and burn["file"]:
+        kwargs = dict(input_kwargs)
+        if burn["start_time"]:
+            kwargs["itsoffset"] = burn["start_time"]
+        key = ("burn", burn["file"], tuple(sorted(kwargs.items())))
+        if key not in cache:
+            cache[key] = ffmpeg.input(burn["file"], **kwargs)
+        source = cache[key]
+    else:
+        source = primary
+    pictures = source[f"s:{burn['index']}"]
+    size = (job.source_width, job.source_height)
+    if all(size) and (burn["width"], burn["height"]) != size:
+        pictures = pictures.filter("scale", *size)
+    return ffmpeg.overlay(video, pictures, eof_action="pass")
+
+
+# --------------------------------------------------------------------------- #
+#  Chapters
+# --------------------------------------------------------------------------- #
+def _chapter_kwargs(job, streams, primary):
+    """`-map_chapters`: -1 to strip; the ffmetadata input `compile_command` adds last for edited
+    chapters; else the source's own when other files are inputs too (ffmpeg would take the first
+    input that has any)."""
+    positions = _input_positions(streams)
+    if job.strip_chapters or job.chapters == []:
+        return {"map_chapters": -1}
+    if job.chapters:
+        return {"map_chapters": len(positions)}
+    if len(positions) > 1:
+        own = positions.get(primary.node)
+        return {"map_chapters": own if job.source_has_chapters and own is not None else -1}
+    return {}
+
+
+def _ffmetadata(chapters):
+    """An FFMETADATA1 document holding `chapters` (seconds -> milliseconds)."""
+    def escape(text):
+        for char in "\\=;#\n":
+            text = text.replace(char, "\\" + char)
+        return text
+    lines = [";FFMETADATA1"]
+    for chapter in chapters:
+        lines += ["[CHAPTER]", "TIMEBASE=1/1000", f"START={round(chapter['start'] * 1000)}",
+                  f"END={round(chapter['end'] * 1000)}", f"title={escape(chapter['title'])}"]
+    return "\n".join(lines) + "\n"
+
+
 def build_mux_command(job, output_path=None):
     """Muxing job -> Stream: one `-map` per checked track (the primary or an added file), all
     `-c copy`. Writes to `output_path` if given, else the job's own."""
@@ -83,6 +253,11 @@ def build_mux_command(job, output_path=None):
             src = _mux_input(entry, primary, input_kwargs, external_cache)
             streams.append(src[f"a:{entry['index']}"])
 
+    # Tags travel with a copy by default: a `-map_metadata` here would switch that off for
+    # every stream.
+    _map_subtitles(job, primary, input_kwargs, output_path or job.output_path, streams, output_kwargs,
+                   external_cache)
+    output_kwargs.update(_chapter_kwargs(job, streams, primary))
     output_kwargs["c"] = "copy"
     # Global, not `-strict:a`: see build_encode_command.
     output_kwargs["strict"] = "-2"
@@ -133,6 +308,7 @@ def build_encode_command(job, output_path=None):
             # -fps_mode needs ffmpeg 5.1+; older builds get -vsync, same behaviour.
             output_kwargs["fps_mode" if supports_fps_mode() else "vsync"] = "cfr"
         video_filters = []
+        burn = job.burn_subtitle
         if job.hdr_to_sdr:
             if not supports_libplacebo():
                 # BT.2390 or nothing, never a lesser curve. Normally caught at queue time; this
@@ -146,9 +322,23 @@ def build_encode_command(job, output_path=None):
             # libplacebo_tonemap_vf).
             has_reliable_metadata = job.mastering_max_nits is not None and bool(job.max_cll)
             video_filters.append(libplacebo_tonemap_vf(peak_detect=not has_reliable_metadata))
-        if job.scale_vf:
-            # After the tone-map, which already ends on a software yuv420p frame.
-            video_filters.append(job.scale_vf)
+        if burn and burn["image"]:
+            # Pictures overlay the (tone-mapped) frame, so the chain becomes a graph.
+            video = stream["v"]
+            if video_filters:
+                video = _vf_node(video, ",".join(video_filters))
+            video = _image_burn(job, burn, video, stream, input_kwargs, external_cache)
+            if job.scale_vf:
+                video = _vf_node(video, job.scale_vf)
+            streams[-1] = video
+            video_filters = []
+        else:
+            if burn:
+                # After the tone-map: text drawn onto the HDR picture would be tone-mapped too.
+                video_filters.append(_text_burn_vf(job, burn))
+            if job.scale_vf:
+                # After the tone-map, which already ends on a software yuv420p frame.
+                video_filters.append(job.scale_vf)
         if video_filters:
             output_kwargs["vf"] = ",".join(video_filters)
 
@@ -183,11 +373,16 @@ def build_encode_command(job, output_path=None):
                 if cfg["language"]:
                     output_kwargs[f"metadata:s:a:{i}"] = f"language={cfg['language']}"
 
-    if copied:
+    subtitles = _map_subtitles(job, stream, input_kwargs, output_path or job.output_path, streams,
+                               output_kwargs, external_cache)
+    if copied or subtitles:
         # A copied track keeps its own tags, mapped from the input it is actually read from.
         positions = _input_positions(streams)
         for i, source, cfg in copied:
             output_kwargs[f"map_metadata:s:a:{i}"] = f"{positions[source.node]}:s:a:{cfg['src_index']}"
+        for i, source, index in subtitles:
+            output_kwargs[f"map_metadata:s:s:{i}"] = f"{positions[source.node]}:s:s:{index}"
+    output_kwargs.update(_chapter_kwargs(job, streams, stream))
 
     # Global, not `-strict:a`: an experimental codec-in-container pairing (TrueHD in MP4) is
     # refused by the muxer's own compliance check, which `-strict:a` doesn't reach.
@@ -211,4 +406,11 @@ def compile_command(job, output_path=None, loglevel="error"):
     prefix = _runner_flags(loglevel)
     if uses_hdr_tonemap(job):
         prefix += VULKAN_DEVICE_FLAGS
-    return ffmpeg.compile(graph, cmd=[tool_path("ffmpeg"), *prefix])
+    args = ffmpeg.compile(graph, cmd=[tool_path("ffmpeg"), *prefix])
+    if job.chapters and not job.strip_chapters:
+        # Edited chapters come in as an FFMETADATA input after the others (a data: URI, so
+        # there's no file to write or clean up); `-map_chapters` already names its position.
+        document = base64.b64encode(_ffmetadata(job.chapters).encode("utf-8")).decode("ascii")
+        last = max(i for i, arg in enumerate(args) if arg == "-i")
+        args[last + 2:last + 2] = ["-f", "ffmetadata", "-i", f"data:text/plain;base64,{document}"]
+    return args

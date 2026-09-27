@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QApplication, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget,
 )
 
+from core import formats
 from ui import scale
 from ui import theme as T
 from ui.scale import px
@@ -27,12 +28,17 @@ _DRAGGED_OPACITY = 0.28     # the row's own slot, left in the list as a placehol
 # Row text, for both users' entries: {"id", "source", "file", "index", "stream", "name"}.
 def stream_details(kind, stream, compact=False):
     """One stream's details in row order. Video: codec, profile, level, size, fps, HDR kind,
-    bit depth + chroma, bit rate, language. Audio: codec, channels, rate, language. `compact`
-    (the narrow "Add Stream(s)" picker): fewer video fields, HDR only when it is."""
+    bit depth + chroma, bit rate, language. Audio: codec, channels, rate, language. Subtitle:
+    codec, language, Default / Forced, title. `compact` (the narrow "Add Stream(s)" picker):
+    fewer video fields, HDR only when it is."""
     if kind == "video" and compact:
         bits = [stream.get("codec") or stream.get("codec_name"), stream.get("profile"),
                 stream.get("resolution_display"),
                 stream.get("hdr_display") if stream.get("hdr") else None, stream.get("language")]
+    elif kind == "subtitle":
+        bits = [stream.get("codec"), formats.language_name(stream.get("language")),
+                "Default" if stream.get("default") else None, "Forced" if stream.get("forced") else None,
+                stream.get("title")]
     elif kind == "video":
         level, fps = stream.get("level"), stream.get("fps_display")
         bits = [stream.get("codec") or stream.get("codec_name"), stream.get("profile"),
@@ -53,11 +59,15 @@ def describe_stream(kind, stream):
 
 def row_label(kind, entry, number):
     """A row's text. `number` is the row's place in the list (removing a track renumbers the
-    rest); a track from another file says so."""
+    rest); a track from another file says so. A subtitle entry's own language / Default /
+    Forced (as edited) stand in for the stream's."""
     bits = [f"Track {number}"]
     if entry["source"] == "external":
         bits.append(f"External: {entry['name']}")
-    bits += stream_details(kind, entry["stream"])
+    stream = entry["stream"]
+    if kind == "subtitle":
+        stream = dict(stream, **{key: entry[key] for key in ("language", "default", "forced") if key in entry})
+    bits += stream_details(kind, stream)
     return "  ·  ".join(bits)
 
 
@@ -149,20 +159,24 @@ class _TrackRow(QWidget):
 
 
 class TrackListBox(BorderedFrame):
-    """`set_items([{"id", "label"}, ...])` updates the rows; empty shows "No tracks available".
+    """`set_items([{"id", "label"}, ...])` updates the rows; empty shows `empty_text`.
     Rows are matched by id (an existing row keeps its tick, so one click never disturbs
     another) and put in the order of `items`. `reset=True` (a new input file) rebuilds every
-    row, so an old file's id can't pass for a pick. A new row starts ticked, unless `checked`
-    (a set of ids) is given, which then sets every row (an undo putting ticks back)."""
+    row, so an old file's id can't pass for a pick. A new row starts ticked (`new_checked`),
+    unless `checked` (a set of ids) is given, which then sets every row (an undo putting ticks
+    back). `reorderable=False` turns dragging off (chapters keep their time order)."""
 
     changed = Signal()          # a row's checkbox was toggled by the user
     reordered = Signal(list)    # a drag ended with the rows in a new order: every id, top to bottom
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, min_width=340, reorderable=True, new_checked=True,
+                 empty_text="No tracks available"):
         super().__init__(parent, color_key="secondary")
+        self._reorderable = reorderable
+        self._new_checked = new_checked
         # Fixed height, not a minimum: the scroll area's hint follows its rows, so extra rows
         # would grow the box (and shrink the preview). Width is a floor; the row stretches it.
-        scale.bounds(self, min_w=340)
+        scale.bounds(self, min_w=min_width)
         scale.fixed(self, h=92)
         self._rows = {}  # id -> (row_widget, CheckBox)
         self._drag = None   # while a row is being dragged: see _begin_drag
@@ -176,7 +190,7 @@ class TrackListBox(BorderedFrame):
         scale.margins(outer, 9, 7, 5, 7)
 
         # Centred in the box, not placed like the list's first row; hidden when there are rows.
-        self.empty_label = ScaledLabel("No tracks available")
+        self.empty_label = ScaledLabel(empty_text)
         self.empty_label.setProperty("role", "empty")
         self.empty_label.setAlignment(Qt.AlignCenter)
         outer.addWidget(self.empty_label, 1, Qt.AlignCenter)
@@ -210,7 +224,7 @@ class TrackListBox(BorderedFrame):
                 if checked is not None:
                     check.setChecked(rid in checked)
             else:
-                row = self._add_row(item, checked=(rid in checked) if checked is not None else True)
+                row = self._add_row(item, checked=(rid in checked) if checked is not None else self._new_checked)
             # Move a row only when it isn't already in place.
             at = self._list_layout.itemAt(i)
             if at is None or at.widget() is not row:
@@ -242,7 +256,7 @@ class TrackListBox(BorderedFrame):
 
     def _begin_drag(self, row, global_pos):
         """Picks `row` up. False (drag refused) with fewer than two rows."""
-        if len(self._rows) < 2 or self._drag is not None:
+        if not self._reorderable or len(self._rows) < 2 or self._drag is not None:
             return False
         viewport = self.scroll.viewport()
         top_left = row.mapTo(viewport, QPoint(0, 0))

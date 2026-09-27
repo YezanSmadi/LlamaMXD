@@ -232,11 +232,45 @@ def _describe_audio_stream(index, stream):
     }
 
 
+def _describe_subtitle_stream(index, stream):
+    """One `subtitle_streams` entry: codec (display and raw), picture or text, size (a picture
+    format's canvas), language, title and the Default / Forced flags. `index` is the position
+    among subtitle streams (`-map 0:s:<index>`, the `subtitles` filter's `si`)."""
+    name = stream.get("codec_name")
+    tags = stream.get("tags") or {}
+    disposition = stream.get("disposition") or {}
+    return {
+        "index": index,
+        "codec": formats.FFPROBE_SUBTITLE.get(name) or (name.upper() if name else None),
+        "codec_name": name,
+        "image": name in formats.IMAGE_SUBTITLES,
+        "width": stream.get("width") or None,
+        "height": stream.get("height") or None,
+        "language": tags.get("language"),
+        "title": tags.get("title"),
+        "default": bool(disposition.get("default")),
+        "forced": bool(disposition.get("forced")),
+    }
+
+
+def _chapter_list(chapters):
+    """ffprobe's chapters as `[{"start", "end", "title"}]` in seconds, sorted by start."""
+    out = []
+    for chapter in chapters or []:
+        start, end = _to_float(chapter.get("start_time")), _to_float(chapter.get("end_time"))
+        if start is None:
+            continue
+        title = ((chapter.get("tags") or {}).get("title") or "").strip() or None
+        out.append({"start": start, "end": end, "title": title})
+    return sorted(out, key=lambda chapter: chapter["start"])
+
+
 def probe_media(path):
     """Best-effort ffprobe of `path`: container, first video/audio stream's codec and details,
     size, fps, HDR (+ its static metadata), duration, file size, every stream
-    (`video_streams` / `audio_streams`), and the container's title / chapter count / bit rate /
-    creation time (the naming tokens). Any field may be None.
+    (`video_streams` / `audio_streams` / `subtitle_streams`), the chapters (`chapter_list`), the
+    container's start time, and its title / chapter count / bit rate / creation time (the naming
+    tokens). Any field may be None.
 
     `has_video` / `has_audio` say whether a stream of that kind exists at all: False only when
     the probe ran and found none, None when it never completed ("unknown", never "absent").
@@ -248,10 +282,11 @@ def probe_media(path):
         "width": None, "height": None, "duration": None, "file_size": None,
         "audio_channels": None, "audio_sample_rate": None, "audio_bitrate": None,
         "has_video": None, "has_audio": None, "previewable": None, "fps": None,
-        "video_streams": [], "audio_streams": [],
+        "video_streams": [], "audio_streams": [], "subtitle_streams": [], "chapter_list": [],
         "mastering_max_nits": None, "mastering_min_nits": None,
         "max_cll": None, "max_fall": None,
         "title": None, "chapters": None, "bit_rate": None, "creation_time": None,
+        "start_time": None,
     }
     if not path or not os.path.exists(path):
         return unknown
@@ -268,8 +303,9 @@ def probe_media(path):
             "stream=codec_type,codec_name,profile,level,channels,sample_rate,"
             "bit_rate,width,height,color_transfer,color_primaries,r_frame_rate,"
             "pix_fmt,bits_per_raw_sample:"
-            "stream_disposition=attached_pic:stream_tags=language:format=duration,start_time,bit_rate:"
-            "format_tags=title,creation_time:chapter=id",
+            "stream_disposition=attached_pic,default,forced:stream_tags=language,title:"
+            "format=duration,start_time,bit_rate:format_tags=title,creation_time:"
+            "chapter=id,start_time,end_time:chapter_tags=title",
             path)
         streams = payload.get("streams", [])
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
@@ -302,9 +338,12 @@ def probe_media(path):
     info["title"] = (tags.get("title") or "").strip() or None
     info["creation_time"] = tags.get("creation_time") or None
     info["chapters"] = len(payload.get("chapters") or []) or None
+    info["chapter_list"] = _chapter_list(payload.get("chapters"))
+    info["start_time"] = _to_float(container_info.get("start_time"))
 
     audio_index = 0
     video_index = 0
+    subtitle_index = 0
     # The singular video/audio fields describe the first stream of each kind; the lists hold all.
     for stream in streams:
         kind, name = stream.get("codec_type"), stream.get("codec_name")
@@ -325,6 +364,9 @@ def probe_media(path):
                 # Static HDR metadata needs its own (frame-level) probe; only worth it for HDR.
                 if info["hdr"]:
                     info.update(_probe_hdr_static_metadata(path))
+        elif kind == "subtitle":
+            info["subtitle_streams"].append(_describe_subtitle_stream(subtitle_index, stream))
+            subtitle_index += 1
         elif kind == "audio":
             info["has_audio"] = True
             info["audio_streams"].append(_describe_audio_stream(audio_index, stream))

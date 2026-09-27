@@ -400,3 +400,74 @@ def containers_for(video_codec, audio_codec):
 def short_name(codec):
     """The codec name without a parenthetical suffix (no current codec has one)."""
     return (codec or "").split(" (")[0]
+
+
+# ---------------------------------------------------------------------- #
+#  Subtitles
+# ---------------------------------------------------------------------- #
+# ffprobe codec_name -> display name, for the subtitle formats this app can carry. Anything
+# else (teletext, closed captions) isn't offered as a track.
+FFPROBE_SUBTITLE = {
+    "subrip": "SRT", "ass": "ASS", "ssa": "SSA", "webvtt": "WebVTT", "mov_text": "MP4 Text",
+    "hdmv_pgs_subtitle": "PGS", "dvd_subtitle": "VobSub", "dvb_subtitle": "DVB",
+}
+# Pictures, not text: they can't be converted, only copied, and only Matroska holds them.
+IMAGE_SUBTITLES = {"hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"}
+# The text format each container's muxer takes (Matroska takes every text format but
+# mov_text, which it gets as SRT).
+_SUBTITLE_TEXT_FORMAT = {".mp4": "mov_text", ".mov": "mov_text", ".webm": "webvtt", ".mkv": "srt"}
+# Standalone subtitle files ("Add Stream(s)" browses these; .idx is VobSub's index, which ffmpeg
+# opens to read its .sub).
+SUBTITLE_EXTENSIONS = (".srt", ".ass", ".ssa", ".vtt", ".sup", ".idx", ".mks")
+# A copy's own muxer for a trimmed external text track (`ffmpeg_build`'s prep step).
+SUBTITLE_TEXT_MUXERS = {"subrip": ("srt", ".srt"), "ass": ("ass", ".ass"), "ssa": ("ass", ".ass"),
+                        "webvtt": ("webvtt", ".vtt")}
+
+SUBTITLE_LANGUAGES = {
+    "und": "Unknown", "eng": "English", "spa": "Spanish", "fre": "French", "ger": "German",
+    "ita": "Italian", "por": "Portuguese", "rus": "Russian", "jpn": "Japanese", "kor": "Korean",
+    "chi": "Chinese", "ara": "Arabic", "hin": "Hindi", "dut": "Dutch", "swe": "Swedish",
+    "nor": "Norwegian", "dan": "Danish", "fin": "Finnish", "pol": "Polish", "tur": "Turkish",
+    "gre": "Greek", "heb": "Hebrew", "tha": "Thai", "vie": "Vietnamese", "ind": "Indonesian",
+    "ukr": "Ukrainian", "cze": "Czech", "hun": "Hungarian", "rum": "Romanian",
+}
+# ISO 639-2/B is what ffmpeg writes; players also meet the /T forms and 639-1 codes.
+_LANGUAGE_ALIASES = {"en": "eng", "es": "spa", "fr": "fre", "fra": "fre", "de": "ger", "deu": "ger",
+                     "it": "ita", "pt": "por", "ru": "rus", "ja": "jpn", "ko": "kor", "zh": "chi",
+                     "zho": "chi", "ar": "ara", "hi": "hin", "nl": "dut", "nld": "dut", "sv": "swe",
+                     "no": "nor", "da": "dan", "fi": "fin", "pl": "pol", "tr": "tur", "el": "gre",
+                     "ell": "gre", "he": "heb", "th": "tha", "vi": "vie", "id": "ind", "uk": "ukr",
+                     "cs": "cze", "ces": "cze", "hu": "hun", "ro": "rum", "ron": "rum"}
+
+
+def subtitle_codec_arg(container, codec_name):
+    """The `-c:s` value for a subtitle of `codec_name` in `container`: "copy", a conversion
+    ("mov_text", "webvtt", "srt"), or None when the container can't carry it at all."""
+    if codec_name not in FFPROBE_SUBTITLE:
+        return None
+    if codec_name in IMAGE_SUBTITLES:
+        return "copy" if container == ".mkv" else None
+    target = _SUBTITLE_TEXT_FORMAT.get(container, "srt")
+    if container == ".mkv":
+        return "srt" if codec_name == "mov_text" else "copy"
+    return "copy" if codec_name == target else target
+
+
+def containers_for_subtitles(codec_names):
+    """The containers that can carry every one of `codec_names` (all of them for none)."""
+    return [c for c in _CONTAINERS if all(subtitle_codec_arg(c, name) for name in codec_names)]
+
+
+def language_code(code):
+    """A stream's language tag as the ISO 639-2/B code this app lists ("en" / "deu" -> "eng" /
+    "ger"), or the tag itself when unlisted; "und" for none."""
+    code = (code or "").strip().lower()
+    if not code:
+        return "und"
+    return _LANGUAGE_ALIASES.get(code, code)
+
+
+def language_name(code):
+    """"English" for "eng"; an unlisted code as itself."""
+    code = language_code(code)
+    return SUBTITLE_LANGUAGES.get(code, code)

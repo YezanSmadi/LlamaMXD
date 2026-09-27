@@ -4,7 +4,8 @@
 background tone-mapped render and its cancellation by a file change, an audio-only file, an
 unreadable file rejected, a video that decodes to no frames, and the shared scrub position.
 After each step the pipeline's state, both media tabs' preview state and any dialog raised are
-recorded (golden). Then the loading spinner's frames being released once it's hidden."""
+recorded (golden). Then the loading spinner's frames being released once it's hidden, and the
+Subtitles / Chapters pages driven on a file with both."""
 import os
 import time
 
@@ -224,8 +225,88 @@ def spinner_release():
     return report("the loading spinner's frames are released when hidden", problems)
 
 
+def subtitle_pages():
+    """Muxing's subtitle editor (language, one default, undo), the format narrowing to .mkv for a
+    picture track, the chapter list (add, rename, remove, undo) and Encoding's burn-in, as the
+    settings a job would get."""
+    import core.probe
+    import ui.widgets.chapters as chapters_page
+    problems = []
+
+    def expect(label, got, want):
+        if got != want:
+            problems.append(f"{label}: {got!r}, expected {want!r}")
+
+    answers, messages, toasts = [], [], []
+    chapters_page.ask_text = lambda *a, **k: answers.pop(0)
+    chapters_page.show_message = lambda parent, title, message: messages.append(title)
+    notify, window.notify = window.notify, lambda text, **k: toasts.append(text)
+    subs = fixture("subs.mkv")
+    select(subs)
+    wait(lambda: pipe("_media_info_path") == subs)
+
+    mux = tabs()[0]
+    window.show_tab("Muxing")
+    flags = lambda: [(t["codec_name"], t["language"], t["default"], t["forced"]) for t in mux._track_args("subtitle")]
+    expect("mux subtitle rows", flags(), [("subrip", "eng", True, False), ("ass", "spa", False, True)])
+    mux._on_subtitle_track_pick("Track 2")
+    mux._on_subtitle_language_pick("German")
+    mux.subtitle_default_check.setChecked(True)
+    mux._set_subtitle_flag("default")
+    expect("one default, language edited", flags(), [("subrip", "eng", False, False), ("ass", "ger", True, True)])
+    mux._undo("subtitle")
+    expect("undo the default", flags(), [("subrip", "eng", True, False), ("ass", "ger", False, True)])
+    mux.format_menu.set(".mp4")
+    mux._on_format_change()
+    mux._stream_probed("subtitle", fixture("bar.sup"), core.probe.probe_media(fixture("bar.sup")))
+    expect("a PGS track narrows the format", (mux.format_menu.value(), mux.format_menu.values()), (".mkv", [".mkv"]))
+    expect("its toast", toasts[-1:], ["Container switched to .mkv — .mp4 can't hold PGS subtitles."])
+    expect("the .sup keeps its own start", mux._track_args("subtitle")[-1]["start_time"], 1.0)
+    mux._undo("subtitle")
+    expect("undo the .sup: .mp4 is offered again", ".mp4" in mux.format_menu.values(), True)
+
+    editor = mux.chapter_editor
+    rows = lambda: [editor.box._rows[i][0].label.text().split("  ·  ", 1)[1] for i in editor.box.item_ids()]
+    expect("source chapters, left to ffmpeg", (rows(), mux._gather_settings()["chapters"]),
+           (["00:00:00  ·  Intro", "00:00:04  ·  Main"], None))
+    editor.at_spinner.set_seconds(7)
+    answers.append("Credits")
+    editor._add()
+    editor.box.set_checked(editor.box.item_ids()[0], True)
+    answers.append("Opening")
+    editor._rename()
+    expect("add + rename", rows(), ["00:00:00  ·  Opening", "00:00:04  ·  Main", "00:00:07  ·  Credits"])
+    editor._remove()
+    expect("remove the ticked one", rows(), ["00:00:04  ·  Main", "00:00:07  ·  Credits"])
+    editor.undo_btn.click()
+    expect("undo", mux._gather_settings()["chapters"], [
+        {"start": 0.0, "title": "Opening"}, {"start": 4.0, "title": "Main"}, {"start": 7.0, "title": "Credits"}])
+    editor.at_spinner.set_seconds(99)
+    editor._add()
+    expect("a chapter past the end is refused", messages[-1:], ["Past the End"])
+
+    enc = tabs()[1]
+    window.show_tab("Encoding")
+    expect("encoding tracks", enc.sub_track_menu.values(), ["Track 1 (SRT)", "Track 2 (ASS)"])
+    enc.sub_burn_check.setChecked(True)
+    enc._on_burn_toggle()
+    settings = enc._gather_settings()
+    expect("burned track", (settings["burn_subtitle"] or {}).get("index"), 0)
+    expect("the rest stay tracks", [t["index"] for t in settings["subtitle_tracks"]], [1])
+    expect("a burned track has no language of its own", enc.sub_language_menu.isEnabled(), False)
+    enc.strip_video_check.setChecked(True)
+    enc._on_control_change()
+    expect("no burn-in without video", (enc._gather_settings()["burn_subtitle"], enc.sub_burn_check.isEnabled()),
+           (None, False))
+    enc.strip_video_check.setChecked(False)
+    enc._on_control_change()
+    window.notify = notify
+    return report("Subtitles / Chapters pages: editor, narrowing, chapters, burn-in", problems)
+
+
 if __name__ == "__main__":
     run()
     overlay_steady()
     spinner_release()
+    subtitle_pages()
     harness.finish()

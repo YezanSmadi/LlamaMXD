@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from core import downloader, ffmpeg_vars, formats, llamalog, power
-from core.ffmpeg_build import compile_command, uses_hdr_tonemap
+from core.ffmpeg_build import compile_command, prepare_commands, uses_hdr_tonemap
 from core.ffmpeg_runner import FfmpegJob, partial_path
 from core.previews import extract_video_thumbnail
 from core.ytdlp_runner import _STAGE_FOR_PART, _STAGE_FOR_POST, YtDlpJob
@@ -892,6 +892,28 @@ class QueueTab(QWidget):
                          else os.path.basename((entry.get("file") or "").replace("\\", "/")))
                 label = f"{kind} Track" if len(tracks) == 1 else f"{kind} Track {i + 1}"
                 rows.append((label, f"Track {entry.get('index', 0) + 1}  ·  {where}", False))
+        # Subtitles and chapters (Mux and Encode tasks).
+        if settings.get("strip_subtitles"):
+            rows.append(("Strip Subtitles", "Yes", False))
+        elif "subtitle_tracks" in settings:
+            tracks = settings.get("subtitle_tracks") or []
+            for i, entry in enumerate(tracks):
+                where = ("Source" if entry.get("source") == "primary"
+                         else os.path.basename((entry.get("file") or "").replace("\\", "/")))
+                bits = [f"Track {entry.get('index', 0) + 1}", where,
+                        formats.FFPROBE_SUBTITLE.get(entry.get("codec_name"), entry.get("codec_name") or "—"),
+                        formats.language_name(entry.get("language"))]
+                bits += [flag.capitalize() for flag in ("default", "forced") if entry.get(flag)]
+                rows.append(("Subtitles" if len(tracks) == 1 else f"Subtitles {i + 1}", "  ·  ".join(bits), False))
+        burn = settings.get("burn_subtitle")
+        if burn and not strip_video:
+            where = ("Source" if burn.get("source") == "primary"
+                     else os.path.basename((burn.get("file") or "").replace("\\", "/")))
+            rows.append(("Burned In", f"Track {burn.get('index', 0) + 1}  ·  {where}", False))
+        if settings.get("strip_chapters"):
+            rows.append(("Strip Chapters", "Yes", False))
+        elif settings.get("chapters") is not None:
+            rows.append(("Chapters", f"{len(settings['chapters'])}, edited", False))
         if row.get("error"):
             rows.append(("Error", row["error"], True))
         for r, (label, value, is_error) in enumerate(rows):
@@ -1024,6 +1046,7 @@ class QueueTab(QWidget):
         temp_path = partial_path(final_path)
         try:
             args = compile_command(job_vars, temp_path, loglevel=llamalog.ffmpeg_loglevel())
+            prepare = prepare_commands(job_vars, temp_path)
         except Exception as exc:
             llamalog.get("queue").exception("Couldn't build the ffmpeg command for task %s", task_id)
             self._fail_task(task_id, rest, f"Couldn't build the ffmpeg command: {exc}")
@@ -1034,6 +1057,7 @@ class QueueTab(QWidget):
             input_file=job_vars.input_file,
             start_secs=job_vars.start_secs,
             verify_hdr_tag=uses_hdr_tonemap(job_vars),
+            prepare=prepare,
             priority=self.app.priority_level,
         )
         self._active = {"task_id": task_id, "job": job, "rest": rest,

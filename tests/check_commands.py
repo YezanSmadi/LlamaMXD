@@ -22,6 +22,15 @@ downloader.tool_path = lambda name: f"<{name}>"
 IN, OUT = "C:/in/clip.mkv", "C:/out/clip.mp4"
 
 
+def _sub(index=0, codec="subrip", language="eng", default=False, forced=False, source="primary", file=None,
+         start_time=None):
+    return {"source": source, "file": file, "index": index, "codec_name": codec, "language": language,
+            "default": default, "forced": forced, "start_time": start_time}
+
+
+CHAPTERS = [{"start": 0.0, "title": "Intro"}, {"start": 40.0, "title": "Main: part = 1"}]
+
+
 def _audio(index=0, codec="AAC", bitrate="192 kbps", channels="Stereo", rate="48000 Hz",
            passthru=False, language="eng", source="primary", file=None):
     return {"id": f"src:{index}", "source": source, "file": file, "index": index, "codec": codec,
@@ -98,6 +107,23 @@ ENCODE_CASES = [
                dict(_audio(index=0, passthru=True, source="external", file="C:/in/extra.m4a"), id="ext:1"),
                _audio(index=1, passthru=True, language="jpn"),
            ]),
+    encode("subtitles_mp4", subtitle_tracks=[_sub(default=True), _sub(index=1, codec="ass", language="spa", forced=True)]),
+    encode("subtitles_webm_trimmed_external", output_path="C:/out/clip.webm", output_format=".webm", encoder="VP9",
+           profile="0", level="", speed="4", audio_streams=[_audio(codec="Opus")], start_secs=30, duration_secs=20,
+           subtitle_tracks=[_sub(), _sub(source="external", file="C:/in/extra.srt", language="fre")]),
+    encode("burn_text_trimmed", start_secs=30, source_start=0.5,
+           burn_subtitle={"source": "primary", "file": None, "index": 1, "image": False}),
+    encode("burn_external_text_hdr_scaled", hdr_to_sdr=True, resolution="720p",
+           burn_subtitle={"source": "external", "file": "C:/in/it's [dir]/a,b;c.srt", "index": 0, "image": False}),
+    encode("burn_image_scaled", output_format=".mkv", output_path="C:/out/clip.mkv", source_width=1280,
+           source_height=720, resolution="480p", burn_subtitle={"source": "primary", "file": None, "index": 0,
+                                                              "image": True, "width": 1920, "height": 1080}),
+    encode("burn_image_video_stripped", strip_video=True, output_path="C:/out/clip.m4a",
+           burn_subtitle={"source": "primary", "file": None, "index": 0, "image": True}),
+    encode("chapters_edited_trimmed", start_secs=30, duration_secs=60, source_duration=600, chapters=CHAPTERS),
+    encode("chapters_all_trimmed_away", start_secs=100, source_duration=50, chapters=CHAPTERS[:1]),
+    encode("chapters_spanning_trim", start_secs=100, source_duration=600, chapters=CHAPTERS[:1]),
+    encode("strip_subtitles_chapters", strip_subtitles=True, strip_chapters=True, subtitle_tracks=[_sub()]),
 ]
 
 MUX_BASE = {
@@ -125,6 +151,17 @@ MUX_CASES = [
         {"source": "external", "file": "C:/in/dub.m4a", "index": 1}]),
     mux("strip_audio", strip_audio=True, audio_tracks=[]),
     mux("strip_video", strip_video=True, video_tracks=[], output_path="C:/out/clip.m4a"),
+    mux("subtitles_mkv_trimmed_externals", output_path="C:/out/clip.mkv", output_format=".mkv", start_secs=30,
+        duration_secs=5, subtitle_tracks=[
+            _sub(default=True), _sub(index=1, codec="mov_text", language="ger"),
+            _sub(source="external", file="C:/in/sub.sup", codec="hdmv_pgs_subtitle", start_time=1.0),
+            _sub(source="external", file="C:/in/sub.srt", forced=True)]),
+    mux("subtitles_mp4_trimmed_external_prepared", start_secs=30, duration_secs=5, subtitle_tracks=[
+        _sub(), _sub(source="external", file="C:/in/sub.ass", codec="ass", language="jpn")]),
+    mux("picture_subtitle_in_mp4_dropped", subtitle_tracks=[_sub(codec="hdmv_pgs_subtitle")]),
+    mux("chapters_source_with_external", source_has_chapters=True, audio_tracks=[
+        {"source": "external", "file": "C:/in/dub.m4a", "index": 0}]),
+    mux("chapters_edited", chapters=CHAPTERS, source_duration=600),
 ]
 
 
@@ -136,6 +173,9 @@ def ffmpeg_commands():
             try:
                 argv = ffmpeg_build.compile_command(job, "C:/out/temp.partial.mp4")
                 out[f"{tab}/{name}"] = {"argv": argv, "hdr_tonemap": ffmpeg_build.uses_hdr_tonemap(job)}
+                prepare = ffmpeg_build.prepare_commands(job, "C:/out/temp.partial.mp4")
+                if prepare:
+                    out[f"{tab}/{name}"]["prepare"] = [{"argv": a, "path": p} for a, p in prepare]
             except Exception as exc:        # a refusal is a result too
                 out[f"{tab}/{name}"] = {"error": f"{type(exc).__name__}: {exc}"}
     out["Encoding/h264_basic@detailed"] = ffmpeg_build.compile_command(

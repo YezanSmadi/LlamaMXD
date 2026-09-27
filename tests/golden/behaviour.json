@@ -13,7 +13,9 @@
    "preset_menu": "— none —",
    "profile_menu": "High",
    "resolution_menu": "Source",
-   "speed_menu": "fast"
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
   },
   "save": "<work>\\out\\sdr-Fixture Clip.mp4",
   "step": "encoding: load sdr.mp4",
@@ -33,7 +35,9 @@
    "preset_menu": "— none —",
    "profile_menu": "—",
    "resolution_menu": "Source",
-   "speed_menu": "—"
+   "speed_menu": "—",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
   },
   "save": "<work>\\out\\sdr-Fixture Clip.webm",
   "step": "encoding: container -> .webm (H.264/AAC can't go)",
@@ -56,7 +60,9 @@
    "preset_menu": "— none —",
    "profile_menu": "—",
    "resolution_menu": "Source",
-   "speed_menu": "—"
+   "speed_menu": "—",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
   },
   "save": "<work>\\out\\sdr-Fixture Clip.mov",
   "step": "encoding: container -> .mov",
@@ -76,7 +82,9 @@
    "preset_menu": "— none —",
    "profile_menu": "—",
    "resolution_menu": "360p",
-   "speed_menu": "—"
+   "speed_menu": "—",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
   },
   "save": "<work>\\out\\sdr-Fixture Clip.mov",
   "step": "encoding: resolution 360p",
@@ -96,7 +104,9 @@
    "preset_menu": "— none —",
    "profile_menu": "High",
    "resolution_menu": "Source",
-   "speed_menu": "fast"
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
   },
   "save": "<work>\\out\\late.mov",
   "step": "encoding: load late.mkv (180p, 25fps)",
@@ -118,7 +128,9 @@
    "preset_menu": "— none —",
    "profile_menu": "High",
    "resolution_menu": "Source",
-   "speed_menu": "fast"
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
   },
   "save": "<work>\\out\\late.mov",
   "step": "encoding: fps 25",
@@ -138,7 +150,9 @@
    "preset_menu": "— none —",
    "profile_menu": "High",
    "resolution_menu": "Source",
-   "speed_menu": "fast"
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
   },
   "save": "<work>\\out\\sdr-Fixture Clip.mov",
   "step": "encoding: load sdr.mp4 (24fps)",
@@ -160,7 +174,9 @@
    "preset_menu": "— none —",
    "profile_menu": "Main",
    "resolution_menu": "Source",
-   "speed_menu": "fast"
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
   },
   "save": "<work>\\out\\sdr-Fixture Clip.mov",
   "step": "encoding: encoder H.265",
@@ -180,7 +196,9 @@
    "preset_menu": "— none —",
    "profile_menu": "Main",
    "resolution_menu": "Source",
-   "speed_menu": "fast"
+   "speed_menu": "fast",
+   "sub_language_menu": "—",
+   "sub_track_menu": "—"
   },
   "save": "<work>\\out\\multi.mov",
   "step": "encoding: load multi.mkv",
@@ -189,7 +207,9 @@
  {
   "menus": {
    "format_menu": ".mp4",
-   "preset_menu": "— none —"
+   "preset_menu": "— none —",
+   "subtitle_language_menu": "—",
+   "subtitle_track_menu": "—"
   },
   "save": "<work>\\out\\sdr-Fixture Clip.mp4",
   "step": "muxing: load sdr.mp4",
@@ -198,7 +218,9 @@
  {
   "menus": {
    "format_menu": ".mov",
-   "preset_menu": "— none —"
+   "preset_menu": "— none —",
+   "subtitle_language_menu": "—",
+   "subtitle_track_menu": "—"
   },
   "save": "<work>\\out\\sdr-Fixture Clip.mov",
   "step": "muxing: container -> .mov",
@@ -207,7 +229,9 @@
  {
   "menus": {
    "format_menu": ".mkv",
-   "preset_menu": "— none —"
+   "preset_menu": "— none —",
+   "subtitle_language_menu": "—",
+   "subtitle_track_menu": "—"
   },
   "save": "<work>\\out\\vp9.mkv",
   "step": "muxing: load vp9.webm (VP9 can't go in .mov)",
@@ -218,7 +242,9 @@
  {
   "menus": {
    "format_menu": ".mkv",
-   "preset_menu": "— none —"
+   "preset_menu": "— none —",
+   "subtitle_language_menu": "—",
+   "subtitle_track_menu": "—"
   },
   "save": "<work>\\out\\multi.mkv",
   "step": "muxing: load multi.mkv (H.264 + AAC + Opus)",
@@ -227,7 +253,9 @@
  {
   "menus": {
    "format_menu": ".mp4",
-   "preset_menu": "— none —"
+   "preset_menu": "— none —",
+   "subtitle_language_menu": "—",
+   "subtitle_track_menu": "—"
   },
   "save": "<work>\\out\\multi.mp4",
   "step": "muxing: container -> .mp4",
@@ -236,7 +264,9 @@
  {
   "menus": {
    "format_menu": ".mp4",
-   "preset_menu": "— none —"
+   "preset_menu": "— none —",
+   "subtitle_language_menu": "—",
+   "subtitle_track_menu": "—"
   },
   "save": "<work>\\out\\multi.mp4",
   "step": "muxing: untick the AAC track (Opus now decides)",
@@ -245,7 +275,9 @@
  {
   "menus": {
    "format_menu": ".mp4",
-   "preset_menu": "— none —"
+   "preset_menu": "— none —",
+   "subtitle_language_menu": "—",
+   "subtitle_track_menu": "—"
   },
   "save": "<work>\\out\\hdr.mp4",
   "step": "muxing: load hdr.mkv",

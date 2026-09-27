@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from core import formats, naming, presets
 from ui import scale
 from ui.widgets.carousel import ThumbnailCarousel
+from ui.widgets.chapters import ChapterEditor
 from ui.widgets.preview_overlay import _ExpandedPreviewOverlay
 from ui.widgets.controls import button, button_width_for, labeled, set_enabled
 from ui.widgets.dropdown import Dropdown, NO_OPTION
@@ -31,7 +32,7 @@ from ui.widgets.panels import MEDIA_FILTER, DropBox, SubTabBar, SummaryPanel
 from ui.widgets.tooltip import tip
 from ui.tips import CONTAINER_TIPS
 
-SUBTABS = ("Overview", "Video", "Audio")
+SUBTABS = ("Overview", "Video", "Audio", "Subtitles", "Chapters")
 
 AV_SYNC_TIP = ("Holds a constant frame rate and keeps timestamps aligned — turn off only "
                "if you need the source's exact original timing.")
@@ -66,9 +67,9 @@ def set_line_text(entry, text):
 
 class MediaTab(QWidget):
     """Base for Muxing and Encoding. Subclasses set the class constants and
-    implement `build_video`, `build_audio`, `_sync_controls`,
+    implement `build_video`, `build_audio`, `build_subtitles`, `_sync_controls`,
     `_refresh_summary`, `_gather_settings`, `_apply_settings` and
-    `_validate_specific`."""
+    `_validate_specific`. The Chapters page is shared (`ChapterEditor`)."""
 
     TAB = ""
     ACTION_TEXT = ""
@@ -124,6 +125,10 @@ class MediaTab(QWidget):
         self.panels.addWidget(self._build_overview())
         self.panels.addWidget(self.build_video())
         self.panels.addWidget(self.build_audio())
+        self.panels.addWidget(self.build_subtitles())
+        self.chapter_editor = ChapterEditor(app, lambda: self.panels.widget(0).sizeHint().height())
+        self.chapter_editor.changed.connect(self._on_control_change)
+        self.panels.addWidget(self.chapter_editor)
         self.sub_tab_bar.changed.connect(lambda n: self.panels.setCurrentIndex(SUBTABS.index(n)))
         root.addWidget(self.panels)
         scale.spacer(root, 11)
@@ -244,6 +249,13 @@ class MediaTab(QWidget):
     def _on_control_change(self, *_):
         """Every control lands here — one recompute, no pairwise handlers."""
         self._sync_controls()
+
+    def _sync_chapters(self):
+        """The Chapters page's part of `_sync_controls`: its list follows the probe, and its
+        sub-tab turns red while they're stripped."""
+        self.chapter_editor.load(self.app.media.info)
+        stripped = self.chapter_editor.refresh(bool(self.app.media.current_file_path))
+        self.sub_tab_bar.set_marked("Chapters", stripped)
 
     def _on_trim_change(self, *_):
         """A trim spinner changed — refresh just the rundown."""
@@ -510,16 +522,22 @@ class MediaTab(QWidget):
             self.strip_video_check.setChecked(bool(settings["strip_video"]))
         if "strip_audio" in settings:
             self.strip_audio_check.setChecked(bool(settings["strip_audio"]))
+        if "strip_subtitles" in settings:
+            self.strip_subtitles_check.setChecked(bool(settings["strip_subtitles"]))
+        self.chapter_editor.apply(settings)
 
     def _gather_common(self):
-        return {
+        settings = {
             "input_file": self.app.media.current_file_path,
             "output_path": self.save_entry.text(),
             "output_format": self.format_menu.value(),
             "start_secs": self.start_time_spinner.seconds(),
             "duration_secs": self.duration_time_spinner.seconds(),
             "av_sync": self.av_sync_check.isChecked(),
+            "strip_subtitles": self.strip_subtitles_check.isChecked(),
         }
+        settings.update(self.chapter_editor.gather())
+        return settings
 
     @staticmethod
     def _menu_value(menu):

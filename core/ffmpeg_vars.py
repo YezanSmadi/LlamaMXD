@@ -118,6 +118,23 @@ class JobVars:
     # streams of the kind (`-map <input>:v:<index>`).
     video_tracks: list = field(default_factory=list)
     audio_tracks: list = field(default_factory=list)
+    # Subtitles (both tabs), in output order: {"source", "file", "index" (among that file's
+    # subtitle streams), "codec_arg" ("copy" or a conversion), "text_muxer" (a copy's own muxer
+    # and extension, for a trimmed external text track), "language", "disposition", "start_time"
+    # (an external file's own start, which ffmpeg would otherwise rebase to 0)}.
+    subtitle_tracks: list = field(default_factory=list)
+    strip_subtitles: bool = False
+    # Encoding: the one track painted into the picture, {"source", "file", "index", "image",
+    # "width", "height" (a picture format's canvas), "start_time"}, or None.
+    burn_subtitle: dict = None
+    source_width: int = None
+    source_height: int = None
+    source_start: float = 0.0       # the source's own first timestamp (a burned text track's timeline)
+    # None: the source's chapters are left to ffmpeg (it shifts them with the trim). Else the
+    # chapters to write, already trimmed: [{"start", "end", "title"}] in output seconds.
+    chapters: list = None
+    strip_chapters: bool = False
+    source_has_chapters: bool = False
 
 
 def _hms(total_seconds):
@@ -156,6 +173,67 @@ def _audio_stream_args(entry):
         # Re-applied after a re-encoded stream's stale tags are wiped (a copy keeps its own).
         "language": None if passthru else entry.get("language"),
     }
+
+
+def _disposition(entry):
+    """`-disposition` for a subtitle entry: "default", "forced", both, or "0" (neither)."""
+    flags = [flag for flag in ("default", "forced") if entry.get(flag)]
+    return "+".join(flags) or "0"
+
+
+def _subtitle_track_args(entry, container):
+    """One settings-dict subtitle entry -> its ffmpeg-ready dict, or None when `container`
+    can't carry it (the UI narrows the format so this doesn't happen)."""
+    codec_name = entry.get("codec_name")
+    codec_arg = formats.subtitle_codec_arg(container, codec_name)
+    if codec_arg is None:
+        return None
+    return {
+        "source": entry.get("source") or "primary",
+        "file": entry.get("file"),
+        "index": int(entry.get("index") or 0),
+        "codec_arg": codec_arg,
+        "text_muxer": formats.SUBTITLE_TEXT_MUXERS.get(codec_name),
+        "language": formats.language_code(entry.get("language")),
+        "disposition": _disposition(entry),
+        "start_time": entry.get("start_time") or None,
+    }
+
+
+def _burn_args(entry):
+    """The burn-in entry as the builder wants it, or None."""
+    if not entry:
+        return None
+    return {
+        "source": entry.get("source") or "primary",
+        "file": entry.get("file"),
+        "index": int(entry.get("index") or 0),
+        "image": bool(entry.get("image")),
+        "width": entry.get("width"),
+        "height": entry.get("height"),
+        "start_time": entry.get("start_time") or None,
+    }
+
+
+def _trimmed_chapters(chapters, duration, start, length):
+    """The chapters to write, moved onto the output's timeline: each ends where the next starts
+    (the last at `duration`), the trim's start is subtracted, and whatever falls outside
+    [0, length] (length 0: to the end) is cut off or dropped. None stays None."""
+    if chapters is None:
+        return None
+    ordered = sorted(chapters, key=lambda chapter: float(chapter.get("start") or 0))
+    out = []
+    for n, chapter in enumerate(ordered):
+        begin = float(chapter.get("start") or 0)
+        end = float(ordered[n + 1]["start"]) if n + 1 < len(ordered) else float(duration or begin)
+        begin, end = begin - start, end - start
+        if length:
+            end = min(end, length)
+        begin = max(begin, 0.0)
+        if end - begin < 0.001:
+            continue
+        out.append({"start": round(begin, 3), "end": round(end, 3), "title": chapter.get("title") or ""})
+    return out
 
 
 def _scale_vf(resolution, source_height):
@@ -233,4 +311,15 @@ def derive(settings, source_tab=""):
         audio_streams=[_audio_stream_args(entry) for entry in (s.get("audio_streams") or [])],
         video_tracks=s.get("video_tracks") or [],
         audio_tracks=s.get("audio_tracks") or [],
+        subtitle_tracks=[track for track in (
+            _subtitle_track_args(entry, _split_path(output_path)[3]) for entry in (s.get("subtitle_tracks") or [])
+        ) if track],
+        strip_subtitles=bool(s.get("strip_subtitles")),
+        burn_subtitle=None if s.get("strip_video") else _burn_args(s.get("burn_subtitle")),
+        source_width=s.get("source_width"),
+        source_height=s.get("source_height"),
+        source_start=float(s.get("source_start") or 0.0),
+        chapters=_trimmed_chapters(s.get("chapters"), s.get("source_duration"), start, duration),
+        strip_chapters=bool(s.get("strip_chapters")),
+        source_has_chapters=bool(s.get("source_has_chapters")),
     )

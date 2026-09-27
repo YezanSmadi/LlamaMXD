@@ -231,31 +231,34 @@ def confirm_output_path(parent, output_path, input_file, claimed=False):
     return True
 
 
-# Audio files, plus "All Files" so an audio track inside a video can be picked.
-_AUDIO_BROWSE_FILTER = "Audio Files (%s);;All Files (*.*)" % " ".join(
-    "*" + ext for ext in sorted(formats.AUDIO_EXTENSIONS))
+# Each kind's files, plus "All Files" so a track inside a video can be picked.
+BROWSE_FILTERS = {
+    "audio": "Audio Files (%s);;All Files (*.*)" % " ".join("*" + ext for ext in sorted(formats.AUDIO_EXTENSIONS)),
+    "subtitle": "Subtitle Files (%s);;All Files (*.*)" % " ".join("*" + ext for ext in formats.SUBTITLE_EXTENSIONS),
+}
 _PICKER_LIST_HEIGHT = 150     # reference px: about five rows before it scrolls
 
 
-class AudioStreamPickerDialog(MessageDialog):
-    """Encoding's "Choose Stream(s)": a `TrackListBox` of audio streams (ticked = included,
-    drag to reorder) and one button row: Add Stream(s), Remove Stream(s), OK, Cancel. It edits a
-    copy, so Cancel discards everything. Add browses a file, probes it off the GUI thread and
-    appends its stream(s) ticked; Remove takes out every ticked row. OK gives `chosen` and
-    `result_entries` (with rows but none ticked, the first is ticked instead: no audio is Strip
-    Audio's job); Cancel gives None."""
+class StreamPickerDialog(MessageDialog):
+    """Encoding's "Choose Stream(s)" (audio or subtitle): a `TrackListBox` of streams (ticked =
+    included, drag to reorder) and one button row: Add Stream(s), Remove Stream(s), OK, Cancel.
+    It edits a copy, so Cancel discards everything. Add browses a file, probes it off the GUI
+    thread and appends its stream(s) ticked; Remove takes out every ticked row. OK gives `chosen`
+    and `result_entries` (audio with rows but none ticked ticks the first instead: no audio is
+    Strip Audio's job; subtitles may be none); Cancel gives None."""
 
     SHOW_HEADER = False
     WIDTH = 500      # one row holds Add, Remove, OK and Cancel
 
-    def __init__(self, parent, entries, included, start_dir=""):
+    def __init__(self, parent, kind, entries, included, start_dir=""):
+        self._kind = kind
         self._entries = list(entries)
         self._initial_checked = set(included)
         self._start_dir = start_dir  # where Add Stream(s)'s file dialog opens (the tab's output folder)
         self._finished = False       # an Add Stream(s) probe landing after OK/Cancel is dropped
         self.chosen = None
         self.result_entries = None
-        super().__init__(parent, "Choose Audio Streams", "", buttons=("OK", "Cancel"))
+        super().__init__(parent, f"Choose {kind.capitalize()} Streams", "", buttons=("OK", "Cancel"))
 
     def _build_extra(self, body):
         self.box = TrackListBox()
@@ -278,7 +281,7 @@ class AudioStreamPickerDialog(MessageDialog):
         says which rows are ticked."""
         if checked is None:
             checked = set(self.box.checked_ids())
-        items = [{"id": entry["id"], "label": row_label("audio", entry, number)}
+        items = [{"id": entry["id"], "label": row_label(self._kind, entry, number)}
                  for number, entry in enumerate(self._entries, start=1)]
         self.box.set_items(items, checked=checked)
 
@@ -297,27 +300,30 @@ class AudioStreamPickerDialog(MessageDialog):
         self._refresh(set(self.box.checked_ids()) - ticked)
 
     def _add_stream(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Audio Source", self._start_dir, _AUDIO_BROWSE_FILTER)
+        path, _ = QFileDialog.getOpenFileName(self, f"Select {self._kind.capitalize()} Source", self._start_dir,
+                                              BROWSE_FILTERS[self._kind])
         if path:
             run_async(probe_media, lambda info: self._stream_probed(path, info), path)
 
     def _stream_probed(self, path, info):
-        """The browsed-in file's probe landed: append its audio stream(s)."""
+        """The browsed-in file's probe landed: append its stream(s) of the kind."""
         if self._finished:
             return
-        streams = (info or {}).get("audio_streams") or []
+        streams = [stream for stream in (info or {}).get(f"{self._kind}_streams") or []
+                   if self._kind != "subtitle" or stream.get("codec_name") in formats.FFPROBE_SUBTITLE]
         if not streams:
             show_message(self, "No Matching Streams",
-                         f"\u201c{os.path.basename(path)}\u201d has no audio streams to add.")
+                         f"\u201c{os.path.basename(path)}\u201d has no {self._kind} streams to add.")
             return
         if len(streams) > 1:
-            picked = pick_external_streams(self, "audio", streams, lambda s: describe_stream("audio", s))
+            picked = pick_external_streams(self, self._kind, streams, lambda s: describe_stream(self._kind, s))
             if picked is None:
                 return
             streams = [s for s in streams if s["index"] in picked]
         name = os.path.basename(path.replace("\\", "/"))
         added = [{"id": f"ext:{uuid.uuid4().hex[:8]}", "source": "external", "file": path,
-                  "index": stream["index"], "stream": stream, "name": name}
+                  "index": stream["index"], "stream": stream, "name": name,
+                  "start_time": (info or {}).get("start_time")}
                  for stream in streams]
         self._entries += added
         self._refresh(set(self.box.checked_ids()) | {entry["id"] for entry in added})
@@ -328,7 +334,7 @@ class AudioStreamPickerDialog(MessageDialog):
     def _dismiss(self, choice):
         if choice == "OK":
             chosen = set(self.box.checked_ids())
-            if not chosen and self.box.item_ids():
+            if not chosen and self.box.item_ids() and self._kind == "audio":
                 self.box.set_checked(self.box.item_ids()[0], True)
                 return
             self.chosen = chosen
@@ -337,10 +343,10 @@ class AudioStreamPickerDialog(MessageDialog):
         super()._dismiss(choice)
 
 
-def choose_audio_streams(parent, entries, included, start_dir=""):
-    """Open the picker on `entries` (`included` ticked), Add Stream(s) browsing from
-    `start_dir`; `(entries, chosen ids)`, or None if cancelled."""
-    dialog = AudioStreamPickerDialog(parent, entries, included, start_dir)
+def choose_streams(parent, kind, entries, included, start_dir=""):
+    """Open the `kind` ("audio" / "subtitle") picker on `entries` (`included` ticked), Add
+    Stream(s) browsing from `start_dir`; `(entries, chosen ids)`, or None if cancelled."""
+    dialog = StreamPickerDialog(parent, kind, entries, included, start_dir)
     dialog.show_modal()
     if dialog.chosen is None:
         return None

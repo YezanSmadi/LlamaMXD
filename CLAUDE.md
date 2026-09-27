@@ -149,7 +149,14 @@ change here), and even `os._exit` runs the DLLs' unload code where it happens.
   no file, a missing exe, an unmakeable folder — plus `FfmpegJob`'s early failures and its
   controls once ended.
 - `check_jobs` — real Mux / Encode jobs through `FfmpegJob`, their outputs probed (streams, languages,
-  length, each stream's start time); stop() mid-run; a failing job's reason.
+  length, each stream's start time); stop() mid-run; a failing job's reason. **Subtitles and chapters**
+  are checked by what a player sees: each track's cues read back as SRT, its language and flags, the
+  chapter list, a picture track's packet times and burned-in pixels (a trimmed mux to .mp4 with a source
+  and a prepared external .srt, an untrimmed .mkv copy, a trimmed external .sup, strip, a trimmed text
+  burn-in, a scaled picture burn-in, a burn-in from a path with `'[],;`). Fixtures `subs.mkv` (SRT eng
+  Default + ASS spa Forced + two chapters, a keyframe a second), `subs.srt`, `bar.sup` and `pgs.mkv` (720p
+  video + the 1080p bar) come from `harness` — the .sup is written by `harness._sup`, since ffmpeg can't
+  make pictures from text. Shown to fail with the prep step switched off (the external cues at 0-3 / 4-8).
 
 Each check was shown to fail on a deliberate one-line break. There are no KNOWN exceptions: the About
 license box's 1px squeeze at 1.5x is fixed (the notice's width is now the box's rounded width less its
@@ -209,6 +216,7 @@ ui/widgets/toggles.py     CheckBox, Switch, SegmentedButton
 ui/widgets/timespinner.py TimeSpinner (+ its _TimeField)
 ui/widgets/marquee.py     MarqueeLabel, MarqueeGroup
 ui/widgets/panels.py      SubTabBar, DropBox, LoadingSpinner, BorderedFrame, SummaryPanel, Sidebar, TabIndicator
+ui/widgets/chapters.py    ChapterEditor — the Chapters sub-tab Muxing and Encoding share
 ui/widgets/tracklist.py   TrackListBox — Muxing's checkable, scrollable track picker
 ui/widgets/carousel.py    ThumbnailCarousel
 ui/widgets/wave.py        WaveLayer: the Wave Loop (rlottie) and its artwork fixes
@@ -674,7 +682,9 @@ raising — it only ever *improves* defaults): container, video/audio codec,
 video profile/level, width/height, fps, HDR, duration, file size, the
 container's `title` / chapter count / overall `bit_rate` / `creation_time`
 (the output-name tokens below), per-stream
-video and audio (`video_streams`/`audio_streams`), HDR static metadata, and
+video, audio and subtitle streams (`video_streams`/`audio_streams`/`subtitle_streams`: a subtitle's
+codec, picture or text, canvas size, language, title, Default / Forced), the chapters (`chapter_list`:
+start, end, title), the container's `start_time`, HDR static metadata, and
 `has_video`/`has_audio`. It lets Encoding auto-resolve Encoder, Profile,
 Level and every per-stream audio control, caps the Resolution and FPS
 ladders to the source's own height/rate, lets Muxing populate its track
@@ -1331,7 +1341,7 @@ codec controls at all. "Copy video, re-encode audio" is an *Encoding* job with
 the encoder auto-resolved to the source's own codec. Encoding is the superset.
 
 They share one frame, `MediaTab`, top to bottom:
-- **Header**: a `SubTabBar` (Overview / Video / Audio) and the `Selected
+- **Header**: a `SubTabBar` (Overview / Video / Audio / Subtitles / Chapters) and the `Selected
   File:` `MarqueeLabel` (double-click to reselect).
 - **Preview**: a `QStackedLayout` holding the `DropBox` (its loading spinner, once a file
   is picked) until the carousel's
@@ -1820,7 +1830,47 @@ disable.
 **HDR→SDR preview** (Encoding only): `on_thumbnails` records the raw frames and, with the switch on,
 `_apply_preview_frames` shows each frame's tone-mapped version where it's rendered and the raw one until
 then, keeping the scrub index; `on_hdr_frames_ready` re-applies as frames land. The switch drives the
-render (`_follow_hdr_switch`: `start_hdr_render` on, `hdr_idle` off).
+render (`_follow_hdr_switch`: `start_hdr_render` on, `hdr_idle` off). **The swap goes through
+`carousel.replace_frames`, never `set_frames`**: `set_frames` treats the list as a new file — it zeroed
+the chevrons' opacity (they stayed hidden until the pointer left and re-entered), cancelled a slide and
+jumped to frame 0 — at every tone-mapped frame that landed. `replace_frames` swaps the pictures of the
+frames on show (same count; else it falls back to `set_frames`) and drops only their cached pixmaps.
+`check_media` watches the chevrons stay at full opacity and the position hold while frames land.
+
+#### Subtitles and Chapters (both tabs)
+
+**Subtitles** is each tab's own Audio pattern. **Muxing**: a `TrackListBox` (`_track_panel("subtitle",
+editor=..., min_width=150)`, sharing Video / Audio's list, undo and Add / Remove code — `_tracks`,
+`_history` and `_boxes` are keyed by kind) with an editor between it and the column: Track (every row),
+Language, Default, Forced. A subtitle entry carries its own `language` / `default` / `forced` (seeded
+from the stream), so an edit is a new entry through `_edit_tracks` and **Undo covers it**; turning
+Default on clears it on every other track (one default). **Encoding**: Subtitle Track + Choose
+Stream(s) (the generalised `StreamPickerDialog` / `choose_streams(parent, "subtitle", ...)`, which may
+end with none ticked, unlike audio) on row one; Language, Default, Forced, **Burn In** on row two;
+Strip Subtitles right. State mirrors audio (`_sub_list`, `_sub_included`, `_active_sub_id`,
+`_sub_settings[id]`) plus `_burn_id`: at most one track is burned; it leaves the soft list (it's in the
+picture), its language / flags grey out, and Burn In is off while the video is stripped or absent.
+Only formats in `formats.FFPROBE_SUBTITLE` become rows (teletext and closed captions don't).
+**A picture track (PGS / VobSub / DVB) that goes into the output narrows the format to .mkv** — by
+request, the same rule as codecs: Muxing intersects `containers_for` with
+`formats.containers_for_subtitles(ticked codecs)`; Encoding retargets its format list
+(`_retarget_format`, the first thing its pass does, since the container is the root). Both toasts name
+the format ("... .mp4 can't hold PGS subtitles."). Neither page adds a rundown row (a fourth row would
+make Overview, and so every page, taller).
+
+**Chapters** is one widget, `ChapterEditor` (`ui/widgets/chapters.py`), built by `MediaTab` and synced by
+`_sync_chapters()` in each tab's pass: a `TrackListBox(reorderable=False, new_checked=False,
+empty_text="No chapters")` whose ticks select rows for **Rename** (each ticked one, a prompt each) and
+**Remove Chapter(s)**; **Add At** (a TimeSpinner) + **Add Chapter** (refused past the end or on a second
+already taken); Undo / Redo; **Strip Chapters**. It reseeds on a new probe result. `gather()` gives
+`chapters` **None while the list is as the source had it** (ffmpeg copies them itself, shifting them with
+the trim — verified) and the list once edited, plus `strip_chapters`, `source_duration`,
+`source_has_chapters`. A stripped Subtitles / Chapters page marks its sub-tab red.
+
+**Both pages fit the preview INVARIANT**: every page's hint is at most Overview's (118 at 1.0), and the
+Muxing Subtitles page's minimum width is 628 of 656 (the box's floor dropped to 150 for the editor: at
+180 it was 2px over at every scale, which the squeeze scan caught). Measure `layout().totalMinimumSize()`
+per page after any change here.
 
 #### `_sync_controls` — the single constraint pass
 
@@ -2706,7 +2756,12 @@ autosave when the tab is left and on close.
   - Signals: `reselect`, `populated` (first frames or audio-only — the tab
     reveals the carousel), `indexChanged` (user scrubs only), `fileDropped`,
     `expandToggled(bool)`. `step(delta)` is the keybind stepper; `sync_index`
-    jumps silently.
+    jumps silently; `replace_frames` swaps pictures without resetting anything (see HDR→SDR preview).
+  - **While expanded, a blank widget holds the carousel's place in the tab's preview stack**
+    (`MediaTab._on_expand_toggled`, `_expand_slot`). Taking the carousel out left the stack showing its
+    other page, the drop box, still collapsed from the import: its spinner played (and decoded frames)
+    the whole time, and in the render check it painted a square through the expanded picture.
+    `check_media` asserts no spinner is showing while expanded.
 - **Dialogs** — `MessageDialog` (a `QDialog`: bold title, wrapped **selectable** message,
   optional entry, buttons right-aligned; the **first button is the affirmative
   one** and gets the `action` role — primary — the rest the `queue` role, i.e.
@@ -3358,6 +3413,72 @@ the MPEG-era encoders, and `retain_length` is **gone** — `duration_secs == 0`
 means "to the end of the file". A derived dropdown showing the `—`
 placeholder reports `""` rather than the dash (`_menu_value`), so a settings
 dict never carries a placeholder around as if it were a real choice.
+
+## Subtitle and chapter flow
+
+**Settings.** Both tabs: `subtitle_tracks` (the output's soft tracks, in order: `{"source", "file",
+"index" (among that file's subtitle streams), "codec_name" (ffprobe's), "language", "default", "forced",
+"start_time" (an external file's own)}`), `strip_subtitles`, `chapters` (None, or `[{"start", "title"}]`),
+`strip_chapters`, `source_duration`, `source_has_chapters`. Encoding adds `burn_subtitle`
+(`{"source", "file", "index", "image", "width", "height", "start_time"}` or None), `source_width`,
+`source_start`. `ffmpeg_vars` turns them into `subtitle_tracks` (with `codec_arg`, `text_muxer`,
+`disposition`), `burn_subtitle`, and `chapters` already on the output's timeline (`_trimmed_chapters`:
+each ends where the next starts, the last at the source's length; shifted by the trim's start, cut to its
+length, and dropped when nothing is left — an all-dropped list strips).
+
+**Formats** (`formats.subtitle_codec_arg(container, codec_name)`): .mkv copies every format but
+MP4 text (-> `srt`); .mp4 / .mov convert text to `mov_text`; .webm to `webvtt`; pictures (PGS, VobSub,
+DVB) are copied into .mkv and can't go anywhere else (None). Each output track also gets
+`-metadata:s:s:N language=` and `-disposition:s:N` (`default`, `forced`, both, or `0`). **Encoding
+maps every subtitle's tags explicitly** (`-map_metadata:s:s:N <input>:s:s:<index>`) because the video's
+`-map_metadata:s:v:0 -1` switches off ffmpeg's default tag copy for every stream; **Muxing must not**
+(any `-map_metadata` of a type there would drop every copied stream's tags).
+
+**Three ffmpeg behaviours, each found on the real build and each worked around:**
+- **ffmpeg rebases every input to start at 0.** A `.sup` reports its first picture as its start, so a
+  PGS track added from a .sup came out with its first picture at 0 (1s early). An external subtitle
+  input gets `-itsoffset <its own start_time>` (`probe_media`'s new `start_time`); .srt / .ass report
+  none, so nothing changes for them.
+- **A subtitle input of its own, trimmed with `-ss`, keeps the cue in progress at the cut**, as a
+  negative timestamp, and ffmpeg then shifts the *whole output* to make it non-negative (the video
+  started 2s in). For a copied track `-copypriorss:s:N 0` drops those packets (verified: .srt and .sup
+  both land right). **For a converted track nothing does** — decoded subtitles ignore it, and every
+  variant tried (`-itsoffset -S`, `-avoid_negative_ts`, `-fix_sub_duration`) came out shifted or
+  stretched — so a trimmed external text track that must be converted goes through a **prep step**
+  (`ffmpeg_build.prepare_commands`): a copy-trim into its own text format beside the output
+  (`<output>.partial.subN.srt`, `-copypriorss 0`), which the main command reads untrimmed and converts.
+  `FfmpegJob(prepare=...)` runs the steps on a thread (contained, 600s timeout each), then launches
+  ffmpeg from there under `_launch_lock` (so `stop()` can't slip between the check and the launch), and
+  deletes the files however the job ends. A track from the source file itself needs none of this: its
+  seek happens in the demuxer with the rest. A cue that spans the cut is dropped, as ffmpeg does for
+  embedded tracks. (An external MP4-text track converted with a trim has no text muxer to copy into and
+  stays on the inline path — the one case left approximate.)
+- **ffmpeg-python over-escapes filter arguments**, so a burned-in file path (drive colon, `'`) never
+  reached the `subtitles` filter intact. The text burn-in goes in the `-vf` string, which ffmpeg-python
+  passes as is, with `_filter_path`: the option level escapes `\ ' :`, the graph level single-quotes the
+  whole value (which also protects `[ ] , ;`), an apostrophe written `'\''`. Found by testing each depth
+  against filenames with `'`, `[1],b;c` and spaces: one level and two levels both failed on this build.
+
+**Burn-in.** Text: `subtitles='<path>':si=N` after the tone-map (text drawn into HDR would be tone-mapped
+too) and before the downscale. The filter reads the file on the file's own timeline, so with a trim the
+frames are moved there and back: `setpts=PTS+<start + the source's own start>/TB,...,setpts=PTS-STARTPTS`
+(an external file: the trim's start only). Pictures: an overlay, so the video becomes a graph
+(`-filter_complex` via ffmpeg-python: `_vf_node` turns the tone-map and scale strings into filter
+nodes); the pictures are scaled from their canvas (the stream's width / height) to the source's size
+first. Checked on real outputs: the line is in the picture only while its cue is, and the 1080p bar lands
+at the right place and times on 720p video. Fonts: libass finds Windows' own.
+
+**Chapters.** Stripped (or every chapter trimmed away): `-map_chapters -1`. Edited: an FFMETADATA1
+document (`_ffmetadata`: milliseconds, titles escaped for `= ; # \` and newlines) goes in as `-f
+ffmetadata -i data:text/plain;base64,...` after the other inputs (`compile_command` inserts it; no file to
+write or delete), and `-map_chapters` names its position. Unedited: left to ffmpeg, except that with other
+files as inputs it's pinned to the source (`-map_chapters <its position>`, or -1 if it has none), since
+ffmpeg takes the first input that has any. MP4 output also gets a chapter text track (`bin_data`), which is
+how that container stores them.
+
+**MP4 marks the first subtitle track default when no track is** (the muxer's own rule for enabled
+tracks): a lone Forced track reads `default+forced` there. Not something the app can switch off; the jobs
+check expects it.
 
 ## Download flow (YT-DLP)
 

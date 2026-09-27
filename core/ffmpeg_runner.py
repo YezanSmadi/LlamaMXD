@@ -14,7 +14,7 @@ import subprocess
 import threading
 import time
 
-from core import llamalog
+from core import llamalog, winproc
 from core import priority as process_priority
 from core.probe import probe_duration, verify_hdr_sdr_tag
 from core.process_job import ProcessJob, replace_output
@@ -25,6 +25,8 @@ _REASON_LINES = 3
 # With Detailed logging (`-loglevel level+info`) each line carries its level: `[error] ...`, or
 # `[ctx @ 0x..] [fatal] ...`.
 _ERROR_TAG = re.compile(r"\s?\[(?:error|fatal)\]")
+# A prep step (cutting an external subtitle track) reads a small file, or seeks in a big one.
+_PREPARE_TIMEOUT = 600
 
 
 def partial_path(final_path):
@@ -39,15 +41,22 @@ class FfmpegJob(ProcessJob):
     trimmed, else the input's probed length minus `start_secs`, stretched upward if the encode
     runs past it (a container can undersell its length 10x).
 
+    `prepare` is `[(argv, path)]` (`ffmpeg_build.prepare_commands`): run first, on a thread, and
+    each `path` deleted when the job ends, however it ends.
+
     Events from `poll_events()`: ("progress", fraction), ("done",), ("failed", reason). A
     stopped job reports nothing further."""
 
     AREA = TOOL = "ffmpeg"
 
     def __init__(self, args, final_path, temp_path, *, duration_secs=0,
-                 input_file="", start_secs=0, verify_hdr_tag=False,
+                 input_file="", start_secs=0, verify_hdr_tag=False, prepare=(),
                  priority=process_priority.DEFAULT_LEVEL, label=None):
         super().__init__(args, final_path, priority, label)
+        self._prepare = list(prepare)
+        # Held while the main process is launched after a prep step, so stop() can't slip in
+        # between the check and the launch.
+        self._launch_lock = threading.Lock()
         self._t0 = None
         self.temp_path = temp_path
         self._duration_secs = duration_secs or 0
@@ -73,12 +82,45 @@ class FfmpegJob(ProcessJob):
         except OSError as exc:
             self._fail_early(f"Couldn't create the output folder: {exc.strerror or exc}")
             return
+        if self._prepare:
+            self._t0 = time.monotonic()
+            threading.Thread(target=self._prepare_then_launch, daemon=True).start()
+            return
+        self._launch_main()
 
+    def stop(self):
+        with self._launch_lock:
+            return super().stop()
+
+    def _prepare_then_launch(self):
+        """Run the prep steps, then launch ffmpeg itself (worker thread)."""
+        for argv, _path in self._prepare:
+            with self._lock:
+                if self._stopped:
+                    return
+            llamalog.get("ffmpeg").info("Preparing %s: %s", self.label, " ".join(argv))
+            try:
+                completed = winproc.run(argv, timeout=_PREPARE_TIMEOUT, text=True)
+                failure = (completed.stderr or "").strip().splitlines()[-1:] if completed.returncode else None
+            except (OSError, subprocess.SubprocessError) as exc:
+                failure = [str(exc)]
+            if failure is not None:
+                self._discard_prepared()
+                self._fail_early("Couldn't prepare a subtitle track: "
+                                 + (failure[0] if failure else f"ffmpeg exited with code {completed.returncode}"))
+                return
+        with self._launch_lock:
+            if self._stopped:
+                return
+            self._launch_main()
+
+    def _launch_main(self):
         if not self._launch("ffmpeg wasn't found. Reinstall LlamaMXD, or install ffmpeg and add it to your PATH.",
                             stderr=subprocess.PIPE):
+            self._discard_prepared()
             return
 
-        self._t0 = time.monotonic()
+        self._t0 = self._t0 or time.monotonic()
         llamalog.log_job_start(self.AREA, self.label, self.args)
         # stderr must be drained, or ffmpeg blocks when the pipe fills.
         self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
@@ -118,6 +160,7 @@ class FfmpegJob(ProcessJob):
         returncode = self._proc.wait()
         if self._stderr_thread is not None:
             self._stderr_thread.join(timeout=2)
+        self._discard_prepared()
 
         with self._lock:
             if self._stopped:
@@ -177,6 +220,17 @@ class FfmpegJob(ProcessJob):
 
     def _cleanup(self):
         self._discard_temp()
+        self._discard_prepared()
+
+    def _discard_prepared(self):
+        """Delete the prep steps' files."""
+        for _argv, path in self._prepare:
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                llamalog.get("ffmpeg").warning("Couldn't delete the prepared file %s: %s", path, exc)
 
     def _discard_temp(self):
         """Delete the partial output, if any; never the real output path."""

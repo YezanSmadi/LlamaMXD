@@ -20,10 +20,10 @@ PRESET_KEYS = {
     "Encoding": [
         "output_format", "av_sync",
         "encoder", "profile", "level", "speed", "quality", "resolution", "fps", "hdr_to_sdr",
-        "strip_video", "strip_audio",
+        "strip_video", "strip_audio", "strip_subtitles", "strip_chapters",
     ],
     "Muxing": [
-        "output_format", "av_sync", "strip_video", "strip_audio",
+        "output_format", "av_sync", "strip_video", "strip_audio", "strip_subtitles", "strip_chapters",
     ],
 }
 # No `audio_streams`: which of a particular file's streams to include is job state.
