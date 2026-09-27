@@ -113,6 +113,7 @@ class MediaTab(QWidget):
         self.carousel.fileDropped.connect(app.media.select_file)
         self.carousel.expandToggled.connect(self._on_expand_toggled)
         self._expand_overlay = None
+        self._expand_slot = None
         self._preview_stack.addWidget(self.drop_box)
         self._preview_stack.addWidget(self.carousel)
         root.addWidget(preview, 1)
@@ -346,6 +347,11 @@ class MediaTab(QWidget):
         """The expand icon: reparent the same carousel into (or out of) a dimming overlay over
         the main window, so all its behaviour carries over."""
         if expanded:
+            # A blank stands in, or the stack would show the drop box and its spinner beneath.
+            if self._expand_slot is None:
+                self._expand_slot = QWidget()
+            self._preview_stack.insertWidget(1, self._expand_slot)
+            self._preview_stack.setCurrentWidget(self._expand_slot)
             self._preview_stack.removeWidget(self.carousel)
             if self._expand_overlay is None:
                 self._expand_overlay = _ExpandedPreviewOverlay(self.app)
@@ -354,6 +360,8 @@ class MediaTab(QWidget):
             self._expand_overlay.release()
             self._preview_stack.insertWidget(1, self.carousel)
             self._preview_stack.setCurrentWidget(self.carousel)
+            self._preview_stack.removeWidget(self._expand_slot)
+            self._expand_slot.hide()
             # insertWidget() reparents, which hides it: show it again.
             self.carousel.show()
 

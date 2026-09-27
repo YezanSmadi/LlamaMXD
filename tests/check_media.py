@@ -150,10 +150,19 @@ def run():
 
 
 def spinner_release():
-    """Frames of another size go after the grace, all but the first few after the idle time;
-    the first ones are always there, at the size needed, for the next spinner."""
+    """No spinner plays behind an expanded preview. Frames of another size go after the grace,
+    all but the first few after the idle time; the first ones stay, at the size needed."""
     problems = []
     window.show_tab("Muxing")
+    carousel = window.tabs["Muxing"].carousel
+    select(fixture("sdr.mp4"))
+    wait(lambda: carousel.isVisible())
+    carousel.toggle_expand()
+    settle(0.5)
+    if panels.LoadingSpinner._showing:
+        problems.append("the drop box's spinner plays behind an expanded preview")
+    carousel.toggle_expand()
+    settle(0.3)
     window.tabs["Muxing"].clear_selected_file()      # the drop box, not a loaded file's carousel
     box = window.tabs["Muxing"].drop_box
 
