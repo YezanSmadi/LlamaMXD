@@ -66,4 +66,9 @@ def run_tool(name, *args, timeout=10):
 def ffprobe_json(*args, timeout=10):
     """`ffprobe -v error <args> -of json`, parsed ({} for no output). Raises like `run_tool`, and
     ValueError for output that isn't JSON."""
-    return json.loads(run_tool("ffprobe", "-v", "error", *args, "-of", "json", timeout=timeout).stdout or "{}")
+    completed = run_tool("ffprobe", "-v", "error", *args, "-of", "json", timeout=timeout)
+    try:
+        return json.loads(completed.stdout or "{}")
+    except ValueError:
+        # ffprobe exits mid-output when it can't open a stream's decoder, printing only "{".
+        raise ValueError(f"ffprobe exited with code {completed.returncode} without finishing its output") from None

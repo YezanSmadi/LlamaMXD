@@ -169,11 +169,10 @@ class MediaSession:
         if self.info.get("hdr") is True and not libplacebo_checked():
             run_async(libplacebo_problem, lambda _problem: [tab._sync_controls() for tab in self.tabs])
 
-    def _reject_file(self, path):
+    def _clear_state(self):
         """Undo the selection entirely, back to the pristine drop box. Bumping the token makes
-        the in-flight decode for this path a no-op when it lands."""
-        llamalog.get("app").warning("Rejected %s: no video or audio stream could be identified "
-                                    "(unreadable, or a format this ffmpeg can't parse)", path)
+        the in-flight decode for the old path a no-op when it lands. Shared by a rejected import
+        and a deliberate Clear."""
         self._thumb_token += 1
         self.current_file_path = ""
         self.info = _empty_media_info()
@@ -186,12 +185,30 @@ class MediaSession:
         for tab in self.tabs:
             tab.clear_selected_file()
         self._reset_hdr_previews()
+
+    def _reject_file(self, path):
+        """A probe found neither video nor audio: clear the selection and say why."""
+        llamalog.get("app").warning("Rejected %s: no video or audio stream could be identified "
+                                    "(unreadable, or a format this ffmpeg can't parse)", path)
+        self._clear_state()
         show_message(
             self._window, "Couldn't Read This File",
             f"“{os.path.basename(path)}”'s video and audio couldn't be identified. "
             "It may be corrupted, or use a format this app's bundled ffmpeg can't "
             "fully parse.",
         )
+
+    def clear_selection(self):
+        """The Clear button: deliberately drop the selected file and everything derived from it,
+        with no message (there's nothing wrong with the file). Unlike a rejected import, this is
+        the only way a tab's own controls (Clear/Queue Task/Mux, all gated on having a file) need
+        to grey out immediately rather than waiting on the next unrelated resync."""
+        if not self.current_file_path:
+            return
+        llamalog.get("app").info("Selection cleared")
+        self._clear_state()
+        for tab in self.tabs:
+            tab._sync_controls()
 
     def _is_audio_only(self, path):
         info = self.info

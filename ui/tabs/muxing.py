@@ -5,7 +5,11 @@ re-encoded, so there are no codec controls, and the container filter runs backwa
 source's codecs decide which containers it can be remuxed into (`formats.containers_for`), and
 a ticked picture subtitle track (PGS, VobSub) narrows them to Matroska. Video, Audio and Subtitles
 each list every track (the source's and any added from other files) in an editable, reorderable
-`TrackListBox` with undo / redo; Subtitles also edits a track's language and Default / Forced."""
+`TrackListBox` with undo / redo; Subtitles adds/edits a track's language and Default / Forced in
+one popup. There is no Strip checkbox anywhere in this tab: a kind with nothing ticked — whether
+the source never had one, every track was removed, or the user simply deselected them all — is
+this app's one "no ___ in the output" signal (`strip_video` / `strip_audio` / `strip_subtitles`
+are still real settings keys, just derived from that instead of a widget)."""
 import os
 import uuid
 
@@ -16,11 +20,10 @@ from core import formats
 from core.probe import probe_media
 from ui import scale
 from ui.scale import px
-from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow, set_line_text
-from ui.widgets.controls import button, button_width_for, labeled, set_enabled, IconButton
-from ui.widgets.dropdown import Dropdown, NO_OPTION
-from ui.widgets.toggles import CheckBox
-from ui.widgets.dialogs import BROWSE_FILTERS, pick_external_streams, show_message
+from ui.tabs.media_tab import MediaTab, hms, hrow, set_line_text
+from ui.widgets.controls import button, button_width_for, IconButton
+from ui.widgets.dialogs import pick_external_streams, show_message
+from ui.widgets.edit_dialogs import edit_subtitles
 from ui.widgets.tooltip import tip
 from ui.widgets.tracklist import TrackListBox
 from ui.widgets.tracklist import describe_stream as _describe_stream
@@ -32,16 +35,17 @@ _TRACK_TIP = ("Check as many streams as the output should carry — muxing never
               "Drag a track up or down to reorder it.")
 _REMOVE_TIP = ("Removes every checked track from the list, the source file's own included — "
                "the tracks below move up to fill the gap. Undo brings them back.")
-_UNDO_TIP = "Undoes the last Add / Remove Stream(s), reorder, or change of which tracks are selected."
+_UNDO_TIP = "Undoes the last add, remove, edit, reorder, or change of which tracks are checked."
 _REDO_TIP = "Redoes what Undo just took back."
 _SELECT_ALL_TIP = "Checks every track in the box — include all of them in the output."
 _DESELECT_ALL_TIP = "Unchecks every track in the box, without removing any of them."
-SUBTITLE_TRACK_TIP = "The subtitle track the Language, Default and Forced settings beside it edit."
-LANGUAGE_TIP = "The track's language tag, which players use to pick a subtitle track."
-DEFAULT_TIP = "Players show this track unless told otherwise. Only one track can be the default."
-FORCED_TIP = "Marks the track as forced: only foreign-language dialogue and signs, shown even with subtitles off."
+_ADD_EDIT_SUBS_TIP = ("Adds a subtitle track from another file, or changes an existing one's "
+                      "language and Default / Forced flags: opens a window with a dropdown of the tracks.")
+_SUBS_TRACK_TIP = ("Check as many subtitle tracks as the output should carry — muxing never re-encodes them. "
+                   "\"Add/Edit Subs\" adds one from another file. Drag a track up or down to reorder it.")
+_SUBS_REMOVE_TIP = ("Removes every checked subtitle track from the list, the source file's own included — "
+                    "the tracks below move up to fill the gap. Undo brings them back.")
 _KINDS = ("video", "audio", "subtitle")
-_LABELS = {"video": "Video", "audio": "Audio", "subtitle": "Subtitles"}
 
 _VIDEO_BROWSE_FILTER = "Video Files (*.mp4 *.mkv *.avi *.mov *.webm *.mxf *.ts *.vob)"
 # Built from the app's audio-extension list, so it can't drift from what counts as audio-only.
@@ -84,19 +88,16 @@ class MuxingTab(MediaTab):
         # a snapshot is a copy. Entry: {"id": "src:0" | "ext:ab12cd34", "source": "primary" |
         # "external", "file", "index" (0-based among that file's streams of the kind),
         # "stream" (the probe's description), "name" (an external file's name)}.
-        # A subtitle entry also holds its (editable) "language", "default" and "forced".
+        # A subtitle entry also holds its (editable, in Add/Edit Subs) "language", "default" and "forced".
         self._tracks = {kind: [] for kind in _KINDS}
         # Undo / redo, per kind: stacks of {"entries": [...], "checked": {ids}}.
         self._history = {kind: {"undo": [], "redo": []} for kind in _KINDS}
         # The ticks an undo / redo puts back, applied by the next `_sync_controls`.
         self._restore_checked = {}
-        # Ticked ids as of the last `_sync_controls`: a click reports after the fact, and its
+        # Checked ids as of the last `_sync_controls`: a click reports after the fact, and its
         # undo step is the state from before it.
         self._checked_baseline = {kind: set() for kind in _KINDS}
         self._boxes = {}
-        # The subtitle row the editor shows; label -> id for its Track dropdown.
-        self._active_subtitle = None
-        self._subtitle_track_ids = {}
         # The file the rows describe; when it differs from the current file the boxes reset.
         self._tracks_file = None
         # The probe the source entries were seeded from; a new one re-seeds them.
@@ -105,22 +106,32 @@ class MuxingTab(MediaTab):
     # ------------------------------------------------------------------ #
     #  Panels
     # ------------------------------------------------------------------ #
-    def _track_panel(self, kind, editor=None, min_width=340):
-        """The track box beside a column of Select / Deselect All, Add and Remove Stream(s),
-        and Undo / Redo with Strip (`editor`, if given, sits between them). The box takes
-        Overview's exact height so this page is never taller than Overview (a taller page would
-        shrink this tab's preview); the column's four rows only just fit, hence the compact icon
-        rows and 4px gaps."""
-        btn_width = button_width_for(["Add Stream(s)", "Remove Stream(s)"])
+    def _track_panel(self, kind, min_width=340):
+        """The track box beside its column of buttons: Select / Deselect All, Add [/ Edit for
+        Subtitles] Stream(s), Remove Stream(s), then Undo / Redo. The box takes Overview's exact
+        height so this page is never taller than Overview (a taller page would shrink this tab's
+        preview), which the column's four rows only just fit, hence the compact icon rows and
+        4px gaps."""
+        subs = kind == "subtitle"
+        add_text = "Add/Edit Subs" if subs else "Add Stream(s)"
+        remove_text = "Remove Subs" if subs else "Remove Stream(s)"
+        # One width on every page, so the buttons don't change size between sub-tabs.
+        btn_width = button_width_for(["Add Stream(s)", "Remove Stream(s)", "Add/Edit Subs", "Remove Subs"])
         select_spacing = 4      # the column's vertical gap, also between each icon pair
         select_width = (btn_width - select_spacing) // 2
         row, rl = hrow(spacing=10, align_bottom=True)
         box = TrackListBox(min_width=min_width)
         self._boxes[kind] = box
-        # The box is fixed at Overview's height, so it never grows as tracks arrive; Select /
-        # Deselect All take what the column has left (a fixed row height, since the button's
-        # stylesheet min-height overrides setFixedHeight). Both are measured off real widgets,
-        # so re-measured after a rescale.
+        side = QWidget()
+        sl = QVBoxLayout(side)
+        sl.setContentsMargins(0, 0, 0, 0)
+        # 4px gaps leave room for the rounding of five px() lengths: with 6 the column came out
+        # taller than the box at 1.25x.
+        scale.spacing(sl, select_spacing)
+        # The box is fixed at Overview's height, so it never grows as tracks arrive; the top row
+        # takes what the column has left (a fixed row height, since the button's stylesheet
+        # min-height overrides setFixedHeight). Both are measured off real widgets, so
+        # re-measured after a rescale.
         top = None
 
         def size_box():
@@ -130,54 +141,42 @@ class MuxingTab(MediaTab):
                 top.setFixedHeight(max(px(22), box.height() - 2 * px(28) - px(24) - 3 * px(4)))
         box.changed.connect(lambda: self._track_toggled(kind))
         box.reordered.connect(lambda ids: self._reorder_tracks(kind, ids))
-        tip(box, _TRACK_TIP)
+        tip(box, _SUBS_TRACK_TIP if subs else _TRACK_TIP)
         rl.addWidget(box, 1)
-        if editor is not None:
-            rl.addWidget(editor, 0, Qt.AlignBottom)
 
-        side = QWidget()
-        sl = QVBoxLayout(side)
-        sl.setContentsMargins(0, 0, 0, 0)
-        # 4px gaps leave room for the rounding of five px() lengths: with 6 the column came out
-        # taller than the box at 1.25x.
-        scale.spacing(sl, 4)
         top, tl = hrow(spacing=select_spacing, align_bottom=False)
         size_box()
         # Left-aligned, or the pair drifts apart across the column's width.
         tl.setAlignment(Qt.AlignLeft)
-        select_all_btn = IconButton("select-multiple", role="compact", width=select_width)
-        select_all_btn.clicked.connect(lambda: self._select_all(kind))
-        tip(select_all_btn, _SELECT_ALL_TIP)
-        select_all_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        tl.addWidget(select_all_btn)
-        deselect_all_btn = IconButton("deselect-multiple", role="compact", width=select_width)
-        deselect_all_btn.clicked.connect(lambda: self._deselect_all(kind))
-        tip(deselect_all_btn, _DESELECT_ALL_TIP)
-        deselect_all_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        tl.addWidget(deselect_all_btn)
+
+        def icon_button(icon, tooltip, handler, **size):
+            btn = IconButton(icon, role="compact", **size)
+            btn.clicked.connect(handler)
+            tip(btn, tooltip)
+            return btn
+
+        select_all_btn = icon_button("select-multiple", _SELECT_ALL_TIP, lambda: self._select_all(kind),
+                                     width=select_width)
+        deselect_all_btn = icon_button("deselect-multiple", _DESELECT_ALL_TIP, lambda: self._deselect_all(kind),
+                                       width=select_width)
+        for btn in (select_all_btn, deselect_all_btn):
+            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+            tl.addWidget(btn)
         sl.addWidget(top)
-        add_btn = button("Add Stream(s)", width=btn_width)
-        add_btn.clicked.connect(lambda: self._add_stream(kind))
+        add_btn = button(add_text, width=btn_width)
+        add_btn.clicked.connect((lambda: self._add_edit_subtitles()) if subs else (lambda: self._add_stream(kind)))
+        tip(add_btn, _ADD_EDIT_SUBS_TIP if subs else "")
         sl.addWidget(add_btn)
-        remove_btn = button("Remove Stream(s)", role="danger", width=btn_width)
+        remove_btn = button(remove_text, role="danger", width=btn_width)
         remove_btn.clicked.connect(lambda: self._remove_streams(kind))
-        tip(remove_btn, _REMOVE_TIP)
+        tip(remove_btn, _SUBS_REMOVE_TIP if subs else _REMOVE_TIP)
         sl.addWidget(remove_btn)
         history, hl = hrow(spacing=select_spacing, align_bottom=False)
         hl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        undo_btn = IconButton("undo", role="compact", width=select_width, height=24)
-        undo_btn.clicked.connect(lambda: self._undo(kind))
-        tip(undo_btn, _UNDO_TIP)
+        undo_btn = icon_button("undo", _UNDO_TIP, lambda: self._undo(kind), width=select_width, height=24)
+        redo_btn = icon_button("redo", _REDO_TIP, lambda: self._redo(kind), width=select_width, height=24)
         hl.addWidget(undo_btn)
-        redo_btn = IconButton("redo", role="compact", width=select_width, height=24)
-        redo_btn.clicked.connect(lambda: self._redo(kind))
-        tip(redo_btn, _REDO_TIP)
         hl.addWidget(redo_btn)
-        scale.spacer(hl, 8 - select_spacing)     # 8px from Redo to Strip, as Remove had
-        check = CheckBox(f"Strip {_LABELS[kind]}", color_key="stop")
-        check.clicked.connect(self._on_control_change)
-        tip(check, STRIP_TIP)
-        hl.addWidget(check)
         sl.addWidget(history)
         rl.addWidget(side, 0, Qt.AlignBottom)
         scale.bind_after(box, size_box)
@@ -187,125 +186,41 @@ class MuxingTab(MediaTab):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addStretch(1)
         outer.addWidget(row)
-        return (page, box, add_btn, remove_btn, check, select_all_btn, deselect_all_btn,
-                undo_btn, redo_btn)
+        return page, box, add_btn, remove_btn, select_all_btn, deselect_all_btn, undo_btn, redo_btn
 
     def build_video(self):
         page, self.video_box, self.video_add_btn, self.video_remove_btn, \
-            self.strip_video_check, self.video_select_all_btn, \
-            self.video_deselect_all_btn, self.video_undo_btn, \
-            self.video_redo_btn = self._track_panel("video")
+            self.video_select_all_btn, self.video_deselect_all_btn, \
+            self.video_undo_btn, self.video_redo_btn = self._track_panel("video")
         return page
 
     def build_audio(self):
         page, self.audio_box, self.audio_add_btn, self.audio_remove_btn, \
-            self.strip_audio_check, self.audio_select_all_btn, \
-            self.audio_deselect_all_btn, self.audio_undo_btn, \
-            self.audio_redo_btn = self._track_panel("audio")
+            self.audio_select_all_btn, self.audio_deselect_all_btn, \
+            self.audio_undo_btn, self.audio_redo_btn = self._track_panel("audio")
         return page
 
     def build_subtitles(self):
-        """The subtitle track box with the chosen track's Language and Default / Forced beside
-        it (a narrower box: the editor needs the width)."""
-        editor = QWidget()
-        el = QVBoxLayout(editor)
-        el.setContentsMargins(0, 0, 0, 0)
-        scale.spacing(el, 6)
-        top, tl = hrow(spacing=8)
-        self.subtitle_track_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(["Track 99"]))
-        self.subtitle_track_menu.picked.connect(self._on_subtitle_track_pick)
-        tip(self.subtitle_track_menu, SUBTITLE_TRACK_TIP)
-        box, self.subtitle_track_label = labeled("Track:", self.subtitle_track_menu)
-        tl.addWidget(box)
-        self.subtitle_language_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(
-            list(formats.SUBTITLE_LANGUAGES.values())))
-        self.subtitle_language_menu.picked.connect(self._on_subtitle_language_pick)
-        tip(self.subtitle_language_menu, LANGUAGE_TIP)
-        box, self.subtitle_language_label = labeled("Language:", self.subtitle_language_menu)
-        tl.addWidget(box)
-        el.addWidget(top)
-        flags, fl = hrow(spacing=12, align_bottom=False)
-        self.subtitle_default_check = CheckBox("Default")
-        self.subtitle_default_check.clicked.connect(lambda: self._set_subtitle_flag("default"))
-        tip(self.subtitle_default_check, DEFAULT_TIP)
-        fl.addWidget(self.subtitle_default_check)
-        self.subtitle_forced_check = CheckBox("Forced")
-        self.subtitle_forced_check.clicked.connect(lambda: self._set_subtitle_flag("forced"))
-        tip(self.subtitle_forced_check, FORCED_TIP)
-        fl.addWidget(self.subtitle_forced_check)
-        el.addWidget(flags)
-        page, self.subtitle_box, self.subtitle_add_btn, self.subtitle_remove_btn, \
-            self.strip_subtitles_check, self.subtitle_select_all_btn, \
-            self.subtitle_deselect_all_btn, self.subtitle_undo_btn, \
-            self.subtitle_redo_btn = self._track_panel("subtitle", editor=editor, min_width=150)
+        page, self.subtitle_box, self.subtitle_add_edit_btn, self.subtitle_remove_btn, \
+            self.subtitle_select_all_btn, self.subtitle_deselect_all_btn, \
+            self.subtitle_undo_btn, self.subtitle_redo_btn = self._track_panel("subtitle")
         return page
 
     # ------------------------------------------------------------------ #
-    #  Subtitle editor: language and flags of the track the Track dropdown shows
+    #  Add/Edit Subs: adds a track from another file, or edits an existing one's language/flags
     # ------------------------------------------------------------------ #
-    def _on_subtitle_track_pick(self, label):
-        self._active_subtitle = self._subtitle_track_ids.get(label)
-        self._sync_controls()
-
-    def _active_subtitle_entry(self):
-        return next((e for e in self._tracks["subtitle"] if e["id"] == self._active_subtitle), None)
-
-    def _on_subtitle_language_pick(self, name):
-        entry = self._active_subtitle_entry()
-        code = next((c for c, n in formats.SUBTITLE_LANGUAGES.items() if n == name), name)
-        if entry is not None and code != formats.language_code(entry.get("language")):
-            self._edit_tracks("subtitle", [dict(e, language=code) if e is entry else e
-                                           for e in self._tracks["subtitle"]])
-
-    def _set_subtitle_flag(self, flag):
-        """Default or Forced clicked: one undo step. Only one track can be the default."""
-        entry = self._active_subtitle_entry()
-        if entry is None:
-            return
-        on = (self.subtitle_default_check if flag == "default" else self.subtitle_forced_check).isChecked()
-        entries = []
-        for e in self._tracks["subtitle"]:
-            if e is entry:
-                e = dict(e, **{flag: on})
-            elif flag == "default" and on and e.get("default"):
-                e = dict(e, default=False)
-            entries.append(e)
-        self._edit_tracks("subtitle", entries)
-
-    def _sync_subtitle_editor(self, live):
-        """The Track dropdown lists every row; the rest shows (and edits) the chosen one."""
+    def _add_edit_subtitles(self):
+        """Open Add/Edit Subs. OK's edits (including any tracks it added) are one undo step."""
         entries = self._tracks["subtitle"]
-        self._subtitle_track_ids = {f"Track {n}": e["id"] for n, e in enumerate(entries, start=1)}
-        if self._active_subtitle not in self._subtitle_track_ids.values():
-            self._active_subtitle = entries[0]["id"] if entries else None
-        self.subtitle_track_menu.set_values(list(self._subtitle_track_ids) or [NO_OPTION])
-        entry = self._active_subtitle_entry()
-        languages = list(formats.SUBTITLE_LANGUAGES.values())
-        if entry is not None:
-            label = next(l for l, i in self._subtitle_track_ids.items() if i == entry["id"])
-            self.subtitle_track_menu.set(label)
-            name = formats.language_name(entry.get("language"))
-            if name not in languages:
-                languages.append(name)
-            self.subtitle_language_menu.set_values(languages)
-            self.subtitle_language_menu.set(name)
-        else:
-            self.subtitle_language_menu.set_values([NO_OPTION])
-        self.subtitle_default_check.setChecked(bool(entry and entry.get("default")))
-        self.subtitle_forced_check.setChecked(bool(entry and entry.get("forced")))
-        editable = live and entry is not None
-        set_enabled(self.subtitle_track_menu, self.subtitle_track_label, editable)
-        set_enabled(self.subtitle_language_menu, self.subtitle_language_label, editable)
-        self.subtitle_default_check.setEnabled(editable)
-        self.subtitle_forced_check.setEnabled(editable)
+        edited = edit_subtitles(self.app, entries, self._output_directory())
+        if edited is not None and edited != entries:
+            self._edit_tracks("subtitle", edited)
 
     # ------------------------------------------------------------------ #
-    #  Add / remove / reorder
+    #  Add / remove / reorder (Video and Audio; Subtitles adds through the popup above)
     def _add_stream(self, kind):
         if kind == "video":
             title, types = "Select Video Source", _VIDEO_BROWSE_FILTER + ";;All Files (*.*)"
-        elif kind == "subtitle":
-            title, types = "Select Subtitle Source", BROWSE_FILTERS["subtitle"]
         else:
             title, types = "Select Audio Source", _AUDIO_BROWSE_FILTER
         path, _ = QFileDialog.getOpenFileName(self, title, self._output_directory(), types)
@@ -336,9 +251,10 @@ class MuxingTab(MediaTab):
         The rows below move up and renumber; undo puts them back."""
         checked = set(self._boxes[kind].checked_ids())
         if not checked:
+            remove_name = "Remove Subs" if kind == "subtitle" else "Remove Stream(s)"
             show_message(
                 self.app, "Nothing to Remove",
-                f"Check the {kind} track(s) you want removed, then press Remove Stream(s) again.",
+                f"Check the {kind} track(s) you want removed, then press {remove_name} again.",
             )
             return
         self._edit_tracks(kind, [entry for entry in self._tracks[kind] if entry["id"] not in checked])
@@ -450,8 +366,6 @@ class MuxingTab(MediaTab):
 
     def _ticked_subtitle_codecs(self):
         """The raw codecs of the subtitle tracks going into the output."""
-        if self.strip_subtitles_check.isChecked():
-            return []
         return [track["codec_name"] for track in self._track_args("subtitle")]
 
     # ------------------------------------------------------------------ #
@@ -459,16 +373,14 @@ class MuxingTab(MediaTab):
     # ------------------------------------------------------------------ #
     def _sync_controls(self, *_):
         """The only place derived UI state is decided. Idempotent.
-          1. stream presence (both stripped would write an empty file)
-          2. the track boxes from `self._tracks` (reset when the file changes)
+          1. the track boxes from `self._tracks` (reset when the file changes)
+          2. nothing checked = nothing of that kind in the output: this tab's one "strip" signal,
+             marks the sub-tab red and greys the preview (an emptied panel keeps Add and Undo /
+             Redo live — they're the ways back)
           3. the container inversion: the source's codecs decide the containers
-          4. a stripped, absent or emptied stream greys its panel and marks its sub-tab red
-             (an emptied one keeps Add Stream(s) and Undo / Redo, the ways back)
-          5. subtitles: a ticked picture track narrows the containers to Matroska; the editor
-          6. chapters (the shared page)
-          7. the Overview rundown"""
-        stripping_video = self.strip_video_check.isChecked()
-        stripping_audio = self.strip_audio_check.isChecked()
+          4. subtitles: a ticked picture track narrows the containers to Matroska
+          5. chapters (the shared page)
+          6. the Overview rundown"""
         info = self.app.media.info
         video_absent = info.get("has_video") is False
         audio_absent = info.get("has_audio") is False
@@ -483,59 +395,42 @@ class MuxingTab(MediaTab):
             self._checked_baseline[kind] = set(box.checked_ids())
         self._tracks_file = current_path
 
-        # Every track of a kind removed reads as stripped, once the probe says the source has
-        # that kind (before it, the lists are simply empty).
-        video_emptied = info.get("has_video") is True and not self._tracks["video"]
-        audio_emptied = info.get("has_audio") is True and not self._tracks["audio"]
+        # Nothing checked of a kind the source has (or once had, via a still-checked external
+        # track) means no ___ in the output — however that came to be.
+        video_stripped = video_absent or (info.get("has_video") is True and not self.video_box.checked_ids())
+        audio_stripped = audio_absent or (info.get("has_audio") is True and not self.audio_box.checked_ids())
+        subtitle_stripped = bool(self._tracks["subtitle"]) and not self.subtitle_box.checked_ids()
+        self.sub_tab_bar.set_marked("Video", video_stripped)
+        self.sub_tab_bar.set_marked("Audio", audio_stripped)
+        self.sub_tab_bar.set_marked("Subtitles", subtitle_stripped)
+        self.carousel.set_strip_state(video_stripped, audio_stripped)
 
-        # With one kind stripped or emptied, the other can't be.
-        self.strip_video_check.setEnabled(not (stripping_audio or audio_emptied or video_absent))
-        self.strip_audio_check.setEnabled(not (stripping_video or video_emptied or audio_absent))
-        self.sub_tab_bar.set_marked("Video", stripping_video or video_absent or video_emptied)
-        self.sub_tab_bar.set_marked("Audio", stripping_audio or audio_absent or audio_emptied)
-        self.carousel.set_strip_state(stripping_video or video_emptied,
-                                      stripping_audio or audio_absent or audio_emptied)
-
-        video_codec = None if stripping_video else info.get("video")
-        audio_codec = None if stripping_audio else info.get("audio")
+        video_codec = None if video_stripped else info.get("video")
+        audio_codec = None if audio_stripped else info.get("audio")
         subtitle_ok = formats.containers_for_subtitles(self._ticked_subtitle_codecs())
         self._retarget_container([c for c in formats.containers_for(video_codec, audio_codec) if c in subtitle_ok]
                                  or subtitle_ok)
 
-        for kind, stripping, absent in (("video", stripping_video, video_absent),
-                                        ("audio", stripping_audio, audio_absent)):
-            # "open": not stripped or absent (an emptied panel stays open, to add or undo).
-            # "has rows": something to select, check or remove.
-            open_ = not stripping and not absent
+        add_btns = {"video": self.video_add_btn, "audio": self.audio_add_btn,
+                   "subtitle": self.subtitle_add_edit_btn}
+        has_file = bool(current_path)
+        # "open": the source has this kind — subtitles have no such source flag, so a file being
+        # selected at all stands in for it. "has rows": something to select, check or remove.
+        for kind, absent in (("video", video_absent), ("audio", audio_absent), ("subtitle", not has_file)):
+            open_ = not absent
             has_rows = open_ and bool(self._tracks[kind])
             history = self._history[kind]
-            getattr(self, f"{kind}_box").setEnabled(has_rows)
-            getattr(self, f"{kind}_add_btn").setEnabled(open_)
+            self._boxes[kind].setEnabled(has_rows)
+            add_btns[kind].setEnabled(open_)
             getattr(self, f"{kind}_remove_btn").setEnabled(has_rows)
             getattr(self, f"{kind}_select_all_btn").setEnabled(has_rows)
             getattr(self, f"{kind}_deselect_all_btn").setEnabled(has_rows)
             getattr(self, f"{kind}_undo_btn").setEnabled(open_ and bool(history["undo"]))
             getattr(self, f"{kind}_redo_btn").setEnabled(open_ and bool(history["redo"]))
 
-        has_file = bool(current_path)
-        stripping_subtitles = self.strip_subtitles_check.isChecked()
-        subtitles_open = has_file and not stripping_subtitles
-        has_subtitles = subtitles_open and bool(self._tracks["subtitle"])
-        history = self._history["subtitle"]
-        self.subtitle_box.setEnabled(has_subtitles)
-        self.subtitle_add_btn.setEnabled(subtitles_open)
-        for widget in (self.subtitle_remove_btn, self.subtitle_select_all_btn, self.subtitle_deselect_all_btn):
-            widget.setEnabled(has_subtitles)
-        self.subtitle_undo_btn.setEnabled(subtitles_open and bool(history["undo"]))
-        self.subtitle_redo_btn.setEnabled(subtitles_open and bool(history["redo"]))
-        self.strip_subtitles_check.setEnabled(has_file and bool(self._tracks["subtitle"]))
-        self.sub_tab_bar.set_marked("Subtitles", stripping_subtitles)
-        self._sync_subtitle_editor(has_subtitles)
         self._sync_chapters()
-
         self._refresh_summary()
-        self._apply_import_gate(extra=((self.subtitle_track_menu, self.subtitle_track_label),
-                                       (self.subtitle_language_menu, self.subtitle_language_label)))
+        self._apply_import_gate()
 
     def _retarget_container(self, allowed):
         lost = self.format_menu.retarget(allowed)
@@ -558,11 +453,9 @@ class MuxingTab(MediaTab):
         info = self.app.media.info
         no_file = not self.app.media.current_file_path
 
-        def stream(kind, check, box):
+        def stream(kind, box):
             if no_file:
                 return "— no streams selected —", "stop"
-            if check.isChecked():
-                return "— removed —", "stop"
             if info.get(f"has_{kind}") is False:
                 return f"— no {kind} stream —", "stop"
             if info.get(f"has_{kind}") is True and not self._tracks[kind]:
@@ -591,8 +484,8 @@ class MuxingTab(MediaTab):
         else:
             length = (f"{hms(start)} → {hms(start + duration)} · keyframe", None)
         self.summary.set_values([
-            stream("video", self.strip_video_check, self.video_box),
-            stream("audio", self.strip_audio_check, self.audio_box),
+            stream("video", self.video_box),
+            stream("audio", self.audio_box),
             length,
         ])
 
@@ -611,41 +504,40 @@ class MuxingTab(MediaTab):
     # ------------------------------------------------------------------ #
     #  Settings in / out
     # ------------------------------------------------------------------ #
+    def _gather_strip_subtitles(self):
+        """Computed in `_gather_settings` itself, from the track box — there's no checkbox here."""
+        return {}
+
+    def _apply_strip_flags(self, settings):
+        """A preset's strip preference: uncheck every track of that kind on the next sync — this
+        tab's only "strip" signal now that there's no checkbox (see `_sync_controls`)."""
+        for kind, key in (("video", "strip_video"), ("audio", "strip_audio"), ("subtitle", "strip_subtitles")):
+            if settings.get(key):
+                self._restore_checked[kind] = set()
+
     def _gather_settings(self):
         settings = self._gather_common()
+        video_tracks = self._track_args("video")
+        audio_tracks = self._track_args("audio")
+        subtitle_tracks = self._track_args("subtitle")
         settings.update({
-            "video_tracks": self._track_args("video"),
-            "strip_video": self.strip_video_check.isChecked(),
-            "audio_tracks": self._track_args("audio"),
-            "strip_audio": self.strip_audio_check.isChecked(),
-            "subtitle_tracks": self._track_args("subtitle"),
+            "video_tracks": video_tracks,
+            "strip_video": not video_tracks,
+            "audio_tracks": audio_tracks,
+            "strip_audio": not audio_tracks,
+            "subtitle_tracks": subtitle_tracks,
+            "strip_subtitles": not subtitle_tracks,
         })
         return settings
 
     def _validate_specific(self, settings):
-        """A box with rows but nothing checked blocks the job; an empty box doesn't."""
-        info = self.app.media.info
-        if (not settings["strip_video"] and info.get("has_video") is not False
-                and self.video_box.item_count() and not settings["video_tracks"]):
-            show_message(
-                self.app, "No Video Track Selected",
-                "Check at least one Video track to include, or turn on Strip Video.",
-            )
-            return False
-        if (not settings["strip_audio"] and info.get("has_audio") is not False
-                and self.audio_box.item_count() and not settings["audio_tracks"]):
-            show_message(
-                self.app, "No Audio Track Selected",
-                "Check at least one Audio track to include, or turn on Strip Audio.",
-            )
-            return False
-        # Tracks can be removed outright, so check there is something to map at all.
-        if not ((not settings["strip_video"] and settings["video_tracks"])
-                or (not settings["strip_audio"] and settings["audio_tracks"])):
+        """Nothing checked is a valid, deliberate "no ___" choice; the only real block is
+        winding up with nothing to mux at all."""
+        if not (settings["video_tracks"] or settings["audio_tracks"]):
             show_message(
                 self.app, "Nothing to Mux",
-                "Every track has been removed or stripped. Keep at least one track "
-                "(Undo brings a removed one back).",
+                "Every video and audio track has been removed or deselected. Keep at least one "
+                "track (Undo brings a removed one back).",
             )
             return False
         return True

@@ -942,12 +942,6 @@
    656,
    118
   ],
-  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/CheckBox#0": [
-   788,
-   421,
-   88,
-   24
-  ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
    220,
    331,
@@ -1074,6 +1068,36 @@
    65,
    26
   ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2": [
+   799,
+   399,
+   77,
+   50
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0": [
+   800,
+   399,
+   76,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#0": [
+   800,
+   399,
+   36,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#1": [
+   840,
+   399,
+   36,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/StripButton#0": [
+   799,
+   425,
+   77,
+   24
+  ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
    220,
    15,
@@ -1131,13 +1155,19 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
    220,
    498,
-   324,
+   60,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
-   552,
+   288,
    498,
-   324,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
    28
   ]
  },
@@ -1268,12 +1298,6 @@
    984,
    180
   ],
-  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/CheckBox#0": [
-   1182,
-   632,
-   132,
-   36
-  ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
    330,
    496,
@@ -1400,6 +1424,36 @@
    97,
    39
   ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2": [
+   1198,
+   599,
+   116,
+   75
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0": [
+   1200,
+   599,
+   114,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#0": [
+   1200,
+   599,
+   54,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#1": [
+   1260,
+   599,
+   54,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/StripButton#0": [
+   1198,
+   638,
+   116,
+   36
+  ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
    330,
    23,
@@ -1457,13 +1511,19 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
    330,
    747,
-   486,
+   90,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
-   828,
+   432,
    747,
-   486,
+   435,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   879,
+   747,
+   435,
    42
   ]
  },
@@ -1594,12 +1654,6 @@
    1312,
    236
   ],
-  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/CheckBox#0": [
-   1576,
-   842,
-   176,
-   48
-  ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
    440,
    662,
@@ -1726,6 +1780,36 @@
    129,
    52
   ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2": [
+   1598,
+   798,
+   154,
+   100
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0": [
+   1600,
+   798,
+   152,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#0": [
+   1600,
+   798,
+   72,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#1": [
+   1680,
+   798,
+   72,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/StripButton#0": [
+   1598,
+   850,
+   154,
+   48
+  ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
    440,
    30,
@@ -1783,13 +1867,835 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
    440,
    996,
-   648,
+   120,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
-   1104,
+   576,
    996,
-   648,
+   580,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   1172,
+   996,
+   580,
+   56
+  ]
+ },
+ "Encoding/Chapters@1.0": {
+  "/Sidebar#0": [
+   0,
+   0,
+   200,
+   540
+  ],
+  "/Sidebar#0/QLabel#0": [
+   15,
+   102,
+   170,
+   170
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   45,
+   292,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   45,
+   340,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   45,
+   388,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   45,
+   436,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   45,
+   482,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   24,
+   200,
+   54
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   518,
+   200,
+   12
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   24,
+   78,
+   151,
+   4
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   896,
+   540
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   155,
+   292,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   155,
+   340,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   155,
+   388,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   155,
+   436,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   155,
+   482,
+   55,
+   28
+  ],
+  "/_TabFrame#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0": [
+   220,
+   331,
+   656,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0": [
+   220,
+   331,
+   656,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0": [
+   220,
+   331,
+   656,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0": [
+   735,
+   333,
+   141,
+   116
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0": [
+   735,
+   333,
+   141,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
+   735,
+   333,
+   68,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
+   807,
+   333,
+   68,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1": [
+   735,
+   427,
+   141,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
+   735,
+   427,
+   68,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
+   807,
+   427,
+   68,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   735,
+   363,
+   141,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#1": [
+   735,
+   395,
+   141,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0": [
+   220,
+   331,
+   505,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0/ScaledLabel#0": [
+   439,
+   382,
+   71,
+   16
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
+   220,
+   15,
+   656,
+   34
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/MarqueeLabel#0": [
+   597,
+   23,
+   279,
+   18
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/SubTabBar#0": [
+   220,
+   15,
+   367,
+   34
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1": [
+   220,
+   64,
+   656,
+   249
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   220,
+   64,
+   656,
+   249
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2": [
+   220,
+   460,
+   656,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledButton#0": [
+   796,
+   460,
+   80,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledLineEdit#0": [
+   220,
+   460,
+   570,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3": [
+   220,
+   498,
+   656,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
+   220,
+   498,
+   60,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
+   288,
+   498,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
+   28
+  ]
+ },
+ "Encoding/Chapters@1.5": {
+  "/Sidebar#0": [
+   0,
+   0,
+   300,
+   810
+  ],
+  "/Sidebar#0/QLabel#0": [
+   22,
+   152,
+   255,
+   255
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   67,
+   437,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   67,
+   509,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   67,
+   581,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   67,
+   653,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   67,
+   723,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   36,
+   300,
+   80
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   777,
+   300,
+   18
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   37,
+   116,
+   226,
+   6
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   1344,
+   810
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   232,
+   437,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   232,
+   509,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   232,
+   581,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   232,
+   653,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   232,
+   723,
+   83,
+   42
+  ],
+  "/_TabFrame#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0": [
+   330,
+   494,
+   984,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0": [
+   330,
+   494,
+   984,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0": [
+   330,
+   494,
+   984,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0": [
+   1102,
+   497,
+   212,
+   177
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0": [
+   1102,
+   497,
+   212,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
+   1102,
+   497,
+   102,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
+   1210,
+   497,
+   102,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1": [
+   1102,
+   641,
+   212,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
+   1102,
+   641,
+   102,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
+   1210,
+   641,
+   102,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   1102,
+   545,
+   212,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#1": [
+   1102,
+   593,
+   212,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0": [
+   330,
+   494,
+   757,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0/ScaledLabel#0": [
+   658,
+   572,
+   106,
+   24
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
+   330,
+   23,
+   984,
+   51
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/MarqueeLabel#0": [
+   895,
+   35,
+   419,
+   27
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/SubTabBar#0": [
+   330,
+   23,
+   550,
+   51
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1": [
+   330,
+   96,
+   984,
+   371
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   330,
+   96,
+   984,
+   371
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2": [
+   330,
+   690,
+   984,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledButton#0": [
+   1194,
+   690,
+   120,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledLineEdit#0": [
+   330,
+   690,
+   855,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3": [
+   330,
+   747,
+   984,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
+   330,
+   747,
+   90,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
+   432,
+   747,
+   435,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   879,
+   747,
+   435,
+   42
+  ]
+ },
+ "Encoding/Chapters@2.0": {
+  "/Sidebar#0": [
+   0,
+   0,
+   400,
+   1080
+  ],
+  "/Sidebar#0/QLabel#0": [
+   30,
+   203,
+   340,
+   340
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   90,
+   583,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   90,
+   679,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   90,
+   775,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   90,
+   871,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   90,
+   964,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   48,
+   400,
+   107
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   1036,
+   400,
+   24
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   49,
+   155,
+   302,
+   8
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   1792,
+   1080
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   310,
+   583,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   310,
+   679,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   310,
+   775,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   310,
+   871,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   310,
+   964,
+   110,
+   56
+  ],
+  "/_TabFrame#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0": [
+   440,
+   662,
+   1312,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0": [
+   440,
+   662,
+   1312,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0": [
+   440,
+   662,
+   1312,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0": [
+   1470,
+   666,
+   282,
+   232
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0": [
+   1470,
+   666,
+   282,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
+   1470,
+   666,
+   136,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
+   1614,
+   666,
+   136,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1": [
+   1470,
+   854,
+   282,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
+   1470,
+   854,
+   136,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
+   1614,
+   854,
+   136,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   1470,
+   726,
+   282,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#1": [
+   1470,
+   790,
+   282,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0": [
+   440,
+   662,
+   1010,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0/ScaledLabel#0": [
+   878,
+   764,
+   141,
+   32
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
+   440,
+   30,
+   1312,
+   68
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/MarqueeLabel#0": [
+   1194,
+   46,
+   558,
+   36
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/SubTabBar#0": [
+   440,
+   30,
+   734,
+   68
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1": [
+   440,
+   128,
+   1312,
+   498
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   440,
+   128,
+   1312,
+   498
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2": [
+   440,
+   920,
+   1312,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledButton#0": [
+   1592,
+   920,
+   160,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledLineEdit#0": [
+   440,
+   920,
+   1140,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3": [
+   440,
+   996,
+   1312,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
+   440,
+   996,
+   120,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
+   576,
+   996,
+   580,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   1172,
+   996,
+   580,
    56
   ]
  },
@@ -2175,13 +3081,19 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
    220,
    498,
-   324,
+   60,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
-   552,
+   288,
    498,
-   324,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
    28
   ]
  },
@@ -2549,13 +3461,19 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
    220,
    498,
-   324,
+   60,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
-   552,
+   288,
    498,
-   324,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
    28
   ]
  },
@@ -2923,13 +3841,19 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
    330,
    747,
-   486,
+   90,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
-   828,
+   432,
    747,
-   486,
+   435,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   879,
+   747,
+   435,
    42
   ]
  },
@@ -3297,13 +4221,925 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
    440,
    996,
-   648,
+   120,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
-   1104,
+   576,
    996,
-   648,
+   580,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   1172,
+   996,
+   580,
+   56
+  ]
+ },
+ "Encoding/Subtitles@1.0": {
+  "/Sidebar#0": [
+   0,
+   0,
+   200,
+   540
+  ],
+  "/Sidebar#0/QLabel#0": [
+   15,
+   102,
+   170,
+   170
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   45,
+   292,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   45,
+   340,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   45,
+   388,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   45,
+   436,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   45,
+   482,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   24,
+   200,
+   54
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   518,
+   200,
+   12
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   24,
+   78,
+   151,
+   4
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   896,
+   540
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   155,
+   292,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   155,
+   340,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   155,
+   388,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   155,
+   436,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   155,
+   482,
+   55,
+   28
+  ],
+  "/_TabFrame#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0": [
+   220,
+   331,
+   656,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0": [
+   220,
+   331,
+   656,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
+   220,
+   331,
+   358,
+   55
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
+   220,
+   331,
+   151,
+   55
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/Dropdown#0": [
+   220,
+   358,
+   151,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#0": [
+   220,
+   331,
+   72,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   379,
+   358,
+   130,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1": [
+   220,
+   392,
+   358,
+   55
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/CheckBox#0": [
+   345,
+   423,
+   69,
+   24
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/CheckBox#1": [
+   428,
+   423,
+   66,
+   24
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/CheckBox#2": [
+   508,
+   423,
+   70,
+   24
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#0": [
+   220,
+   392,
+   111,
+   55
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#0/Dropdown#0": [
+   220,
+   419,
+   111,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#0/ScaledLabel#0": [
+   220,
+   392,
+   50,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2": [
+   785,
+   399,
+   91,
+   50
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0": [
+   786,
+   399,
+   90,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#0": [
+   786,
+   399,
+   43,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#1": [
+   833,
+   399,
+   43,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/StripButton#0": [
+   785,
+   425,
+   91,
+   24
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
+   220,
+   15,
+   656,
+   34
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/MarqueeLabel#0": [
+   597,
+   23,
+   279,
+   18
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/SubTabBar#0": [
+   220,
+   15,
+   367,
+   34
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1": [
+   220,
+   64,
+   656,
+   249
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   220,
+   64,
+   656,
+   249
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2": [
+   220,
+   460,
+   656,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledButton#0": [
+   796,
+   460,
+   80,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledLineEdit#0": [
+   220,
+   460,
+   570,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3": [
+   220,
+   498,
+   656,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
+   220,
+   498,
+   60,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
+   288,
+   498,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
+   28
+  ]
+ },
+ "Encoding/Subtitles@1.5": {
+  "/Sidebar#0": [
+   0,
+   0,
+   300,
+   810
+  ],
+  "/Sidebar#0/QLabel#0": [
+   22,
+   152,
+   255,
+   255
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   67,
+   437,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   67,
+   509,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   67,
+   581,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   67,
+   653,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   67,
+   723,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   36,
+   300,
+   80
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   777,
+   300,
+   18
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   37,
+   116,
+   226,
+   6
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   1344,
+   810
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   232,
+   437,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   232,
+   509,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   232,
+   581,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   232,
+   653,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   232,
+   723,
+   83,
+   42
+  ],
+  "/_TabFrame#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0": [
+   330,
+   494,
+   984,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0": [
+   330,
+   494,
+   984,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
+   330,
+   496,
+   537,
+   83
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
+   330,
+   496,
+   226,
+   83
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/Dropdown#0": [
+   330,
+   537,
+   226,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#0": [
+   330,
+   496,
+   108,
+   39
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   568,
+   537,
+   195,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1": [
+   330,
+   588,
+   537,
+   83
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/CheckBox#0": [
+   517,
+   635,
+   104,
+   36
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/CheckBox#1": [
+   642,
+   635,
+   99,
+   36
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/CheckBox#2": [
+   762,
+   635,
+   105,
+   36
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#0": [
+   330,
+   588,
+   166,
+   83
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#0/Dropdown#0": [
+   330,
+   629,
+   166,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#0/ScaledLabel#0": [
+   330,
+   588,
+   75,
+   39
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2": [
+   1178,
+   599,
+   136,
+   75
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0": [
+   1180,
+   599,
+   134,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#0": [
+   1180,
+   599,
+   64,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#1": [
+   1250,
+   599,
+   64,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/StripButton#0": [
+   1178,
+   638,
+   136,
+   36
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
+   330,
+   23,
+   984,
+   51
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/MarqueeLabel#0": [
+   895,
+   35,
+   419,
+   27
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/SubTabBar#0": [
+   330,
+   23,
+   550,
+   51
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1": [
+   330,
+   96,
+   984,
+   371
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   330,
+   96,
+   984,
+   371
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2": [
+   330,
+   690,
+   984,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledButton#0": [
+   1194,
+   690,
+   120,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledLineEdit#0": [
+   330,
+   690,
+   855,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3": [
+   330,
+   747,
+   984,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
+   330,
+   747,
+   90,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
+   432,
+   747,
+   435,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   879,
+   747,
+   435,
+   42
+  ]
+ },
+ "Encoding/Subtitles@2.0": {
+  "/Sidebar#0": [
+   0,
+   0,
+   400,
+   1080
+  ],
+  "/Sidebar#0/QLabel#0": [
+   30,
+   203,
+   340,
+   340
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   90,
+   583,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   90,
+   679,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   90,
+   775,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   90,
+   871,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   90,
+   964,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   48,
+   400,
+   107
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   1036,
+   400,
+   24
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   49,
+   155,
+   302,
+   8
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   1792,
+   1080
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   310,
+   583,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   310,
+   679,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   310,
+   775,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   310,
+   871,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   310,
+   964,
+   110,
+   56
+  ],
+  "/_TabFrame#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0": [
+   440,
+   662,
+   1312,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0": [
+   440,
+   662,
+   1312,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
+   440,
+   662,
+   716,
+   110
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
+   440,
+   662,
+   302,
+   110
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/Dropdown#0": [
+   440,
+   716,
+   302,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#0": [
+   440,
+   662,
+   143,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   758,
+   716,
+   260,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1": [
+   440,
+   784,
+   716,
+   110
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/CheckBox#0": [
+   690,
+   846,
+   138,
+   48
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/CheckBox#1": [
+   856,
+   846,
+   132,
+   48
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/CheckBox#2": [
+   1016,
+   846,
+   140,
+   48
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#0": [
+   440,
+   784,
+   222,
+   110
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#0/Dropdown#0": [
+   440,
+   838,
+   222,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#0/ScaledLabel#0": [
+   440,
+   784,
+   99,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2": [
+   1570,
+   798,
+   182,
+   100
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0": [
+   1572,
+   798,
+   180,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#0": [
+   1572,
+   798,
+   86,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/IconButton#1": [
+   1666,
+   798,
+   86,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/StripButton#0": [
+   1570,
+   850,
+   182,
+   48
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
+   440,
+   30,
+   1312,
+   68
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/MarqueeLabel#0": [
+   1194,
+   46,
+   558,
+   36
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0/SubTabBar#0": [
+   440,
+   30,
+   734,
+   68
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1": [
+   440,
+   128,
+   1312,
+   498
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   440,
+   128,
+   1312,
+   498
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2": [
+   440,
+   920,
+   1312,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledButton#0": [
+   1592,
+   920,
+   160,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#2/ScaledLineEdit#0": [
+   440,
+   920,
+   1140,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3": [
+   440,
+   996,
+   1312,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
+   440,
+   996,
+   120,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
+   576,
+   996,
+   580,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   1172,
+   996,
+   580,
    56
   ]
  },
@@ -3434,159 +5270,153 @@
    656,
    118
   ],
-  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/CheckBox#0": [
-   788,
-   425,
-   88,
-   24
-  ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
    220,
-   340,
+   338,
    527,
    55
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
    220,
-   340,
+   338,
    98,
    55
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/Dropdown#0": [
    220,
-   367,
+   365,
    98,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#0": [
    220,
-   340,
+   338,
    43,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#1": [
    326,
-   340,
+   338,
    115,
    55
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#1/Dropdown#0": [
    326,
-   367,
+   365,
    115,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#1/ScaledLabel#0": [
    326,
-   340,
+   338,
    36,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#2": [
    449,
-   340,
+   338,
    102,
    55
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#2/Dropdown#0": [
    449,
-   367,
+   365,
    102,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#2/ScaledLabel#0": [
    449,
-   340,
+   338,
    29,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#3": [
    559,
-   340,
+   338,
    97,
    55
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#3/Dropdown#0": [
    559,
-   367,
+   365,
    97,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#3/ScaledLabel#0": [
    559,
-   340,
+   338,
    78,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#4": [
    664,
-   340,
+   338,
    83,
    55
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#4/Dropdown#0": [
    664,
-   367,
+   365,
    83,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#4/ScaledLabel#0": [
    664,
-   340,
+   338,
    56,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1": [
    220,
-   395,
+   393,
    527,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/ScaledLabel#0": [
    220,
-   395,
+   393,
    436,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/ScaledLabel#1": [
    664,
-   395,
+   393,
    83,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2": [
    220,
-   421,
+   419,
    527,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/Dropdown#0": [
    664,
-   421,
+   419,
    83,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0": [
    220,
-   421,
+   419,
    436,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/QSlider#0": [
    240,
-   426,
+   424,
    378,
    18
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/ScaledLabel#0": [
    220,
-   421,
+   419,
    16,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/ScaledLabel#1": [
    622,
-   421,
+   419,
    34,
    28
   ],
@@ -3606,6 +5436,36 @@
    834,
    357,
    42,
+   24
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4": [
+   799,
+   399,
+   77,
+   50
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/QWidget#0": [
+   800,
+   399,
+   76,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/QWidget#0/IconButton#0": [
+   800,
+   399,
+   36,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/QWidget#0/IconButton#1": [
+   840,
+   399,
+   36,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/StripButton#0": [
+   799,
+   425,
+   77,
    24
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
@@ -3665,13 +5525,19 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
    220,
    498,
-   324,
+   60,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
-   552,
+   288,
    498,
-   324,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
    28
   ]
  },
@@ -3802,159 +5668,153 @@
    984,
    180
   ],
-  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/CheckBox#0": [
-   1182,
-   638,
-   132,
-   36
-  ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
    330,
-   510,
+   507,
    790,
    83
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
    330,
-   510,
+   507,
    147,
    83
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/Dropdown#0": [
    330,
-   551,
+   548,
    147,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#0": [
    330,
-   510,
+   507,
    64,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#1": [
    489,
-   510,
+   507,
    172,
    83
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#1/Dropdown#0": [
    489,
-   551,
+   548,
    172,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#1/ScaledLabel#0": [
    489,
-   510,
+   507,
    54,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#2": [
    673,
-   510,
+   507,
    153,
    83
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#2/Dropdown#0": [
    673,
-   551,
+   548,
    153,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#2/ScaledLabel#0": [
    673,
-   510,
+   507,
    43,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#3": [
    838,
-   510,
+   507,
    146,
    83
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#3/Dropdown#0": [
    838,
-   551,
+   548,
    146,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#3/ScaledLabel#0": [
    838,
-   510,
+   507,
    116,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#4": [
    996,
-   510,
+   507,
    124,
    83
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#4/Dropdown#0": [
    996,
-   551,
+   548,
    124,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#4/ScaledLabel#0": [
    996,
-   510,
+   507,
    84,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1": [
    330,
-   593,
+   590,
    790,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/ScaledLabel#0": [
    330,
-   593,
+   590,
    654,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/ScaledLabel#1": [
    996,
-   593,
+   590,
    124,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2": [
    330,
-   632,
+   629,
    790,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/Dropdown#0": [
    996,
-   632,
+   629,
    124,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0": [
    330,
-   632,
+   629,
    654,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/QSlider#0": [
    360,
-   639,
+   636,
    567,
    27
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/ScaledLabel#0": [
    330,
-   632,
+   629,
    24,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/ScaledLabel#1": [
    933,
-   632,
+   629,
    51,
    42
   ],
@@ -3974,6 +5834,36 @@
    1251,
    533,
    63,
+   36
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4": [
+   1198,
+   599,
+   116,
+   75
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/QWidget#0": [
+   1200,
+   599,
+   114,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/QWidget#0/IconButton#0": [
+   1200,
+   599,
+   54,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/QWidget#0/IconButton#1": [
+   1260,
+   599,
+   54,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/StripButton#0": [
+   1198,
+   638,
+   116,
    36
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
@@ -4033,13 +5923,19 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
    330,
    747,
-   486,
+   90,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
-   828,
+   432,
    747,
-   486,
+   435,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   879,
+   747,
+   435,
    42
   ]
  },
@@ -4170,159 +6066,153 @@
    1312,
    236
   ],
-  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/CheckBox#0": [
-   1576,
-   850,
-   176,
-   48
-  ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
    440,
-   680,
+   676,
    1054,
    110
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
    440,
-   680,
+   676,
    196,
    110
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/Dropdown#0": [
    440,
-   734,
+   730,
    196,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#0": [
    440,
-   680,
+   676,
    85,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#1": [
    652,
-   680,
+   676,
    230,
    110
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#1/Dropdown#0": [
    652,
-   734,
+   730,
    230,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#1/ScaledLabel#0": [
    652,
-   680,
+   676,
    72,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#2": [
    898,
-   680,
+   676,
    204,
    110
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#2/Dropdown#0": [
    898,
-   734,
+   730,
    204,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#2/ScaledLabel#0": [
    898,
-   680,
+   676,
    57,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#3": [
    1118,
-   680,
+   676,
    194,
    110
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#3/Dropdown#0": [
    1118,
-   734,
+   730,
    194,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#3/ScaledLabel#0": [
    1118,
-   680,
+   676,
    155,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#4": [
    1328,
-   680,
+   676,
    166,
    110
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#4/Dropdown#0": [
    1328,
-   734,
+   730,
    166,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#4/ScaledLabel#0": [
    1328,
-   680,
+   676,
    111,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1": [
    440,
-   790,
+   786,
    1054,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/ScaledLabel#0": [
    440,
-   790,
+   786,
    872,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/ScaledLabel#1": [
    1328,
-   790,
+   786,
    166,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2": [
    440,
-   842,
+   838,
    1054,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/Dropdown#0": [
    1328,
-   842,
+   838,
    166,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0": [
    440,
-   842,
+   838,
    872,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/QSlider#0": [
    479,
-   852,
+   848,
    757,
    36
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/ScaledLabel#0": [
    440,
-   842,
+   838,
    31,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#2/QWidget#0/ScaledLabel#1": [
    1244,
-   842,
+   838,
    68,
    56
   ],
@@ -4342,6 +6232,36 @@
    1668,
    714,
    84,
+   48
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4": [
+   1598,
+   798,
+   154,
+   100
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/QWidget#0": [
+   1600,
+   798,
+   152,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/QWidget#0/IconButton#0": [
+   1600,
+   798,
+   72,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/QWidget#0/IconButton#1": [
+   1680,
+   798,
+   72,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#4/StripButton#0": [
+   1598,
+   850,
+   154,
    48
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#0": [
@@ -4401,13 +6321,19 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#0": [
    440,
    996,
-   648,
+   120,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#1": [
-   1104,
+   576,
    996,
-   648,
+   580,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QWidget#3/ScaledButton#2": [
+   1172,
+   996,
+   580,
    56
   ]
  },
@@ -4545,93 +6471,87 @@
    118
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   646,
-   331,
-   230,
-   118
+   742,
+   333,
+   134,
+   116
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   646,
-   331,
-   230,
+   742,
+   333,
+   134,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
-   646,
-   331,
+   742,
+   333,
    65,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
-   715,
-   331,
+   811,
+   333,
    65,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1": [
-   646,
-   425,
-   230,
-   24
-  ],
-  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/CheckBox#0": [
-   788,
-   425,
-   88,
-   24
+   742,
+   427,
+   134,
+   22
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
-   646,
-   425,
+   742,
+   427,
    65,
-   24
+   22
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
-   715,
-   425,
+   811,
+   427,
    65,
-   24
+   22
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
-   646,
-   361,
+   742,
+   363,
    134,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#1": [
-   646,
-   393,
+   742,
+   395,
    134,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0": [
    220,
    331,
-   416,
+   512,
    118
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0": [
    229,
    338,
-   402,
+   498,
    104
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0": [
    229,
    338,
-   402,
+   498,
    104
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0": [
    229,
    338,
-   402,
+   498,
    104
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0": [
    229,
    338,
-   396,
+   492,
    24
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/CheckBox#0": [
@@ -4643,7 +6563,7 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/MarqueeLabel#0": [
    261,
    339,
-   364,
+   460,
    22
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
@@ -4703,13 +6623,19 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
    220,
    498,
-   324,
+   60,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
-   552,
+   288,
    498,
-   324,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
    28
   ]
  },
@@ -4847,93 +6773,87 @@
    180
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   968,
-   494,
-   346,
-   180
+   1112,
+   497,
+   202,
+   177
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   968,
-   494,
-   346,
+   1112,
+   497,
+   202,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
-   968,
-   494,
+   1112,
+   497,
    98,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
-   1072,
-   494,
+   1216,
+   497,
    98,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1": [
-   968,
-   638,
-   346,
-   36
-  ],
-  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/CheckBox#0": [
-   1182,
-   638,
-   132,
-   36
+   1112,
+   641,
+   202,
+   33
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
-   968,
-   638,
+   1112,
+   641,
    98,
-   36
+   33
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
-   1072,
-   638,
+   1216,
+   641,
    98,
-   36
+   33
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
-   968,
-   542,
+   1112,
+   545,
    201,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#1": [
-   968,
-   590,
+   1112,
+   593,
    201,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0": [
    330,
    494,
-   623,
+   767,
    180
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0": [
    344,
    504,
-   601,
+   745,
    160
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0": [
    344,
    504,
-   601,
+   745,
    160
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0": [
    344,
    504,
-   601,
+   745,
    160
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0": [
    344,
    504,
-   592,
+   736,
    36
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/CheckBox#0": [
@@ -4945,7 +6865,7 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/MarqueeLabel#0": [
    392,
    505,
-   544,
+   688,
    33
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
@@ -5005,13 +6925,19 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
    330,
    747,
-   486,
+   90,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
-   828,
+   432,
    747,
-   486,
+   435,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   879,
+   747,
+   435,
    42
   ]
  },
@@ -5149,93 +7075,87 @@
    236
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   1292,
-   662,
-   460,
-   236
+   1484,
+   666,
+   268,
+   232
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   1292,
-   662,
-   460,
+   1484,
+   666,
+   268,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
-   1292,
-   662,
+   1484,
+   666,
    130,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
-   1430,
-   662,
+   1622,
+   666,
    130,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1": [
-   1292,
-   850,
-   460,
-   48
-  ],
-  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/CheckBox#0": [
-   1576,
-   850,
-   176,
-   48
+   1484,
+   854,
+   268,
+   44
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
-   1292,
-   850,
+   1484,
+   854,
    130,
-   48
+   44
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
-   1430,
-   850,
+   1622,
+   854,
    130,
-   48
+   44
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
-   1292,
-   722,
+   1484,
+   726,
    268,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#1": [
-   1292,
-   786,
+   1484,
+   790,
    268,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0": [
    440,
    662,
-   832,
+   1024,
    236
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0": [
    458,
    676,
-   804,
+   996,
    208
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0": [
    458,
    676,
-   804,
+   996,
    208
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0": [
    458,
    676,
-   804,
+   996,
    208
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0": [
    458,
    676,
-   792,
+   984,
    48
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/CheckBox#0": [
@@ -5247,7 +7167,7 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/MarqueeLabel#0": [
    522,
    678,
-   728,
+   920,
    44
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
@@ -5307,13 +7227,835 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
    440,
    996,
-   648,
+   120,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
-   1104,
+   576,
    996,
-   648,
+   580,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   1172,
+   996,
+   580,
+   56
+  ]
+ },
+ "Muxing/Chapters@1.0": {
+  "/Sidebar#0": [
+   0,
+   0,
+   200,
+   540
+  ],
+  "/Sidebar#0/QLabel#0": [
+   15,
+   102,
+   170,
+   170
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   45,
+   292,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   45,
+   340,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   45,
+   388,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   45,
+   436,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   45,
+   482,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   24,
+   200,
+   54
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   518,
+   200,
+   12
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   24,
+   78,
+   151,
+   4
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   896,
+   540
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   155,
+   292,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   155,
+   340,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   155,
+   388,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   155,
+   436,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   155,
+   482,
+   55,
+   28
+  ],
+  "/_TabFrame#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0": [
+   220,
+   331,
+   656,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0": [
+   220,
+   331,
+   656,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0": [
+   220,
+   331,
+   656,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0": [
+   735,
+   333,
+   141,
+   116
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0": [
+   735,
+   333,
+   141,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
+   735,
+   333,
+   68,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
+   807,
+   333,
+   68,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1": [
+   735,
+   427,
+   141,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
+   735,
+   427,
+   68,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
+   807,
+   427,
+   68,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   735,
+   363,
+   141,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#1": [
+   735,
+   395,
+   141,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0": [
+   220,
+   331,
+   505,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0/ScaledLabel#0": [
+   439,
+   382,
+   71,
+   16
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
+   220,
+   15,
+   656,
+   34
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/MarqueeLabel#0": [
+   597,
+   23,
+   279,
+   18
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/SubTabBar#0": [
+   220,
+   15,
+   367,
+   34
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1": [
+   220,
+   64,
+   656,
+   249
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   220,
+   64,
+   656,
+   249
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2": [
+   220,
+   460,
+   656,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledButton#0": [
+   796,
+   460,
+   80,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledLineEdit#0": [
+   220,
+   460,
+   570,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3": [
+   220,
+   498,
+   656,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
+   220,
+   498,
+   60,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
+   288,
+   498,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
+   28
+  ]
+ },
+ "Muxing/Chapters@1.5": {
+  "/Sidebar#0": [
+   0,
+   0,
+   300,
+   810
+  ],
+  "/Sidebar#0/QLabel#0": [
+   22,
+   152,
+   255,
+   255
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   67,
+   437,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   67,
+   509,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   67,
+   581,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   67,
+   653,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   67,
+   723,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   36,
+   300,
+   80
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   777,
+   300,
+   18
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   37,
+   116,
+   226,
+   6
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   1344,
+   810
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   232,
+   437,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   232,
+   509,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   232,
+   581,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   232,
+   653,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   232,
+   723,
+   83,
+   42
+  ],
+  "/_TabFrame#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0": [
+   330,
+   494,
+   984,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0": [
+   330,
+   494,
+   984,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0": [
+   330,
+   494,
+   984,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0": [
+   1102,
+   497,
+   212,
+   177
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0": [
+   1102,
+   497,
+   212,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
+   1102,
+   497,
+   102,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
+   1210,
+   497,
+   102,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1": [
+   1102,
+   641,
+   212,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
+   1102,
+   641,
+   102,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
+   1210,
+   641,
+   102,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   1102,
+   545,
+   212,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#1": [
+   1102,
+   593,
+   212,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0": [
+   330,
+   494,
+   757,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0/ScaledLabel#0": [
+   658,
+   572,
+   106,
+   24
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
+   330,
+   23,
+   984,
+   51
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/MarqueeLabel#0": [
+   895,
+   35,
+   419,
+   27
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/SubTabBar#0": [
+   330,
+   23,
+   550,
+   51
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1": [
+   330,
+   96,
+   984,
+   371
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   330,
+   96,
+   984,
+   371
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2": [
+   330,
+   690,
+   984,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledButton#0": [
+   1194,
+   690,
+   120,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledLineEdit#0": [
+   330,
+   690,
+   855,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3": [
+   330,
+   747,
+   984,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
+   330,
+   747,
+   90,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
+   432,
+   747,
+   435,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   879,
+   747,
+   435,
+   42
+  ]
+ },
+ "Muxing/Chapters@2.0": {
+  "/Sidebar#0": [
+   0,
+   0,
+   400,
+   1080
+  ],
+  "/Sidebar#0/QLabel#0": [
+   30,
+   203,
+   340,
+   340
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   90,
+   583,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   90,
+   679,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   90,
+   775,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   90,
+   871,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   90,
+   964,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   48,
+   400,
+   107
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   1036,
+   400,
+   24
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   49,
+   155,
+   302,
+   8
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   1792,
+   1080
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   310,
+   583,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   310,
+   679,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   310,
+   775,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   310,
+   871,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   310,
+   964,
+   110,
+   56
+  ],
+  "/_TabFrame#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0": [
+   440,
+   662,
+   1312,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0": [
+   440,
+   662,
+   1312,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0": [
+   440,
+   662,
+   1312,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0": [
+   1470,
+   666,
+   282,
+   232
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0": [
+   1470,
+   666,
+   282,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
+   1470,
+   666,
+   136,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
+   1614,
+   666,
+   136,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1": [
+   1470,
+   854,
+   282,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
+   1470,
+   854,
+   136,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
+   1614,
+   854,
+   136,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   1470,
+   726,
+   282,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/QWidget#0/ScaledButton#1": [
+   1470,
+   790,
+   282,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0": [
+   440,
+   662,
+   1010,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/ChapterEditor#0/QWidget#0/TrackListBox#0/ScaledLabel#0": [
+   878,
+   764,
+   141,
+   32
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
+   440,
+   30,
+   1312,
+   68
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/MarqueeLabel#0": [
+   1194,
+   46,
+   558,
+   36
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/SubTabBar#0": [
+   440,
+   30,
+   734,
+   68
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1": [
+   440,
+   128,
+   1312,
+   498
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   440,
+   128,
+   1312,
+   498
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2": [
+   440,
+   920,
+   1312,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledButton#0": [
+   1592,
+   920,
+   160,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledLineEdit#0": [
+   440,
+   920,
+   1140,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3": [
+   440,
+   996,
+   1312,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
+   440,
+   996,
+   120,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
+   576,
+   996,
+   580,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   1172,
+   996,
+   580,
    56
   ]
  },
@@ -5699,13 +8441,19 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
    220,
    498,
-   324,
+   60,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
-   552,
+   288,
    498,
-   324,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
    28
   ]
  },
@@ -6073,13 +8821,19 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
    220,
    498,
-   324,
+   60,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
-   552,
+   288,
    498,
-   324,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
    28
   ]
  },
@@ -6447,13 +9201,19 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
    330,
    747,
-   486,
+   90,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
-   828,
+   432,
    747,
-   486,
+   435,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   879,
+   747,
+   435,
    42
   ]
  },
@@ -6821,13 +9581,835 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
    440,
    996,
-   648,
+   120,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
-   1104,
+   576,
    996,
-   648,
+   580,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   1172,
+   996,
+   580,
+   56
+  ]
+ },
+ "Muxing/Subtitles@1.0": {
+  "/Sidebar#0": [
+   0,
+   0,
+   200,
+   540
+  ],
+  "/Sidebar#0/QLabel#0": [
+   15,
+   102,
+   170,
+   170
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   45,
+   292,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   45,
+   340,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   45,
+   388,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   45,
+   436,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   45,
+   482,
+   110,
+   28
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   24,
+   200,
+   54
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   518,
+   200,
+   12
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   24,
+   78,
+   151,
+   4
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   896,
+   540
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   155,
+   292,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   155,
+   340,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   155,
+   388,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   155,
+   436,
+   55,
+   28
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   155,
+   482,
+   55,
+   28
+  ],
+  "/_TabFrame#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0": [
+   210,
+   10,
+   676,
+   520
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0": [
+   220,
+   331,
+   656,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0": [
+   220,
+   331,
+   656,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
+   220,
+   331,
+   656,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
+   742,
+   333,
+   134,
+   116
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0": [
+   742,
+   333,
+   134,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
+   742,
+   333,
+   65,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
+   811,
+   333,
+   65,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1": [
+   742,
+   427,
+   134,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
+   742,
+   427,
+   65,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
+   811,
+   427,
+   65,
+   22
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   742,
+   363,
+   134,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#1": [
+   742,
+   395,
+   134,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0": [
+   220,
+   331,
+   512,
+   118
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/ScaledLabel#0": [
+   423,
+   382,
+   110,
+   16
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
+   220,
+   15,
+   656,
+   34
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/MarqueeLabel#0": [
+   597,
+   23,
+   279,
+   18
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/SubTabBar#0": [
+   220,
+   15,
+   367,
+   34
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1": [
+   220,
+   64,
+   656,
+   249
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   220,
+   64,
+   656,
+   249
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2": [
+   220,
+   460,
+   656,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledButton#0": [
+   796,
+   460,
+   80,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledLineEdit#0": [
+   220,
+   460,
+   570,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3": [
+   220,
+   498,
+   656,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
+   220,
+   498,
+   60,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
+   288,
+   498,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
+   28
+  ]
+ },
+ "Muxing/Subtitles@1.5": {
+  "/Sidebar#0": [
+   0,
+   0,
+   300,
+   810
+  ],
+  "/Sidebar#0/QLabel#0": [
+   22,
+   152,
+   255,
+   255
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   67,
+   437,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   67,
+   509,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   67,
+   581,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   67,
+   653,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   67,
+   723,
+   165,
+   42
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   36,
+   300,
+   80
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   777,
+   300,
+   18
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   37,
+   116,
+   226,
+   6
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   1344,
+   810
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   232,
+   437,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   232,
+   509,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   232,
+   581,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   232,
+   653,
+   83,
+   42
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   232,
+   723,
+   83,
+   42
+  ],
+  "/_TabFrame#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0": [
+   315,
+   15,
+   1014,
+   780
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0": [
+   330,
+   494,
+   984,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0": [
+   330,
+   494,
+   984,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
+   330,
+   494,
+   984,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
+   1112,
+   497,
+   202,
+   177
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0": [
+   1112,
+   497,
+   202,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
+   1112,
+   497,
+   98,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
+   1216,
+   497,
+   98,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1": [
+   1112,
+   641,
+   202,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
+   1112,
+   641,
+   98,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
+   1216,
+   641,
+   98,
+   33
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   1112,
+   545,
+   201,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#1": [
+   1112,
+   593,
+   201,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0": [
+   330,
+   494,
+   767,
+   180
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/ScaledLabel#0": [
+   634,
+   572,
+   165,
+   24
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
+   330,
+   23,
+   984,
+   51
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/MarqueeLabel#0": [
+   895,
+   35,
+   419,
+   27
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/SubTabBar#0": [
+   330,
+   23,
+   550,
+   51
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1": [
+   330,
+   96,
+   984,
+   371
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   330,
+   96,
+   984,
+   371
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2": [
+   330,
+   690,
+   984,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledButton#0": [
+   1194,
+   690,
+   120,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledLineEdit#0": [
+   330,
+   690,
+   855,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3": [
+   330,
+   747,
+   984,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
+   330,
+   747,
+   90,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
+   432,
+   747,
+   435,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   879,
+   747,
+   435,
+   42
+  ]
+ },
+ "Muxing/Subtitles@2.0": {
+  "/Sidebar#0": [
+   0,
+   0,
+   400,
+   1080
+  ],
+  "/Sidebar#0/QLabel#0": [
+   30,
+   203,
+   340,
+   340
+  ],
+  "/Sidebar#0/ScaledButton#0": [
+   90,
+   583,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#1": [
+   90,
+   679,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#2": [
+   90,
+   775,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#3": [
+   90,
+   871,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledButton#4": [
+   90,
+   964,
+   220,
+   56
+  ],
+  "/Sidebar#0/ScaledLabel#0": [
+   0,
+   48,
+   400,
+   107
+  ],
+  "/Sidebar#0/ScaledLabel#1": [
+   0,
+   1036,
+   400,
+   24
+  ],
+  "/Sidebar#0/_AccentBar#0": [
+   49,
+   155,
+   302,
+   8
+  ],
+  "/TabIndicator#0": [
+   0,
+   0,
+   1792,
+   1080
+  ],
+  "/TabIndicator#0/_TabPipe#0": [
+   310,
+   583,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#1": [
+   310,
+   679,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#2": [
+   310,
+   775,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#3": [
+   310,
+   871,
+   110,
+   56
+  ],
+  "/TabIndicator#0/_TabPipe#4": [
+   310,
+   964,
+   110,
+   56
+  ],
+  "/_TabFrame#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0": [
+   420,
+   20,
+   1352,
+   1040
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0": [
+   440,
+   662,
+   1312,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0": [
+   440,
+   662,
+   1312,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0": [
+   440,
+   662,
+   1312,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
+   1484,
+   666,
+   268,
+   232
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0": [
+   1484,
+   666,
+   268,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
+   1484,
+   666,
+   130,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
+   1622,
+   666,
+   130,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1": [
+   1484,
+   854,
+   268,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
+   1484,
+   854,
+   130,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
+   1622,
+   854,
+   130,
+   44
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   1484,
+   726,
+   268,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#1": [
+   1484,
+   790,
+   268,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0": [
+   440,
+   662,
+   1024,
+   236
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/ScaledLabel#0": [
+   846,
+   764,
+   219,
+   32
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
+   440,
+   30,
+   1312,
+   68
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/MarqueeLabel#0": [
+   1194,
+   46,
+   558,
+   36
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0/SubTabBar#0": [
+   440,
+   30,
+   734,
+   68
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1": [
+   440,
+   128,
+   1312,
+   498
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#1/ThumbnailCarousel#0": [
+   440,
+   128,
+   1312,
+   498
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2": [
+   440,
+   920,
+   1312,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledButton#0": [
+   1592,
+   920,
+   160,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#2/ScaledLineEdit#0": [
+   440,
+   920,
+   1140,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3": [
+   440,
+   996,
+   1312,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
+   440,
+   996,
+   120,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
+   576,
+   996,
+   580,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   1172,
+   996,
+   580,
    56
   ]
  },
@@ -6965,93 +10547,87 @@
    118
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   646,
-   331,
-   230,
-   118
+   742,
+   333,
+   134,
+   116
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   646,
-   331,
-   230,
+   742,
+   333,
+   134,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
-   646,
-   331,
+   742,
+   333,
    65,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
-   715,
-   331,
+   811,
+   333,
    65,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1": [
-   646,
-   425,
-   230,
-   24
-  ],
-  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/CheckBox#0": [
-   788,
-   425,
-   88,
-   24
+   742,
+   427,
+   134,
+   22
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
-   646,
-   425,
+   742,
+   427,
    65,
-   24
+   22
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
-   715,
-   425,
+   811,
+   427,
    65,
-   24
+   22
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
-   646,
-   361,
+   742,
+   363,
    134,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#1": [
-   646,
-   393,
+   742,
+   395,
    134,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0": [
    220,
    331,
-   416,
+   512,
    118
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0": [
    229,
    338,
-   402,
+   498,
    104
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0": [
    229,
    338,
-   402,
+   498,
    104
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0": [
    229,
    338,
-   402,
+   498,
    104
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0": [
    229,
    338,
-   396,
+   492,
    24
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/CheckBox#0": [
@@ -7063,7 +10639,7 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/MarqueeLabel#0": [
    261,
    339,
-   364,
+   460,
    22
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
@@ -7123,13 +10699,19 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
    220,
    498,
-   324,
+   60,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
-   552,
+   288,
    498,
-   324,
+   290,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   586,
+   498,
+   290,
    28
   ]
  },
@@ -7267,93 +10849,87 @@
    180
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   968,
-   494,
-   346,
-   180
+   1112,
+   497,
+   202,
+   177
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   968,
-   494,
-   346,
+   1112,
+   497,
+   202,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
-   968,
-   494,
+   1112,
+   497,
    98,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
-   1072,
-   494,
+   1216,
+   497,
    98,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1": [
-   968,
-   638,
-   346,
-   36
-  ],
-  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/CheckBox#0": [
-   1182,
-   638,
-   132,
-   36
+   1112,
+   641,
+   202,
+   33
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
-   968,
-   638,
+   1112,
+   641,
    98,
-   36
+   33
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
-   1072,
-   638,
+   1216,
+   641,
    98,
-   36
+   33
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
-   968,
-   542,
+   1112,
+   545,
    201,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#1": [
-   968,
-   590,
+   1112,
+   593,
    201,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0": [
    330,
    494,
-   623,
+   767,
    180
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0": [
    344,
    504,
-   601,
+   745,
    160
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0": [
    344,
    504,
-   601,
+   745,
    160
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0": [
    344,
    504,
-   601,
+   745,
    160
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0": [
    344,
    504,
-   592,
+   736,
    36
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/CheckBox#0": [
@@ -7365,7 +10941,7 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/MarqueeLabel#0": [
    392,
    505,
-   544,
+   688,
    33
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
@@ -7425,13 +11001,19 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
    330,
    747,
-   486,
+   90,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
-   828,
+   432,
    747,
-   486,
+   435,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   879,
+   747,
+   435,
    42
   ]
  },
@@ -7569,93 +11151,87 @@
    236
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   1292,
-   662,
-   460,
-   236
+   1484,
+   666,
+   268,
+   232
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0": [
-   1292,
-   662,
-   460,
+   1484,
+   666,
+   268,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#0": [
-   1292,
-   662,
+   1484,
+   666,
    130,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#0/IconButton#1": [
-   1430,
-   662,
+   1622,
+   666,
    130,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1": [
-   1292,
-   850,
-   460,
-   48
-  ],
-  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/CheckBox#0": [
-   1576,
-   850,
-   176,
-   48
+   1484,
+   854,
+   268,
+   44
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#0": [
-   1292,
-   850,
+   1484,
+   854,
    130,
-   48
+   44
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/QWidget#1/IconButton#1": [
-   1430,
-   850,
+   1622,
+   854,
    130,
-   48
+   44
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
-   1292,
-   722,
+   1484,
+   726,
    268,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#1": [
-   1292,
-   786,
+   1484,
+   790,
    268,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0": [
    440,
    662,
-   832,
+   1024,
    236
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0": [
    458,
    676,
-   804,
+   996,
    208
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0": [
    458,
    676,
-   804,
+   996,
    208
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0": [
    458,
    676,
-   804,
+   996,
    208
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0": [
    458,
    676,
-   792,
+   984,
    48
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/CheckBox#0": [
@@ -7667,7 +11243,7 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#0/TrackListBox#0/QScrollArea#0/QWidget#0/QWidget#0/_TrackRow#0/MarqueeLabel#0": [
    522,
    678,
-   728,
+   920,
    44
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#0": [
@@ -7727,13 +11303,19 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#0": [
    440,
    996,
-   648,
+   120,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#1": [
-   1104,
+   576,
    996,
-   648,
+   580,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QWidget#3/ScaledButton#2": [
+   1172,
+   996,
+   580,
    56
   ]
  },
@@ -11468,13 +15050,13 @@
    210,
    91,
    664,
-   505
+   577
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
    220,
    122,
    430,
-   424
+   496
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#0": [
    424,
@@ -11497,6 +15079,18 @@
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#11": [
    424,
    518,
+   170,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#12": [
+   424,
+   554,
+   170,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#13": [
+   424,
+   590,
    170,
    28
   ],
@@ -11572,6 +15166,18 @@
    190,
    26
   ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#12": [
+   220,
+   555,
+   190,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#13": [
+   220,
+   591,
+   190,
+   26
+  ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#2": [
    220,
    195,
@@ -11644,6 +15250,18 @@
    42,
    24
   ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Switch#12": [
+   608,
+   556,
+   42,
+   24
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Switch#13": [
+   608,
+   592,
+   42,
+   24
+  ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Switch#2": [
    608,
    196,
@@ -11694,7 +15312,7 @@
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/ScaledButton#0": [
    220,
-   558,
+   630,
    118,
    28
   ],
@@ -11890,13 +15508,13 @@
    315,
    137,
    996,
-   758
+   866
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
    330,
    184,
    645,
-   636
+   744
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#0": [
    636,
@@ -11919,6 +15537,18 @@
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#11": [
    636,
    778,
+   255,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#12": [
+   636,
+   832,
+   255,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#13": [
+   636,
+   886,
    255,
    42
   ],
@@ -11994,6 +15624,18 @@
    285,
    39
   ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#12": [
+   330,
+   833,
+   285,
+   39
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#13": [
+   330,
+   887,
+   285,
+   39
+  ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#2": [
    330,
    293,
@@ -12066,6 +15708,18 @@
    63,
    36
   ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Switch#12": [
+   912,
+   835,
+   63,
+   36
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Switch#13": [
+   912,
+   889,
+   63,
+   36
+  ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Switch#2": [
    912,
    295,
@@ -12116,7 +15770,7 @@
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/ScaledButton#0": [
    330,
-   838,
+   946,
    177,
    42
   ],
@@ -12312,13 +15966,13 @@
    420,
    181,
    1328,
-   1010
+   1154
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
    440,
    243,
    860,
-   848
+   992
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#0": [
    848,
@@ -12341,6 +15995,18 @@
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#11": [
    848,
    1035,
+   340,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#12": [
+   848,
+   1107,
+   340,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/KeyField#13": [
+   848,
+   1179,
    340,
    56
   ],
@@ -12416,6 +16082,18 @@
    380,
    52
   ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#12": [
+   440,
+   1109,
+   380,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#13": [
+   440,
+   1181,
+   380,
+   52
+  ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#2": [
    440,
    389,
@@ -12488,6 +16166,18 @@
    84,
    48
   ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Switch#12": [
+   1216,
+   1111,
+   84,
+   48
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Switch#13": [
+   1216,
+   1183,
+   84,
+   48
+  ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Switch#2": [
    1216,
    391,
@@ -12538,7 +16228,7 @@
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/ScaledButton#0": [
    440,
-   1115,
+   1259,
    236,
    56
   ],

@@ -34,6 +34,7 @@ class MessageDialog(QDialog):
 
     SHOW_HEADER = True
     WIDTH = _DIALOG_WIDTH        # reference px; a dialog with a lot on its button row is wider
+    SIDE_MARGIN = 20             # reference px; a dialog whose own content is tight can narrow this
 
     def __init__(self, parent, title, message, buttons=("OK",), entry=None):
         super().__init__(parent)
@@ -50,9 +51,10 @@ class MessageDialog(QDialog):
         scale.fixed(self, w=self.WIDTH)
         self.result_label = None
         self._buttons = buttons
+        self._button_widgets = {}
 
         body = QVBoxLayout(self)
-        scale.margins(body, 20, 18, 20, 14)
+        scale.margins(body, self.SIDE_MARGIN, 18, self.SIDE_MARGIN, 14)
         body.setSpacing(0)
         self.message_label = None
         if self.SHOW_HEADER:
@@ -86,11 +88,16 @@ class MessageDialog(QDialog):
         for index, label in enumerate(buttons):
             btn = button(label, role="action" if index == 0 else "queue", width=90)
             btn.clicked.connect(lambda _=False, choice=label: self._dismiss(choice))
+            self._button_widgets[label] = btn
             row.addWidget(btn)
         body.addLayout(row)
 
     def _build_extra(self, body):
         """Hook for subclasses that need more than a message."""
+
+    def set_button_enabled(self, label, enabled):
+        """Grey out (or restore) the button labelled `label`; Enter then does nothing either."""
+        self._button_widgets[label].setEnabled(bool(enabled))
 
     def _build_leading_buttons(self, row):
         """Hook: widgets for the left end of the button row (the standard buttons are right)."""
@@ -104,7 +111,7 @@ class MessageDialog(QDialog):
         path.addRoundedRect(QRectF(self.rect()).adjusted(border / 2, border / 2, -border / 2, -border / 2),
                             scale.fpx(_RADIUS), scale.fpx(_RADIUS))
         p.fillPath(path, T.theme.color("window"))
-        p.setPen(QPen(T.theme.color("primary"), border))
+        p.setPen(QPen(T.theme.color("theme_accent"), border))
         p.drawPath(path)
 
     def mousePressEvent(self, e):
@@ -130,7 +137,8 @@ class MessageDialog(QDialog):
 
     def keyPressEvent(self, e):
         if e.key() in (Qt.Key_Return, Qt.Key_Enter):
-            self._dismiss(self._buttons[0])
+            if self._button_widgets[self._buttons[0]].isEnabled():
+                self._dismiss(self._buttons[0])
         elif e.key() == Qt.Key_Escape:
             self._dismiss(None)
         else:
@@ -165,6 +173,32 @@ def ask_text(parent, title, message, initial="", confirm="Save"):
     if dialog.show_modal() != confirm:
         return None
     return (dialog.entry.text() or "").strip() or None
+
+
+class _RememberDialog(MessageDialog):
+    """Yes/No plus a "Don't ask again" checkbox, under the message."""
+
+    def __init__(self, parent, title, message, checkbox_text):
+        self._checkbox_text = checkbox_text
+        self.dont_ask = None
+        super().__init__(parent, title, message, buttons=("Yes", "No"))
+
+    def _build_extra(self, body):
+        scale.spacer(body, 10)
+        self.remember_check = CheckBox(self._checkbox_text)
+        body.addWidget(self.remember_check)
+
+    def _dismiss(self, choice):
+        self.dont_ask = self.remember_check.isChecked()
+        super()._dismiss(choice)
+
+
+def ask_yes_no_remember(parent, title, message, checkbox_text="Don't ask again"):
+    """Yes/No with a "Don't ask again" checkbox: `(confirmed, dont_ask)` — `confirmed` True only
+    on an explicit Yes, `dont_ask` whatever the checkbox read when the dialog closed."""
+    dialog = _RememberDialog(parent, title, message, checkbox_text)
+    confirmed = dialog.show_modal() == "Yes"
+    return confirmed, bool(dialog.dont_ask)
 
 
 class CountdownDialog(MessageDialog):
@@ -243,12 +277,13 @@ class StreamPickerDialog(MessageDialog):
     """Encoding's "Choose Stream(s)" (audio or subtitle): a `TrackListBox` of streams (ticked =
     included, drag to reorder) and one button row: Add Stream(s), Remove Stream(s), OK, Cancel.
     It edits a copy, so Cancel discards everything. Add browses a file, probes it off the GUI
-    thread and appends its stream(s) ticked; Remove takes out every ticked row. OK gives `chosen`
-    and `result_entries` (audio with rows but none ticked ticks the first instead: no audio is
-    Strip Audio's job; subtitles may be none); Cancel gives None."""
+    thread and appends its stream(s) ticked; Remove takes out every ticked row. OK gives
+    `chosen` and `result_entries` — `chosen` may be empty, for either kind: the caller (Strip
+    Video/Audio/Subtitles) treats that the same as stripping the stream; Cancel gives None."""
 
     SHOW_HEADER = False
-    WIDTH = 500      # one row holds Add, Remove, OK and Cancel
+    WIDTH = 476           # one row holds Add, Remove, OK and Cancel — tight, see SIDE_MARGIN
+    SIDE_MARGIN = 12      # narrower than the default 20: only the button row needs the width
 
     def __init__(self, parent, kind, entries, included, start_dir=""):
         self._kind = kind
@@ -333,11 +368,10 @@ class StreamPickerDialog(MessageDialog):
 
     def _dismiss(self, choice):
         if choice == "OK":
-            chosen = set(self.box.checked_ids())
-            if not chosen and self.box.item_ids() and self._kind == "audio":
-                self.box.set_checked(self.box.item_ids()[0], True)
-                return
-            self.chosen = chosen
+            # Nothing ticked is a real, confirmable choice here — Strip Video/Audio/Subtitles
+            # picks it up as one (`EncodingTab._open_stream_picker`/`_open_sub_picker`), not a
+            # dead end the dialog has to steer the user away from.
+            self.chosen = set(self.box.checked_ids())
             self.result_entries = list(self._entries)
         self._finished = True
         super()._dismiss(choice)

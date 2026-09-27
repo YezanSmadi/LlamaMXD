@@ -107,7 +107,7 @@ class _LinkDropFrame(BorderedFrame):
     """The preview box — accepts a dragged link, and nothing else."""
 
     def __init__(self, on_link):
-        super().__init__()
+        super().__init__(color_key="secondary")     # matches Muxing/Encoding's DropBox
         self._on_link = on_link
         self.setAcceptDrops(True)
 
@@ -536,8 +536,9 @@ class DownloaderTab(QWidget):
 
     @staticmethod
     def _describe(settings):
-        """The queue row's title (its other columns come from the settings)."""
-        return settings["title"] or "Download"
+        """The queue row's title: the output file's own name (its other columns come from the
+        settings)."""
+        return os.path.basename(settings["output_path"].replace("\\", "/")) or "Download"
 
     def download_now(self):
         settings = self._gather_settings()

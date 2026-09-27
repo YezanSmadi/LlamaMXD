@@ -44,8 +44,8 @@ _THUMB_W, _THUMB_H = 60, 40
 _ROW_H = 56
 _ROW_CORNER = 8
 _DETAIL_SCROLL_HEIGHT = 140
-_SORTS = ["A to Z", "Z to A", "Recent", "Latest"]
-_SORT_DEFAULT = _SORTS[0]
+_SORTS = ["A to Z", "Z to A", "Recent", "Oldest"]
+_SORT_DEFAULT = "Recent"
 _YTDLP = "Downloader"
 _PREPARING = "Preparing..."
 
@@ -463,7 +463,7 @@ class QueueTab(QWidget):
         self.sort_menu.set(_SORT_DEFAULT)
         self.sort_menu.picked.connect(self._set_sort)
         tip(self.sort_menu, "How the queue is ordered — and so the order it runs in. Recent puts the "
-                            "newest-added task first, Latest the oldest-added.")
+                            "newest-added task first, Oldest the oldest-added.")
         controls.addWidget(self.sort_menu)
         self.search_toggle = SearchToggle()
         self.search_toggle.clicked.connect(self.search_bar.toggle_open)
@@ -760,11 +760,11 @@ class QueueTab(QWidget):
 
     def _apply_sort(self):
         """Put the rows, and their run order, in the chosen order: title A-Z / Z-A, or time
-        added (Recent newest first, Latest oldest first). Stable."""
+        added (Recent newest first, Oldest oldest first). Stable."""
         by_time = sorted(self._rows, key=lambda tid: (self._rows[tid]["added"], tid))
         if self._sort == "Recent":
             order = by_time[::-1]
-        elif self._sort == "Latest":
+        elif self._sort == "Oldest":
             order = by_time
         else:
             order = sorted(by_time, key=lambda tid: self._rows[tid]["widget"].description.casefold(),

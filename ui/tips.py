@@ -53,3 +53,9 @@ AUDIO_FORMAT_TIPS = {
     ".flac": "Lossless — exact audio quality, a larger file than any lossy conversion.",
     ".wav": "Uncompressed — exact quality, the largest possible file size.",
 }
+
+# The subtitle track editors (Muxing's Edit Subs popup, Encoding's Subtitles page).
+SUBTITLE_TRACK_TIP = "The subtitle track the Language, Default and Forced settings edit."
+LANGUAGE_TIP = "The track's language tag, which players use to pick a subtitle track."
+DEFAULT_TIP = "Players show this track unless told otherwise. Only one track can be the default."
+FORCED_TIP = "Marks the track as forced: only foreign-language dialogue and signs, shown even with subtitles off."

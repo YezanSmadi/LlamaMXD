@@ -166,6 +166,11 @@ class ThemeManager(QObject):
         for role, source in (("action_btn", action), ("queue_btn", queue)):
             for suffix in ("", "_hover", "_pressed", "_text", "_disabled_text"):
                 colors[role + suffix] = colors[source + suffix]
+        # The theme's own brand accent, used wherever primary would vanish against the
+        # background for a theme that swaps its action buttons (Terminal's black primary):
+        # a popup's outline (MessageDialog), a divider inside one (Add/Edit Chapters), and the
+        # loading disc's coloured trim (`ui.widgets.panels.LoadingSpinner`).
+        colors["theme_accent"] = colors[action]
         self._colors = colors
 
 

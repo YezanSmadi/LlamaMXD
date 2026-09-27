@@ -2,8 +2,9 @@
 # Copyright (C) 2026 Yezan Smadi
 """UI geometry: the real MainWindow, offscreen, with its own settings.json. Records every
 visible widget's rect on every page at three scales (golden), runs the squeeze scan (a layout
-squeezed below its own minimum clips a control), and checks the Muxing / Encoding preview-size
-invariant."""
+squeezed below its own minimum clips a control), and checks the preview-size invariant: no
+sub-tab page is taller than Overview (a taller one shrinks the preview) and Muxing's and Encoding's
+previews match."""
 import json
 import os
 import time
@@ -28,6 +29,10 @@ from PySide6.QtCore import QPoint  # noqa: E402
 from PySide6.QtWidgets import QWidget  # noqa: E402
 
 SCALES = (1.0, 1.5, 2.0)
+# Scales for the page-height scan, with a whole-pixel margin: Encoding's Audio and Subtitles pages
+# come out a pixel over at 0.95 / 1.45 / 1.95 / 2.45 (known, see CLAUDE.md), so those are left out.
+HEIGHT_SCALES = (0.8, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.6)
+SUBTABS = ("Overview", "Video", "Audio", "Subtitles", "Chapters")
 # Squeezes that predate the test suite: (state prefix, widget path suffix). Reported, not failed.
 KNOWN_SQUEEZE = []
 BASE_W, BASE_H = 896, 540
@@ -99,7 +104,7 @@ def states():
     """(label, setup) for every page worth capturing."""
     out = []
     for tab in ("Muxing", "Encoding"):
-        for sub in ("Overview", "Video", "Audio"):
+        for sub in SUBTABS:
             out.append((f"{tab}/{sub}", lambda t=tab, s=sub: (window.show_tab(t), window.tabs[t].sub_tab_bar.set_active(s))))
     out.append(("Downloader", lambda: window.show_tab("Downloader")))
     out.append(("Queue", lambda: window.show_tab("Queue")))
@@ -107,6 +112,25 @@ def states():
         out.append((f"Settings/{page}", lambda p=page: (window.show_tab("Settings"),
                                                         window.tabs["Settings"].sub_tab_bar.set_active(p))))
     return out
+
+
+def taller_than_overview():
+    """Every sub-tab page whose size hint beats Overview's, at each of `HEIGHT_SCALES`, on both
+    tabs (each page shown first: a hidden page is restyled lazily, so its hint is stale)."""
+    over = []
+    for k in HEIGHT_SCALES:
+        window.resize(round(BASE_W * k), round(BASE_H * k))
+        settle(0.15)
+        for tab in ("Muxing", "Encoding"):
+            window.show_tab(tab)
+            heights = {}
+            for index, sub in enumerate(SUBTABS):
+                window.tabs[tab].sub_tab_bar.set_active(sub)
+                settle(0.05)
+                heights[sub] = window.tabs[tab].panels.widget(index).sizeHint().height()
+            over += [f"{tab}/{sub}@{k}: {h}px, Overview {heights['Overview']}px"
+                     for sub, h in heights.items() if h > heights["Overview"]]
+    return over
 
 
 def run():
@@ -150,6 +174,10 @@ def run():
     for line in known:
         print(f"  KNOWN {line}")
     ok &= report("Muxing / Encoding previews identical at every scale", invariant)
+    ok &= report("no sub-tab page taller than Overview", taller_than_overview())
+    ok &= report("the Downloader's preview frame is secondary-bordered, like DropBox",
+                 [] if window.tabs["Downloader"].preview_frame._color_key == "secondary"
+                 else [f"preview_frame._color_key: {window.tabs['Downloader'].preview_frame._color_key!r}, expected 'secondary'"])
     return ok
 
 

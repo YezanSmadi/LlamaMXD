@@ -606,6 +606,7 @@ class SettingsTab(QWidget):
             "startup_tab": self.app.startup_tab,
             "log_detail": self.app.log_detail,
             "keybinds": self.app.keymap.to_dict(),
+            "confirm_clear_selection": self.app.confirm_clear_selection,
             "downloader_separate_save": separate,
             # With separate-save off the entry only displays the shared default: don't save it.
             "downloader_save_location": (
@@ -802,8 +803,8 @@ class SettingsTab(QWidget):
             self.app, "Reset to Default?",
             "This resets the theme, appearance mode, window mode, default save location, "
             "Downloader save location, file naming, hardware acceleration, "
-            "priority level, When Done, Startup Tab, log detail and keyboard shortcuts back to their "
-            "defaults. Continue?",
+            "priority level, When Done, Startup Tab, log detail, keyboard shortcuts and the Clear "
+            "confirmation back to their defaults. Continue?",
         ):
             return
         self._committed = DEFAULT_THEME_NAME
@@ -844,6 +845,7 @@ class SettingsTab(QWidget):
         llamalog.set_detail(llamalog.DEFAULT_LEVEL)
         self.app.keymap.reset()
         self._refresh_shortcut_rows()
+        self.app.confirm_clear_selection = True
         self._refresh_disk_usage()
         self.autosave()
         llamalog.get("settings").info("Settings reset to their defaults")

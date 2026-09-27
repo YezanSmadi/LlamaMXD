@@ -76,6 +76,10 @@
    "enabled": true,
    "key": "Left"
   },
+  "redo": {
+   "enabled": true,
+   "key": "Ctrl+Shift+Z"
+  },
   "tab_next": {
    "enabled": true,
    "key": "Down"
@@ -87,6 +91,10 @@
   "toggle_queue": {
    "enabled": true,
    "key": "Space"
+  },
+  "undo": {
+   "enabled": true,
+   "key": "Ctrl+Z"
   }
  },
  "normalized_broken": {
@@ -126,6 +134,10 @@
    "enabled": true,
    "key": "Left"
   },
+  "redo": {
+   "enabled": true,
+   "key": "Ctrl+Shift+Z"
+  },
   "tab_next": {
    "enabled": true,
    "key": "Down"
@@ -137,6 +149,10 @@
   "toggle_queue": {
    "enabled": true,
    "key": "Space"
+  },
+  "undo": {
+   "enabled": true,
+   "key": "Ctrl+Z"
   }
  }
 }

@@ -546,6 +546,10 @@ class ThumbnailCarousel(QWidget):
         target = self._hovered_control(pos) if pos is not None else None
         for name in self._hover:
             self._hover_to(name, 1.0 if name == target else 0.0)
+        if pos is not None:
+            # The expanded preview is a hand only over its controls: one that just went (the last
+            # frame's chevron) must not leave the hand behind under a still pointer.
+            self.setCursor(self._hover_cursor(pos))
 
     def _reset_hover(self):
         """Everything back to normal size at once (the controls just moved or went)."""

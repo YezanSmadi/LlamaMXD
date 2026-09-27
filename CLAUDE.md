@@ -6,7 +6,7 @@ PySide6 (Qt 6). Wraps ffmpeg and yt-dlp behind a tabbed interface. Repo:
 text; every `.py` file starts with `# SPDX-License-Identifier: GPL-3.0-or-later` and `# Copyright (C)
 2026 Yezan Smadi` — **put the same two lines on any new source file**, as the "or later" is stated there).
 It was the Unlicense up to v0.5.0-beta.3 (beta.4 is the first GPL release); those releases stay public domain. Currently
-v0.5.0-beta.4 (the sidebar footer — `VERSION` in `ui/widgets/panels.py`).
+v0.5.0-beta.5 (the sidebar footer — `VERSION` in `ui/widgets/panels.py`).
 
 ## Running
 
@@ -129,8 +129,20 @@ own settings.json / presets.json, and fixture clips are generated there by the b
 UI checks end through `harness.finish()` (`TerminateProcess` once their results are printed): Qt's
 native teardown crashes at exit now and then (3 of 10 runs on one check, before and after any
 change here), and even `os._exit` runs the DLLs' unload code where it happens.
-- `check_ui` — the real `MainWindow` offscreen: every visible widget's rect on 13 pages (plus the
-  no-file state) at 1.0 / 1.5 / 2.0x, the squeeze scan, and the Muxing / Encoding preview invariant.
+- `check_ui` — the real `MainWindow` offscreen: every visible widget's rect on 17 pages (Overview /
+  Video / Audio / Subtitles / Chapters on both tabs, the Downloader, the Queue, Settings' five; plus
+  the no-file state) at 1.0 / 1.5 / 2.0x, the squeeze scan, the Muxing / Encoding preview invariant, and
+  that no sub-tab page is taller than Overview at 8 scales on both tabs (Encoding's Audio and
+  Subtitles pages come out a pixel over at 0.95 / 1.45 / 1.95 / 2.45, a known one, so those scales are
+  left out). It once covered only Overview / Video / Audio, which is how a Subtitles or Chapters page
+  could grow past Overview unnoticed.
+- `check_hover` — the cursor and hover state under a resting pointer, offscreen (`QCursor.setPos` posts a
+  real mouse move there): disabled controls show an arrow; a widget that moves out from under a still
+  pointer takes its cursor and hover flag with it (through HoverSync's real timer); the expanded preview's
+  hand goes with its chevron; nothing is sent while nothing changes or a drag holds the cursor.
+- `check_media` also drives the Edit Subs, Add Chapter and Edit Chapters popups (one undo step, Cancel,
+  the one-default rule, refused times, the exact start kept), Muxing's subtitle-format narrowing and
+  Encoding's burn-in, as the settings a job would get.
 - `check_media` — the selected-file pipeline (`MediaSession`): load, a cache-hit reselect (no
   second probe), the HDR preview (an import tone-maps frames 0-2 and stops, scrubbing to 6 adds 6-8, the
   switch completes the set and the carousel shows it, off shows the raw set, a file change drops or
@@ -206,6 +218,7 @@ ui/qt_log.py              routes Qt's own warnings/errors into the log
 ui/single_instance.py     InstanceLock: a per-user lock file so only one LlamaMXD runs (main.py checks it first)
 ui/keymap.py              KeyMap: the live shortcuts + matching a QKeyEvent against them
 ui/keynav.py              KeyNav: Tab / Enter selection of a tab's controls (the ring) + an open dropdown's keys
+ui/hover.py               HoverSync: the cursor and hover state under a pointer that isn't moving
 ui/tips.py                shared hover-tooltip copy (codec / container / audio-format explanations)
 ui/widgets/controls.py    button / labeled / field_label / set_enabled / restyle / anim / draw_cross helpers, IconButton
                           (✕ / ▲ / ▼ / select-all / deselect-all / undo / redo)
@@ -217,6 +230,7 @@ ui/widgets/timespinner.py TimeSpinner (+ its _TimeField)
 ui/widgets/marquee.py     MarqueeLabel, MarqueeGroup
 ui/widgets/panels.py      SubTabBar, DropBox, LoadingSpinner, BorderedFrame, SummaryPanel, Sidebar, TabIndicator
 ui/widgets/chapters.py    ChapterEditor — the Chapters sub-tab Muxing and Encoding share
+ui/widgets/edit_dialogs.py  the Add/Edit Subs / Add/Edit Chapters popups (edit a copy; OK hands it back)
 ui/widgets/tracklist.py   TrackListBox — Muxing's checkable, scrollable track picker
 ui/widgets/carousel.py    ThumbnailCarousel
 ui/widgets/wave.py        WaveLayer: the Wave Loop (rlottie) and its artwork fixes
@@ -361,7 +375,11 @@ close, a crash or End Task used to leave a preview grab or a tone-map ffmpeg run
 one app-wide **kill-on-close job object** (`_tools_job`, made on first use; its handle is never
 closed, so the process exiting — however it exits — closes it and Windows ends everything in it).
 `winproc.run(args, timeout=...)` is the one way to run a tool to completion: `subprocess.run`'s
-shape, no console window, started `CREATE_SUSPENDED` so it joins the job before it can start a child
+shape (`text=True` decodes as **UTF-8 with `errors="replace"`, never the system code page**: ffprobe writes
+tags as UTF-8, and cp1252 has undefined bytes, e.g. 0x8f in `台` and `я`, whose decode error kills the pipe's
+reader thread and leaves empty output and no exception, so a whole probe came back "no streams" and the
+file was rejected as unreadable; fixed after `Mulan.mkv` and two other real files hit it, with a fixture and
+a check in `check_core`), no console window, started `CREATE_SUSPENDED` so it joins the job before it can start a child
 of its own, then resumed; killed on a timeout or any exception. Every such call uses it —
 `tools.run_tool` (so every probe and capability check), the preview grabs and tone-mapped frames,
 Deno's version check and the Downloader's fetch, the GPU queries, the log header's version lines.
@@ -585,7 +603,11 @@ tab's `on_thumbnails` (Encoding wraps it for the HDR preview) and re-applies
 the shared scrub index.
 
 **A file that probes to neither video nor audio at all is rejected, not
-broadcast as an empty file.** `_deliver_media_info` treats
+broadcast as an empty file** (any probe failure, timeouts and unreadable output included, lands here
+too, since `has_video` is then `None`: audited over the 3,184 media files under the user's Editing
+folder, the only real rejections were the three UTF-8 decode failures, a truncated .ogg, and a 4K H.264
+mp4 whose AAC track has a bogus config — ffprobe fails to open that stream's decoder, prints `{` and exits 1,
+whichever streams are selected; the log now names the exit code, and no fallback exists for it). `_deliver_media_info` treats
 `has_video in (None, False) and has_audio in (None, False)` as the
 signature of ffmpeg's demuxer failing outright (a corrupt file, or a
 container variant this build's demuxer doesn't parse — some vendors' MXF
@@ -846,6 +868,28 @@ before the click is delivered to its real target — clicking a genuinely
 focusable widget (another line edit, a `_TimeField`) still works exactly as
 Qt's own default already handled it, since `setFocus()` on the new widget
 clears the old one anyway.
+
+### The cursor and hover under a resting pointer (`ui/hover.py`)
+
+**Qt re-evaluates the cursor and the hover state only when the mouse moves**, so a widget that moves,
+resizes or goes away under a still pointer (a layout shift, an animation, the carousel's last chevron)
+left the old cursor behind — a hand over nothing — and a stale hover highlight, until the next move.
+Reproduced offscreen (a button moved off the pointer kept a hand; the expanded preview's chevron went at the last
+frame and left one). Not a cause, tested: **a disabled control already shows an arrow** (Qt clears it
+itself), for tip-less buttons, track rows, text fields and the time field alike.
+
+`HoverSync` (`MainWindow.hover`) looks every 120ms while the app is the active one. If nothing holds the
+pointer (no button down, no override cursor such as a track drag's, no open popup list) and it hasn't
+moved since the last look, but the widget under it has changed or the window's cursor isn't what that widget
+wants (`wanted_cursor`: its own, else its nearest ancestor's, an arrow if disabled), it sends the window
+one `QMouseEvent.MouseMove` to the same spot — which makes Qt redo enter / leave, the hover flags and the
+cursor. At most one per resting spot; none while a modal dialog blocks the widget. The timer is owned by
+the `QApplication`. A look costs ~5us on the 733-widget window (0.005% of a core at 8 a second, measured
+with `widgetAt` swapped for `childAt`; on Windows `widgetAt` adds one native call), and none run while the
+app is in the background. **The carousel sets its own cursor from what it has drawn**, which HoverSync can't
+see (its `cursor()` property is the stale one), so `_sync_hover` also re-reads its cursor. The small
+preview's hand is deliberately everywhere over it (a double-click anywhere re-selects the file); only the
+expanded one is a hand over its controls alone. `tests/check_hover.py` is mutation-tested for both fixes.
 
 ### UI scale (`ui/scale.py`)
 
@@ -1365,9 +1409,15 @@ They share one frame, `MediaTab`, top to bottom:
   re-checking this — see the sizing rule and its two concrete
   worked examples (`TrackListBox`'s fixed height on Muxing, the
   Video-panel layout on Encoding) below.
-- **Save row** (entry + Browse) and the **actions** (`Queue Task` secondary,
-  `Mux` / `Encode` primary — queue *and* start; by role `queue` / `action`, which a
-  theme can swap — see Theming).
+- **Save row** (entry + Browse) and the **actions**: **Clear** (small, `role="danger"`, left
+  edge) then `Queue Task` secondary, `Mux` / `Encode` primary — queue *and* start; by role
+  `queue` / `action`, which a theme can swap — see Theming. **Clear** drops the selected file
+  and everything decoded from it (`app.media.clear_selection()` — `MediaSession._clear_state()`,
+  shared with a rejected import's own teardown, minus that dialog) without touching the file on
+  disk; it asks first (`ask_yes_no_remember`, a Yes/No dialog with a **"Don't ask again"**
+  checkbox) unless `app.confirm_clear_selection` is already off (`settings.json`, default on,
+  a Settings-less preference only this checkbox can turn off — `SettingsTab`'s Reset to Default
+  turns it back on). All three action buttons grey out with no file selected, same as before.
 
 Subclasses set `TAB`, `ACTION_TEXT`, `OUTPUT_SUFFIX` (`_muxed` / `_encoded` — now only
 the fallback when the naming format would name the output after the input itself),
@@ -1415,26 +1465,26 @@ every checked one mapped into the output. This replaced the original single
 file's own tracks, not just one at a time. The box carries no caption of its
 own (the sub-tab's own "Video"/"Audio" label already says what it's a box
 of) and **fills the row**, stopping only where a narrow column sits to its
-right: `Select All` / `Deselect All` — two **icon buttons** (`IconButton` kinds
-`select-multiple` / `deselect-multiple`, `assets/select-multiple.svg` /
-`deselect-multiple.svg`, recoloured to the button's own text colour by string-replacing
-the SVG's black `stroke` — `svg_renderer(..., "ink")`, same trick as the carousel's
-`fill="currentColor"` swap; each has a hover tooltip, since there's no caption)
-sharing a line on top (checks/unchecks
-every row in the box — `TrackListBox.item_ids()`, every row regardless of
-current state, vs. `checked_ids()`'s already-checked-only — without adding
-or removing anything, the non-destructive counterpart to `Remove
-Stream(s)`), then `Add Stream(s)` beneath them, then `Remove Stream(s)`
-(`role="danger"`, STOP_RED) at the same width, then on the bottom line
-**`Undo` / `Redo`** — two more icon buttons (`undo.svg` / `redo.svg`, kinds `undo` /
-`redo`) with the **Strip checkbox to their right**. The two-button rows
-(`Select All`/`Deselect All`, `Undo`/`Redo`) each share one line rather than each getting
-their own full row, which is what keeps this four-row column short enough to still fit
-under the box's own fixed height (see the panel-height paragraph below for why that
-specifically breaks). `Add Stream(s)`/`Remove Stream(s)` share one width
-(`button_width_for`); each icon pair is half that width less half a 4px gap, so the pair
-lines up under them and sits as tight as the rows do (4px between the buttons, the same as
-the column's vertical gap — it was 8).
+right, stacked **Select / Deselect All, Add Stream(s), Remove Stream(s), Undo / Redo** —
+top to bottom, one row each except the two icon-button pairs, which share a line: `Select
+All` / `Deselect All` — two **icon buttons** (`IconButton` kinds `select-multiple` /
+`deselect-multiple`, `assets/select-multiple.svg` / `deselect-multiple.svg`, recoloured to
+the button's own text colour by string-replacing the SVG's black `stroke` —
+`svg_renderer(..., "ink")`, same trick as the carousel's `fill="currentColor"` swap; each
+has a hover tooltip, since there's no caption) on top (checks/unchecks every row in the box
+— `TrackListBox.item_ids()`, every row regardless of current state, vs. `checked_ids()`'s
+already-checked-only — without adding or removing anything, the non-destructive counterpart
+to `Remove Stream(s)`), then `Add Stream(s)`, then `Remove Stream(s)` (`role="danger"`,
+STOP_RED) at the same width, then **`Undo` / `Redo`** at the bottom — two more icon buttons
+(`undo.svg` / `redo.svg`, kinds `undo` / `redo`) sharing the last line. **There is no Strip
+checkbox anywhere in this column**: a kind with nothing checked — whether the source never
+had one, every track was removed, or the user simply deselected them all — is this tab's one
+"no ___ in the output" signal (see "`_sync_controls`" below); removing the checkbox freed the
+width and the row it used to share with Undo/Redo. `Add Stream(s)`/`Remove Stream(s)` share
+one width (`button_width_for`, now measured across every kind's button text including
+Subtitles' — see below — so it doesn't change size between sub-tabs); each icon pair is half
+that width less half a 4px gap, so the pair lines up under them and sits as tight as the rows
+do (4px between the buttons, the same as the column's vertical gap).
 
 **Icon sizes.** `IconButton` draws its SVG in a square of `_ICON_FRACTION` × the button's
 shorter side (default 56%, 72% for a `compact` button). Undo/redo override it to **100%**
@@ -1449,22 +1499,23 @@ text (`stop_disabled_text`, `disabled_text_on(STOP_RED)`) — the danger rule us
 override `QPushButton:disabled`, so a disabled Remove Stream(s) looked enabled.
 
 **Even four rows only just fit**: Overview is 118px, and 28 + 28 (Add, Remove) +
-24 (the Undo/Redo/Strip row — the checkbox's own height) + 12 (three 4px gaps) leaves 26 for
+24 (Undo/Redo — the icon buttons' own height) + 12 (three 4px gaps) leaves 26 for
 Select/Deselect All. So Undo/Redo and Select/Deselect All are `role="compact"` (stylesheet
 `min-height: 22px` — the stock 28px `min-height` defeats any fixed height, so a
-shorter button needs its own role), the column's gaps are 4px (they were 6 with three rows),
-and Select/Deselect All take whatever height the box has left
-(`size_box`: `box.height() − 2·px(28) − px(24) − 3·px(4)`, floor `px(22)`; a fixed
-row height with Expanding buttons, since the button's own `min-height` overrides a
-`setFixedHeight`). **The gap change is what makes it safe, not cosmetic**: with 6px
-gaps the column had 0px to spare at 1.0x and, at 1.25x, five independently-rounded
-`px()` lengths made it 3px taller than the box — the whole page 3px taller than
-Overview, i.e. a smaller preview on Muxing than on Encoding. With 4px, the Video and
-Audio pages are never taller than Overview at any of 42 scales checked from 0.8x to
-2.6x (re-checked after Strip moved onto the Undo/Redo row). Re-run that scan (Video/Audio
-`sizeHint().height()` against Overview's, showing
+shorter button needs its own role), the column's gaps are 4px, and Select/Deselect All take
+whatever height the box has left (`size_box`: `box.height() − 2·px(28) − px(24) − 3·px(4)`,
+floor `px(22)`; a fixed row height with Expanding buttons, since the button's own
+`min-height` overrides a `setFixedHeight`). **The gap change is what makes it safe, not
+cosmetic**: with 6px gaps the column had 0px to spare at 1.0x and, at 1.25x, five
+independently-rounded `px()` lengths made it 3px taller than the box — the whole page 3px
+taller than Overview, i.e. a smaller preview on Muxing than on Encoding. With 4px, the Video
+and Audio pages are never taller than Overview at any of 42 scales checked from 0.8x to
+2.6x. Re-run that scan (Video/Audio `sizeHint().height()` against Overview's, showing
 each page before measuring — a hidden page is restyled lazily, so its hint is stale)
-after touching this column.
+after touching this column. **This same four-row shape (Select/Deselect All, Add[/Edit],
+Remove, Undo/Redo) is now shared by Subtitles' and Chapters' columns too** — see "Subtitles
+and Chapters" below — since combining Subtitles' Add and Edit buttons into one, and dropping
+every Strip checkbox, brought every kind down to exactly this row count.
 
 **Row text marquees, the checkbox doesn't.** Each row is a `_TrackRow`
 (`ui/widgets/tracklist.py`): a text-less `CheckBox` plus a `MarqueeLabel`
@@ -1588,13 +1639,18 @@ too, consumed by the next `_sync_controls`) — an earlier version left survivin
 they were, which was right only while ticks weren't tracked. A returning row
 lands **where it was**: `set_items` orders the rows to match its item list (it used to
 append), and `checked_ids()` follows that order. The buttons enable from the stacks
-in `_sync_controls` and are also off while the panel is stripped/absent.
+in `_sync_controls` and are also off while the panel is absent (the source never had that
+kind — an *emptied* one, all its own tracks removed, keeps them live, same as before).
 Settings keys `video_tracks`, `strip_video`, `audio_tracks`, `strip_audio` — each
 `*_tracks` a list of `{"source": "primary"/"external", "file": path|None,
 "index": N}`, one entry per *checked* row, `N` 0-based among that file's own
 streams of that kind (what `-map <input>:v:<index>` / `:a:<index>`
-addresses). The Queue's details popup therefore shows a track's number *in its
-file*, which after a removal differs from the number the box showed.
+addresses). **`strip_video`/`strip_audio` are still real settings keys** (`ffmpeg_build.py`
+and the Queue's details popup read them unchanged), just no longer a checkbox: Muxing derives
+each as `not bool(*_tracks)` — exactly equivalent to "the list ended up empty", which is all
+`build_mux_command` ever checked anyway, so nothing downstream needed to change. The Queue's
+details popup therefore shows a track's number *in its file*, which after a removal differs
+from the number the box showed.
 
 **The sizing rule, stated generally (this is what the INVARIANT above rests
 on): neither tab's Video or Audio page may size taller than that tab's own
@@ -1839,12 +1895,21 @@ frames on show (same count; else it falls back to `set_frames`) and drops only t
 
 #### Subtitles and Chapters (both tabs)
 
-**Subtitles** is each tab's own Audio pattern. **Muxing**: a `TrackListBox` (`_track_panel("subtitle",
-editor=..., min_width=150)`, sharing Video / Audio's list, undo and Add / Remove code — `_tracks`,
-`_history` and `_boxes` are keyed by kind) with an editor between it and the column: Track (every row),
-Language, Default, Forced. A subtitle entry carries its own `language` / `default` / `forced` (seeded
-from the stream), so an edit is a new entry through `_edit_tracks` and **Undo covers it**; turning
-Default on clears it on every other track (one default). **Encoding**: Subtitle Track + Choose
+**Subtitles** is each tab's own Audio pattern. **Muxing**: a `TrackListBox` (`_track_panel("subtitle")`,
+sharing Video / Audio's list, undo and Add code, and the identical four-row column shape — `_tracks`,
+`_history` and `_boxes` are keyed by kind). **Add Subs and Edit Subs are one button, "Add/Edit Subs"** —
+opening `EditSubtitlesDialog` (`ui/widgets/edit_dialogs.py`) with a leading **Add** button of its own
+(`_build_leading_buttons`, the same hook `StreamPickerDialog` uses): a Track dropdown (— while there are
+none — the button is always live once a file's loaded, since it's also how you add the first track) with
+that track's Language, Default and Forced below it, edited on a copy of the entries; Add browses another
+file, probes it off the GUI thread and appends its stream(s) (`ExternalStreamPickerDialog` if it offers
+more than one), selecting the newest track. OK is **one undo step** for everything changed in the session
+— edits and any tracks added — (Cancel, or an OK that changed nothing, adds none). A subtitle entry
+carries its own `language` / `default` / `forced` (seeded from the stream); turning Default on clears it
+on every other track (one default). **There is no Strip Subtitles checkbox**: nothing checked in the box
+— the source never had a subtitle, every track was removed, or they were simply deselected — is this
+page's one "no subtitles in the output" signal, the same rule Video and Audio now use (see
+"`_sync_controls`" below). **Encoding**: Subtitle Track + Choose
 Stream(s) (the generalised `StreamPickerDialog` / `choose_streams(parent, "subtitle", ...)`, which may
 end with none ticked, unlike audio) on row one; Language, Default, Forced, **Burn In** on row two;
 Strip Subtitles right. State mirrors audio (`_sub_list`, `_sub_included`, `_active_sub_id`,
@@ -1859,18 +1924,34 @@ the format ("... .mp4 can't hold PGS subtitles."). Neither page adds a rundown r
 make Overview, and so every page, taller).
 
 **Chapters** is one widget, `ChapterEditor` (`ui/widgets/chapters.py`), built by `MediaTab` and synced by
-`_sync_chapters()` in each tab's pass: a `TrackListBox(reorderable=False, new_checked=False,
-empty_text="No chapters")` whose ticks select rows for **Rename** (each ticked one, a prompt each) and
-**Remove Chapter(s)**; **Add At** (a TimeSpinner) + **Add Chapter** (refused past the end or on a second
-already taken); Undo / Redo; **Strip Chapters**. It reseeds on a new probe result. `gather()` gives
-`chapters` **None while the list is as the source had it** (ffmpeg copies them itself, shifting them with
-the trim — verified) and the list once edited, plus `strip_chapters`, `source_duration`,
-`source_has_chapters`. A stripped Subtitles / Chapters page marks its sub-tab red.
+`_sync_chapters()` in each tab's pass: a `TrackListBox(reorderable=False, empty_text="No chapters")` — every
+new chapter starts **ticked**, matching Muxing's tracks — with the same four-row column as Muxing's track
+boxes: **Select / Deselect All**, **Add/Edit Chapters**, **Remove Chapter(s)**, **Undo / Redo**. **A ticked
+chapter is included in the output; deselecting or removing them all is this page's one "strip" signal, the
+same as Muxing's track boxes** — there is no Strip Chapters checkbox. `checked_ids()` is genuinely load-
+bearing here now, not just "which rows Edit/Remove act on" as before: `gather()`'s `chapters` list is built
+from the *ticked* chapters only (`_included()`), and `strip_chapters` is derived as `bool(self._source) and
+not included` (`self._source`, the file's own chapters at the last probe, stands in for "does this kind
+exist at all" the way `has_video`/`has_audio` do for Muxing's tracks). **Add/Edit Chapters** opens
+`AddEditChaptersDialog` (`ui/widgets/edit_dialogs.py`) on a copy of every chapter (ticked or not — this
+popup doesn't care which are checked): a Chapter dropdown (— while there are none) with that one's Time
+and Name below it, plus a separate **Add At** + **Name** + **Add** row (the new chapter's name follows Add
+At the same way a fresh one always has, until the user types one; blank falls back to the default), which
+stays greyed with the reason underneath while its own time is past the end of the file or already taken —
+independent of the Edit fields' own greying/validation, so you can fix one time while the other still has a
+problem. A newly-added chapter is selected and the dropdown re-worded at once, `Add At` moves on to the
+next free second so several can be added in one sitting, and OK hands back the whole edited list (added
+chapters included) as one undo step; Cancel changes nothing. A time left alone on an *existing* chapter
+keeps its exact start, since the spinner only shows whole seconds. Four rows come to the same 118px budget
+as Muxing's track columns (28+28+24+3×4, 26px left for the top row) now that Subtitles and Chapters both
+dropped to two action buttons (Add/Edit, Remove) — see above. It reseeds on a new probe result (`load()`
+sets a flag `refresh()` consumes to reset the box, so a same-numbered chapter from a *different* file is
+never mistaken for a carried-over tick, the same rule Muxing's track boxes already followed). A stripped
+Subtitles / Chapters page marks its sub-tab red.
 
-**Both pages fit the preview INVARIANT**: every page's hint is at most Overview's (118 at 1.0), and the
-Muxing Subtitles page's minimum width is 628 of 656 (the box's floor dropped to 150 for the editor: at
-180 it was 2px over at every scale, which the squeeze scan caught). Measure `layout().totalMinimumSize()`
-per page after any change here.
+**Both pages fit the preview INVARIANT**: every page's hint is at most Overview's (118 at 1.0), which
+`check_ui` now scans at 8 scales on both tabs. Measure `layout().totalMinimumSize()` per page after any
+change here.
 
 #### `_sync_controls` — the single constraint pass
 
@@ -1974,23 +2055,32 @@ The Downloader's equivalent lives in its own `_sync_controls`
 this helper, since it isn't a `MediaTab`
 subclass.
 
-Muxing's rules: the same stream-presence rule; the track boxes carrying the
-source's own streams plus any browsed-in external ones (see "Muxing / Video"
-above for the reset-on-file-change/diff-otherwise logic); **the container
-inversion** — the source's own codecs decide which containers are reachable
-(`formats.containers_for`), with a toast when the pick snaps and the save
-path's extension following it; a stripped or absent stream disables its
-panel — and so does an **emptied** one (the user removed every track of a kind the source
-has; only once the probe says `has_video`/`has_audio` is `True`, since the lists are empty
-before it lands): the sub-tab goes red, the carousel shows the Wave Loop (video) / mute
-badge (audio) exactly as for Strip, the box, Select/Deselect All and Remove grey out and
-the rundown reads `— removed —`. `Add Stream(s)` and Undo/Redo stay live on an emptied
-panel — they are the ways back, and disabling them as Strip does would strand it — and the
-*other* kind's Strip checkbox is disabled (an output can't drop both); a job left with no
-track to map anywhere is refused by `_validate_specific`. The rundown (`copy · H.264 · 1 track` — the codec is the first *checked* track's, not
-the source's first stream — or `· 2 tracks` once more than
-one is checked, and the trim with a `· keyframe` caveat, since a copied
+Muxing's rules: the track boxes carrying the source's own streams plus any browsed-in
+external ones (see "Muxing / Video" above for the reset-on-file-change/diff-otherwise logic);
+**the container inversion** — the source's own codecs decide which containers are reachable
+(`formats.containers_for`), with a toast when the pick snaps and the save path's extension
+following it; **nothing checked in a box is this tab's one "stripped" signal** — whether the
+source never had that kind, every track of it was removed, or the user simply deselected them
+all, the effect (and the settings dict's `strip_video`/`strip_audio`/`strip_subtitles`, each
+derived as `not bool(that kind's checked tracks)`) is identical: the sub-tab goes red, the
+carousel shows the Wave Loop (video) / mute badge (audio), and the rundown reads
+`— removed —`. `Add Stream(s)` and Undo/Redo stay live regardless — they're the ways back
+for an emptied-but-not-absent panel — and only a *genuinely absent* stream (the source never
+had it) disables the whole panel including Add; a job left with no track to map anywhere at
+all is refused by `_validate_specific` ("Nothing to Mux"). The rundown (`copy · H.264 · 1
+track` — the codec is the first *checked* track's, not the source's first stream — or `· 2
+tracks` once more than one is checked, and the trim with a `· keyframe` caveat, since a copied
 stream can only be cut on a keyframe).
+
+**A saved preset's strip preference has no checkbox to write any more, so it deselects
+instead.** `MuxingTab` overrides `_apply_strip_flags`/`_gather_strip_subtitles` (the hooks
+`MediaTab._apply_common`/`_gather_common` call, whose default implementation still reads
+Encoding's own checkboxes unchanged): applying a preset with `strip_video: true` sets
+`_restore_checked["video"] = set()` — the same one-shot mechanism undo/redo already uses —
+so the *next* `_sync_controls` pass deselects every video track, rather than toggling a
+widget that no longer exists; `ChapterEditor.apply()` does the identical thing for
+`strip_chapters`. Saving a preset needs no such translation (`_gather_settings` already
+computes the derived value directly).
 
 Encoding's `_validate_specific` blocks a present-or-unknown stream left on
 `Select` (Encoding never falls back to a silent copy — that's Muxing's job),
@@ -2113,8 +2203,9 @@ Completed` removes Done and Failed rows.
 Top: the Deno warning (shown only when the startup check found no usable
 Deno — warn-only), the URL row (entry, `Paste` — fills from the clipboard
 *and* fetches — and `Fetch`; Enter fetches too), and the preview box
-(`BorderedFrame`: placeholder text, then the fitted thumbnail over a
-`MarqueeLabel` title and an "uploader · length" line). **Only a single http(s)
+(`_LinkDropFrame(BorderedFrame)`, `color_key="secondary"` — the same border colour DropBox
+itself uses, not `BorderedFrame`'s own `primary` default: placeholder text, then the fitted
+thumbnail over a `MarqueeLabel` title and an "uploader · length" line). **Only a single http(s)
 link can be dropped on the box** (`_dropped_link`); files and other text are
 refused. Bottom: `Mode` (`SegmentedButton`: Video + Audio / Video Only /
 Audio Only), `Video Codec` / `Audio Codec` (Video + Audio only) /

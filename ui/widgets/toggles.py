@@ -105,6 +105,76 @@ class CheckBox(QAbstractButton):
 
 
 # --------------------------------------------------------------------------- #
+#  StripButton
+# --------------------------------------------------------------------------- #
+class StripButton(QAbstractButton):
+    """The Strip Video/Audio/Subtitles toggle: off reads "Strip <kind>" filled in `stop` red,
+    on reads "Return <kind>" filled in `secondary` — the fill and text colour cross-fade between
+    the two rather than a checkbox ticking beside a fixed label. `clicked` fires only on a real
+    click (`QAbstractButton`'s own signal); `setChecked` from code doesn't animate, so a preset
+    or an undo can still set it silently, the same as the checkbox it replaces."""
+
+    def __init__(self, kind, checked=False, parent=None):
+        super().__init__(parent)
+        self._kind = kind
+        self.setCheckable(True)
+        self.setChecked(checked)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self._hover = False
+        self._t = 1.0 if checked else 0.0
+        self._font = ui_font(12, family="Arial")
+        fm = QFontMetricsF(self._font)
+        self.ref_width = math.ceil(max(fm.horizontalAdvance(f"Strip {kind}"),
+                                       fm.horizontalAdvance(f"Return {kind}")) + 20)
+        scale.fixed(self, self.ref_width, 24)
+        self._fade = anim(self, 160, self._fade_step)
+        self.toggled.connect(self._on_toggled)
+        T.theme.changed.connect(self.update)
+
+    def _fade_step(self, v):
+        self._t = v if self.isChecked() else 1.0 - v
+        self.update()
+
+    def _on_toggled(self, _on):
+        if self.isVisible():
+            self._fade.stop()
+            self._fade.start()
+        else:
+            self._t = 1.0 if self.isChecked() else 0.0
+            self.update()
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, _event):
+        th = T.theme
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        scale.begin(p)
+        rect = scale.ref_rect(self)
+        enabled = self.isEnabled()
+        if enabled:
+            shade = "_pressed" if self.isDown() else ("_hover" if self._hover else "")
+            fill = T.lerp(th.color(f"stop{shade}"), th.color(f"secondary{shade}"), self._t)
+            text_color = T.lerp(th.color("stop_text"), th.color("secondary_text"), self._t)
+        else:
+            fill = th.color("disabled")
+            text_color = T.lerp(th.color("stop_disabled_text"), th.color("secondary_disabled_text"), self._t)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 6, 6)
+        p.fillPath(path, fill)
+        p.setFont(self._font)
+        p.setPen(text_color)
+        p.drawText(rect, Qt.AlignCenter, f"Return {self._kind}" if self.isChecked() else f"Strip {self._kind}")
+
+
+# --------------------------------------------------------------------------- #
 #  Switch
 # --------------------------------------------------------------------------- #
 class Switch(QAbstractButton):

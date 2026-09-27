@@ -90,6 +90,7 @@ def run():
     # Loop (an audio-only file), held on its first frame so the image is deterministic.
     set_scale(1.0)
     window.show_tab("Encoding")
+    window.tabs["Encoding"].sub_tab_bar.set_active("Audio")      # not wherever the loop above left it
     carousel = window.tabs["Encoding"].carousel
     carousel.toggle_expand()
     settle()

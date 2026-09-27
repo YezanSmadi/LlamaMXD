@@ -207,9 +207,7 @@
  {
   "menus": {
    "format_menu": ".mp4",
-   "preset_menu": "— none —",
-   "subtitle_language_menu": "—",
-   "subtitle_track_menu": "—"
+   "preset_menu": "— none —"
   },
   "save": "<work>\\out\\sdr-Fixture Clip.mp4",
   "step": "muxing: load sdr.mp4",
@@ -218,9 +216,7 @@
  {
   "menus": {
    "format_menu": ".mov",
-   "preset_menu": "— none —",
-   "subtitle_language_menu": "—",
-   "subtitle_track_menu": "—"
+   "preset_menu": "— none —"
   },
   "save": "<work>\\out\\sdr-Fixture Clip.mov",
   "step": "muxing: container -> .mov",
@@ -229,9 +225,7 @@
  {
   "menus": {
    "format_menu": ".mkv",
-   "preset_menu": "— none —",
-   "subtitle_language_menu": "—",
-   "subtitle_track_menu": "—"
+   "preset_menu": "— none —"
   },
   "save": "<work>\\out\\vp9.mkv",
   "step": "muxing: load vp9.webm (VP9 can't go in .mov)",
@@ -242,9 +236,7 @@
  {
   "menus": {
    "format_menu": ".mkv",
-   "preset_menu": "— none —",
-   "subtitle_language_menu": "—",
-   "subtitle_track_menu": "—"
+   "preset_menu": "— none —"
   },
   "save": "<work>\\out\\multi.mkv",
   "step": "muxing: load multi.mkv (H.264 + AAC + Opus)",
@@ -253,9 +245,7 @@
  {
   "menus": {
    "format_menu": ".mp4",
-   "preset_menu": "— none —",
-   "subtitle_language_menu": "—",
-   "subtitle_track_menu": "—"
+   "preset_menu": "— none —"
   },
   "save": "<work>\\out\\multi.mp4",
   "step": "muxing: container -> .mp4",
@@ -264,9 +254,7 @@
  {
   "menus": {
    "format_menu": ".mp4",
-   "preset_menu": "— none —",
-   "subtitle_language_menu": "—",
-   "subtitle_track_menu": "—"
+   "preset_menu": "— none —"
   },
   "save": "<work>\\out\\multi.mp4",
   "step": "muxing: untick the AAC track (Opus now decides)",
@@ -275,9 +263,7 @@
  {
   "menus": {
    "format_menu": ".mp4",
-   "preset_menu": "— none —",
-   "subtitle_language_menu": "—",
-   "subtitle_track_menu": "—"
+   "preset_menu": "— none —"
   },
   "save": "<work>\\out\\hdr.mp4",
   "step": "muxing: load hdr.mkv",

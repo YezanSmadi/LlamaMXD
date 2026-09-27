@@ -131,8 +131,14 @@ def _sup(width=1920, height=1080, shown=((1.0, 4.0), (6.0, 8.0))):
     return out
 
 
+# Titles with 台 and я, whose UTF-8 bytes include 0x8f, which the Windows code page (cp1252) can't decode.
+UNICODE_TITLES = {"container": "台配国语 Я", "chapters": ["第 01 章", "Глава 2 я"], "audio": "国语 台配", "subtitle": "简体 я"}
+_UNICODE_CHAPTERS = (";FFMETADATA1\ntitle=%s\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=4000\ntitle=%s\n"
+                     "[CHAPTER]\nTIMEBASE=1/1000\nSTART=4000\nEND=10000\ntitle=%s\n"
+                     % (UNICODE_TITLES["container"], *UNICODE_TITLES["chapters"]))
+
 _WRITTEN = {"subs.srt": _SRT.encode(), "subs.ass": _ASS.encode(), "chapters.txt": _CHAPTERS.encode(),
-            "bar.sup": None}
+            "unicode-chapters.txt": _UNICODE_CHAPTERS.encode("utf-8"), "bar.sup": None}
 
 
 def _made_clips():
@@ -150,6 +156,13 @@ def _made_clips():
         # .sup's first picture to 0 otherwise).
         "pgs.mkv": ["-f", "lavfi", "-i", "testsrc2=s=1280x720:r=24:d=10", "-itsoffset", "1", "-i", fixture("bar.sup"),
                     "-map", "0", "-map", "1", "-c:v", "libx264", "-preset", "ultrafast", "-g", "24", "-c:s", "copy"],
+        # Container, chapter, audio and subtitle titles that aren't ASCII (UNICODE_TITLES).
+        "unicode.mkv": ["-f", "lavfi", "-i", "testsrc2=s=320x180:r=24:d=10", "-f", "lavfi", "-i", "sine=d=10",
+                        "-i", fixture("subs.srt"), "-i", fixture("unicode-chapters.txt"),
+                        "-map", "0", "-map", "1", "-map", "2", "-map_chapters", "3", "-map_metadata", "3",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-c:s", "copy",
+                        "-metadata:s:a:0", "title=" + UNICODE_TITLES["audio"],
+                        "-metadata:s:s:0", "title=" + UNICODE_TITLES["subtitle"]],
     }
 
 
@@ -160,7 +173,7 @@ def fixture(name):
         with open(path, "wb") as fh:
             fh.write(_WRITTEN[name] if _WRITTEN[name] is not None else _sup())
         return path
-    if name in ("subs.mkv", "pgs.mkv") and not os.path.exists(path):
+    if name in ("subs.mkv", "pgs.mkv", "unicode.mkv") and not os.path.exists(path):
         _ffmpeg(*_made_clips()[name], path)
         return path
     if not os.path.exists(path):

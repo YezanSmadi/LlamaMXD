@@ -5,7 +5,7 @@ decoding the fixture clips."""
 import itertools
 from datetime import datetime
 
-from harness import check_golden, fixture, report
+from harness import UNICODE_TITLES, check_golden, fixture, report
 
 from core import capabilities, formats, keybinds, naming, previews, probe
 
@@ -129,11 +129,24 @@ def probe_snapshot():
     return out
 
 
+def unicode_tag_problems():
+    """A file whose tags aren't ASCII must be identified and its titles read back intact (the
+    probe's output was once decoded as cp1252, which has no 0x8f: the whole probe came back empty)."""
+    info = probe.probe_media(fixture("unicode.mkv"))
+    found = {"video": info["has_video"], "audio": info["has_audio"], "container title": info["title"],
+             "chapter titles": [c["title"] for c in info["chapter_list"]],
+             "subtitle title": (info["subtitle_streams"] or [{}])[0].get("title")}
+    wanted = {"video": True, "audio": True, "container title": UNICODE_TITLES["container"],
+              "chapter titles": UNICODE_TITLES["chapters"], "subtitle title": UNICODE_TITLES["subtitle"]}
+    return [f"{what}: {found[what]!r}, wanted {want!r}" for what, want in wanted.items() if found[what] != want]
+
+
 def run():
     ok = report("format cascade (formats.py)", check_golden("core_formats", formats_snapshot()))
     ok &= report("file naming (naming.py)", check_golden("core_naming", naming_snapshot()))
     ok &= report("keybinds (keybinds.py)", check_golden("core_keybinds", keybinds_snapshot()))
     ok &= report("probe + preview frames on fixture clips", check_golden("core_probe", probe_snapshot()))
+    ok &= report("non-ASCII tags survive the probe", unicode_tag_problems())
     return ok
 
 

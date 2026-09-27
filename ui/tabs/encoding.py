@@ -14,15 +14,17 @@ from core import formats
 from core.capabilities import av1_preset_range, libplacebo_checked, libplacebo_problem_text, supports_libplacebo
 from ui import scale
 from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow, set_line_text
-from ui.tabs.muxing import DEFAULT_TIP, FORCED_TIP, LANGUAGE_TIP
-from ui.widgets.controls import button, field_label, labeled, set_enabled
+from ui.widgets.controls import button, field_label, IconButton, labeled, set_enabled
 from ui.widgets.dropdown import Dropdown, NO_OPTION
 from ui.widgets.text import ClickableLabel, ScaledLabel
-from ui.widgets.toggles import CheckBox, Switch
+from ui.widgets.toggles import CheckBox, StripButton, Switch
 from ui.widgets.dialogs import choose_streams, show_message
 from ui.widgets.tooltip import tip
 from ui.tips import (
     AUDIO_CODEC_TIPS,
+    DEFAULT_TIP,
+    FORCED_TIP,
+    LANGUAGE_TIP,
     SELECT_AUDIO_CODEC_TIP,
     SELECT_VIDEO_CODEC_TIP,
     VIDEO_CODEC_TIPS,
@@ -56,6 +58,15 @@ _CHOOSE_SUBTITLES_TIP = ("Pick which subtitle tracks the output includes and in 
                          "and add tracks from other files (.srt, .ass, .vtt, .sup...).")
 _BURN_TIP = ("Paints this track into the picture, so it shows on every player and can't be turned off. "
              "Only one track can be burned in; it isn't also kept as a separate track.")
+_UNDO_TIP = "Undoes the last change here — Choose Stream(s), or Strip/Return."
+_REDO_TIP = "Redoes what Undo just took back."
+_HISTORY_LIMIT = 50
+# The list a kind's Choose Stream(s) edits (Video has none — just its own Strip/Return) and the
+# widgets `_on_strip_clicked`/`_sync_controls` reach by kind.
+_STRIP_INCLUDED_ATTR = {"audio": "_audio_included", "subtitle": "_sub_included"}
+_STRIP_CHECK_ATTR = {"video": "strip_video_check", "audio": "strip_audio_check", "subtitle": "strip_subtitles_check"}
+_UNDO_BTN_ATTR = {"video": "video_undo_btn", "audio": "audio_undo_btn", "subtitle": "subtitle_undo_btn"}
+_REDO_BTN_ATTR = {"video": "video_redo_btn", "audio": "audio_redo_btn", "subtitle": "subtitle_redo_btn"}
 
 
 class EncodingTab(MediaTab):
@@ -90,6 +101,11 @@ class EncodingTab(MediaTab):
         self._sub_track_ids = {}
         self._burn_id = None
         self._subs_source = None
+        # Undo/redo, per panel: Video's own Strip/Return, Audio's and Subtitles' Choose
+        # Stream(s) edits (add, remove, reorder, re-tick) and their own Strip/Return. Cleared
+        # whenever the file changes (a new file's streams aren't what an old step describes).
+        self._history = {kind: {"undo": [], "redo": []} for kind in ("video", "audio", "subtitle")}
+        self._video_history_source = None
         # HDR→SDR preview: the file shown and its raw frames (the tone-mapped set is the app's).
         self._preview_path = None
         self._raw_frames = []
@@ -97,6 +113,31 @@ class EncodingTab(MediaTab):
     # ------------------------------------------------------------------ #
     #  Panels
     # ------------------------------------------------------------------ #
+    def _strip_column(self, kind, label):
+        """Undo/Redo above the Strip/Return toggle, right-aligned — the shape the Video, Audio
+        and Subtitles panels' right column all end on (see `_on_strip_clicked`, `_undo`/`_redo`)."""
+        strip_btn = StripButton(label)
+        strip_btn.clicked.connect(lambda: self._on_strip_clicked(kind))
+        tip(strip_btn, STRIP_TIP)
+        half = (strip_btn.ref_width - 4) // 2
+        history_row, hl = hrow(spacing=4, align_bottom=False)
+        hl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        undo_btn = IconButton("undo", role="compact", width=half, height=24)
+        undo_btn.clicked.connect(lambda: self._undo(kind))
+        tip(undo_btn, _UNDO_TIP)
+        redo_btn = IconButton("redo", role="compact", width=half, height=24)
+        redo_btn.clicked.connect(lambda: self._redo(kind))
+        tip(redo_btn, _REDO_TIP)
+        hl.addWidget(undo_btn)
+        hl.addWidget(redo_btn)
+        column = QWidget()
+        cl = QVBoxLayout(column)
+        cl.setContentsMargins(0, 0, 0, 0)
+        scale.spacing(cl, 4)
+        cl.addWidget(history_row, 0, Qt.AlignRight)
+        cl.addWidget(strip_btn, 0, Qt.AlignRight)
+        return column, strip_btn, undo_btn, redo_btn
+
     def build_video(self):
         """Encoder / Profile / Level / Encoder Preset / Resolution on one row, captions and then
         the quality slider with FPS beneath; HDR→SDR over Strip Video on the right."""
@@ -189,6 +230,7 @@ class EncodingTab(MediaTab):
         ql.addWidget(slider_row)
         ql.addWidget(self.fps_menu)
         left.addWidget(quality_row)
+        scale.spacer(left, 2)
 
         hdr_row, hl = hrow(spacing=5, align_bottom=False)
         self.hdr_label = ClickableLabel("HDRtoSDR")
@@ -200,13 +242,12 @@ class EncodingTab(MediaTab):
         tip(self.hdr_switch, _HDR_TIP)
         hl.addWidget(self.hdr_label)
         hl.addWidget(self.hdr_switch)
-        self.strip_video_check = CheckBox("Strip Video", color_key="stop")
-        self.strip_video_check.clicked.connect(self._on_control_change)
-        tip(self.strip_video_check, STRIP_TIP)
+        strip_column, self.strip_video_check, self.video_undo_btn, self.video_redo_btn = \
+            self._strip_column("video", "Video")
         scale.spacer(right, 26)   # aligns HDR with the dropdown row's top
         right.addWidget(hdr_row, 0, Qt.AlignRight)
         right.addStretch(1)
-        right.addWidget(self.strip_video_check, 0, Qt.AlignRight | Qt.AlignBottom)
+        right.addWidget(strip_column, 0, Qt.AlignRight)
         return page
 
     def build_audio(self):
@@ -266,12 +307,10 @@ class EncodingTab(MediaTab):
         left.addWidget(row2)
         scale.spacer(left, 2)
 
-        self.strip_audio_check = CheckBox("Strip Audio", color_key="stop")
-        self.strip_audio_check.clicked.connect(self._on_control_change)
-        tip(self.strip_audio_check, STRIP_TIP)
+        strip_column, self.strip_audio_check, self.audio_undo_btn, self.audio_redo_btn = \
+            self._strip_column("audio", "Audio")
         right.addStretch(1)
-        right.addWidget(self.strip_audio_check, 0, Qt.AlignRight)
-        scale.spacer(right, 4)
+        right.addWidget(strip_column, 0, Qt.AlignRight)
         return page
 
     def build_subtitles(self):
@@ -313,13 +352,91 @@ class EncodingTab(MediaTab):
         left.addWidget(row2)
         scale.spacer(left, 2)
 
-        self.strip_subtitles_check = CheckBox("Strip Subtitles", color_key="stop")
-        self.strip_subtitles_check.clicked.connect(self._on_control_change)
-        tip(self.strip_subtitles_check, STRIP_TIP)
+        strip_column, self.strip_subtitles_check, self.subtitle_undo_btn, self.subtitle_redo_btn = \
+            self._strip_column("subtitle", "Subtitles")
         right.addStretch(1)
-        right.addWidget(self.strip_subtitles_check, 0, Qt.AlignRight)
-        scale.spacer(right, 4)
+        right.addWidget(strip_column, 0, Qt.AlignRight)
         return page
+
+    # ------------------------------------------------------------------ #
+    #  Undo / redo, per panel (Video's own Strip/Return; Audio's and Subtitles' Choose
+    #  Stream(s) edits and their own Strip/Return)
+    # ------------------------------------------------------------------ #
+    def _snapshot(self, kind):
+        """This panel's state now, for one undo/redo step."""
+        if kind == "video":
+            return {"strip": self.strip_video_check.isChecked()}
+        if kind == "audio":
+            return {"list": list(self._audio_list), "included": set(self._audio_included),
+                    "active": self._active_audio_id,
+                    "settings": {i: dict(v) for i, v in self._audio_stream_settings.items()},
+                    "strip": self.strip_audio_check.isChecked()}
+        return {"list": list(self._sub_list), "included": set(self._sub_included),
+                "active": self._active_sub_id,
+                "settings": {i: dict(v) for i, v in self._sub_settings.items()},
+                "burn_id": self._burn_id, "strip": self.strip_subtitles_check.isChecked()}
+
+    def _restore(self, kind, snap):
+        """A snapshot from `_snapshot` becomes the panel's state again."""
+        if kind == "video":
+            self.strip_video_check.setChecked(snap["strip"])
+        elif kind == "audio":
+            self._audio_list = list(snap["list"])
+            self._audio_included = set(snap["included"])
+            self._active_audio_id = snap["active"]
+            self._audio_stream_settings = {i: dict(v) for i, v in snap["settings"].items()}
+            self.strip_audio_check.setChecked(snap["strip"])
+            self._reactivate_audio_stream()
+            self._load_active_audio_stream()
+        else:
+            self._sub_list = list(snap["list"])
+            self._sub_included = set(snap["included"])
+            self._active_sub_id = snap["active"]
+            self._sub_settings = {i: dict(v) for i, v in snap["settings"].items()}
+            self._burn_id = snap["burn_id"]
+            self.strip_subtitles_check.setChecked(snap["strip"])
+        self._sync_controls()
+
+    def _push_history(self, kind, snapshot=None):
+        """Keep `snapshot` (default: the panel now) as the next undo step; clears redo."""
+        history = self._history[kind]
+        history["undo"].append(snapshot if snapshot is not None else self._snapshot(kind))
+        del history["undo"][:-_HISTORY_LIMIT]
+        history["redo"].clear()
+
+    def _undo(self, kind):
+        self._travel(kind, "undo", "redo")
+
+    def _redo(self, kind):
+        self._travel(kind, "redo", "undo")
+
+    def _travel(self, kind, take, keep):
+        history = self._history[kind]
+        if not history[take]:
+            return
+        history[keep].append(self._snapshot(kind))
+        self._restore(kind, history[take].pop())
+
+    def _on_strip_clicked(self, kind):
+        """Strip/Return was clicked. Returning from a Choose Stream(s) edit that left nothing
+        included plays back as an undo instead of a bare toggle — un-stripping an empty
+        selection would otherwise bring nothing back — and the Undo button visibly takes the
+        click."""
+        check = getattr(self, _STRIP_CHECK_ATTR[kind])
+        included_attr = _STRIP_INCLUDED_ATTR.get(kind)
+        emptied = included_attr is not None and not getattr(self, included_attr)
+        history = self._history[kind]
+        if not check.isChecked() and emptied and history["undo"]:
+            # The click already flipped `check` to False; put it back before undo's own snapshot
+            # of "now" is taken, so the state Redo would bring back is the stripped-empty one,
+            # not this click's own half-finished toggle.
+            check.setChecked(True)
+            getattr(self, _UNDO_BTN_ATTR[kind]).animateClick()
+            return
+        prior = self._snapshot(kind)
+        prior["strip"] = not check.isChecked()
+        self._push_history(kind, prior)
+        self._on_control_change()
 
     # ------------------------------------------------------------------ #
     #  Change handlers
@@ -414,6 +531,10 @@ class EncodingTab(MediaTab):
         self.sub_tab_bar.set_marked("Video", stripping_video or video_absent)
         self.sub_tab_bar.set_marked("Audio", stripping_audio or audio_absent)
         self.carousel.set_strip_state(stripping_video, stripping_audio or audio_absent)
+        self.video_undo_btn.setEnabled(bool(self._history["video"]["undo"]))
+        self.video_redo_btn.setEnabled(bool(self._history["video"]["redo"]))
+        self.audio_undo_btn.setEnabled(bool(self._history["audio"]["undo"]))
+        self.audio_redo_btn.setEnabled(bool(self._history["audio"]["redo"]))
 
         # 2. A picture subtitle track narrows the containers to Matroska. A probe-only passthru
         # codec (DTS / TrueHD) is never snapped away.
@@ -528,7 +649,9 @@ class EncodingTab(MediaTab):
                            self.strip_video_check, self.strip_audio_check,
                            self.choose_streams_btn, self.passthru_check, self.passthru_label,
                            self.choose_subs_btn, self.strip_subtitles_check, self.sub_default_check,
-                           self.sub_forced_check, self.sub_burn_check):
+                           self.sub_forced_check, self.sub_burn_check,
+                           self.video_undo_btn, self.video_redo_btn, self.audio_undo_btn,
+                           self.audio_redo_btn, self.subtitle_undo_btn, self.subtitle_redo_btn):
                 widget.setEnabled(False)
 
     def _retarget_format(self):
@@ -691,21 +814,33 @@ class EncodingTab(MediaTab):
         self._sync_controls()
 
     def _open_stream_picker(self):
-        """Choose Stream(s): the popup edits a copy; OK swaps it in, Cancel changes nothing."""
+        """Choose Stream(s): the popup edits a copy; OK swaps it in (one undo step), Cancel
+        changes nothing."""
         result = choose_streams(self.app, "audio", self._audio_list, self._audio_included,
                                      self._output_directory())
         if result is None:
             return
         entries, chosen = result
-        self._save_active_audio_stream()
         present = {entry["id"] for entry in entries}
+        new_included = chosen & present
+        if entries == self._audio_list and new_included == self._audio_included:
+            return
+        self._save_active_audio_stream()
+        prior = self._snapshot("audio")
         for entry in entries:
             self._audio_stream_settings.setdefault(entry["id"], self._default_audio_settings(entry["stream"]))
         self._audio_stream_settings = {i: v for i, v in self._audio_stream_settings.items() if i in present}
         self._audio_list = entries
-        self._audio_included = chosen & present
+        self._audio_included = new_included
         self._reactivate_audio_stream()
         self._load_active_audio_stream()
+        # Every track removed, or simply none left ticked — either way nothing plays as audio,
+        # the same outcome as Strip Audio, so the button reflects it (matches Muxing's
+        # empty-box == stripped rule); Return Audio undoes back to this same step (see
+        # `_on_strip_clicked`).
+        if not new_included:
+            self.strip_audio_check.setChecked(True)
+        self._push_history("audio", prior)
         self._sync_controls()
 
     def _reactivate_audio_stream(self):
@@ -734,6 +869,7 @@ class EncodingTab(MediaTab):
         if self.app.media.current_file_path == self._audio_streams_source:
             return
         self._audio_streams_source = self.app.media.current_file_path
+        self._history["audio"] = {"undo": [], "redo": []}
         primary = [{"id": f"src:{stream['index']}", "source": "primary", "file": None,
                     "index": stream["index"], "stream": stream, "name": None}
                    for stream in info.get("audio_streams") or []]
@@ -791,6 +927,7 @@ class EncodingTab(MediaTab):
         if self.app.media.current_file_path == self._subs_source:
             return
         self._subs_source = self.app.media.current_file_path
+        self._history["subtitle"] = {"undo": [], "redo": []}
         primary = [{"id": f"src:{stream['index']}", "source": "primary", "file": None,
                     "index": stream["index"], "stream": stream, "name": None}
                    for stream in info.get("subtitle_streams") or []
@@ -811,19 +948,31 @@ class EncodingTab(MediaTab):
                 "default": bool(stream.get("default")), "forced": bool(stream.get("forced"))}
 
     def _open_sub_picker(self):
-        """Choose Stream(s) for subtitles: OK swaps the edited list in, Cancel changes nothing."""
+        """Choose Stream(s) for subtitles: OK swaps the edited list in (one undo step), Cancel
+        changes nothing."""
         result = choose_streams(self.app, "subtitle", self._sub_list, self._sub_included, self._output_directory())
         if result is None:
             return
         entries, chosen = result
         present = {entry["id"] for entry in entries}
+        new_included = chosen & present
+        if entries == self._sub_list and new_included == self._sub_included:
+            return
+        prior = self._snapshot("subtitle")
         for entry in entries:
             self._sub_settings.setdefault(entry["id"], self._default_sub_settings(entry["stream"]))
         self._sub_settings = {i: v for i, v in self._sub_settings.items() if i in present}
         self._sub_list = entries
-        self._sub_included = chosen & present
+        self._sub_included = new_included
         if self._burn_id not in self._sub_included:
             self._burn_id = None
+        # Every track removed, or simply none left ticked — either way nothing plays as
+        # subtitles, the same outcome as Strip Subtitles, so the button reflects it (matches
+        # Muxing's empty-box == stripped rule); Return Subtitles undoes back to this same step
+        # (see `_on_strip_clicked`).
+        if not new_included:
+            self.strip_subtitles_check.setChecked(True)
+        self._push_history("subtitle", prior)
         self._sync_controls()
 
     def _on_sub_track_change(self, label):
@@ -893,7 +1042,13 @@ class EncodingTab(MediaTab):
         self.sub_default_check.setEnabled(editable and not burned)
         self.sub_forced_check.setEnabled(editable and not burned)
         self.sub_burn_check.setEnabled(editable and video_live)
-        self.strip_subtitles_check.setEnabled(has_file and bool(self._sub_list))
+        # A Remove Stream(s) that emptied the list keeps the button live: Return Subtitles is
+        # still the way back (an undo — see `_on_strip_clicked`), unlike a source that genuinely
+        # never had a subtitle track and has no history to restore either.
+        self.strip_subtitles_check.setEnabled(
+            has_file and (bool(self._sub_list) or bool(self._history["subtitle"]["undo"])))
+        self.subtitle_undo_btn.setEnabled(bool(self._history["subtitle"]["undo"]))
+        self.subtitle_redo_btn.setEnabled(bool(self._history["subtitle"]["redo"]))
         self.sub_tab_bar.set_marked("Subtitles", stripping)
 
     # ------------------------------------------------------------------ #
@@ -978,6 +1133,9 @@ class EncodingTab(MediaTab):
     # ------------------------------------------------------------------ #
     def on_media_info(self, info):
         """Adopt the source's container (while unpicked), then resolve Encoder and the audio."""
+        if self.app.media.current_file_path != self._video_history_source:
+            self._video_history_source = self.app.media.current_file_path
+            self._history["video"] = {"undo": [], "redo": []}
         container = info.get("container")
         if container and self._auto_format is not None and container in formats.containers():
             self.format_menu.set(container)

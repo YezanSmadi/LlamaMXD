@@ -27,17 +27,23 @@ from ui.widgets.marquee import MarqueeLabel
 from ui.widgets.text import ScaledLineEdit
 from ui.widgets.timespinner import TimeSpinner
 from ui.widgets.toggles import CheckBox
-from ui.widgets.dialogs import ask_text, ask_yes_no, confirm_output_path, show_message
+from ui.widgets.dialogs import ask_text, ask_yes_no, ask_yes_no_remember, confirm_output_path, show_message
 from ui.widgets.panels import MEDIA_FILTER, DropBox, SubTabBar, SummaryPanel
 from ui.widgets.tooltip import tip
 from ui.tips import CONTAINER_TIPS
 
 SUBTABS = ("Overview", "Video", "Audio", "Subtitles", "Chapters")
+# Ctrl+Z/Ctrl+Shift+Z (`undo_current`/`redo_current`): the sub-tab names that have a kind's
+# `_undo(kind)`/`_redo(kind)` history; Overview and Chapters don't.
+_UNDO_KIND_FOR_SUBTAB = {"Video": "video", "Audio": "audio", "Subtitles": "subtitle"}
 
 AV_SYNC_TIP = ("Holds a constant frame rate and keeps timestamps aligned — turn off only "
                "if you need the source's exact original timing.")
 STRIP_TIP = "Removes this stream entirely from the output — the other panel's stream is unaffected."
 PRESET_TIP = "Presets remember the container and codec/quality choices — never the trim, file paths, or track picks."
+CLEAR_TIP = "Clears the selected file and everything decoded from it, without touching the file itself."
+_CLEAR_TITLE = "Clear Selected File?"
+_CLEAR_MESSAGE = "Are you sure you want to clear the currently selected file?"
 
 
 def hrow(spacing=0, align_bottom=True):
@@ -146,12 +152,16 @@ class MediaTab(QWidget):
         root.addWidget(save)
         scale.spacer(root, 10)
 
-        # --- Queue Task + the do-it-now button, by role (a theme can swap them).
+        # --- Clear, then Queue Task + the do-it-now button, by role (a theme can swap the latter two).
         actions, al = hrow(spacing=8, align_bottom=False)
+        self.clear_btn = button("Clear", role="danger", width=button_width_for(["Clear"]))
+        self.clear_btn.clicked.connect(self._on_clear)
+        tip(self.clear_btn, CLEAR_TIP)
         self.queue_btn = button("Queue Task", role="queue")
         self.queue_btn.clicked.connect(self.add_to_queue)
         self.go_btn = button(self.ACTION_TEXT, role="action")
         self.go_btn.clicked.connect(self.run_now)
+        al.addWidget(self.clear_btn)
         al.addWidget(self.queue_btn, 1)
         al.addWidget(self.go_btn, 1)
         root.addWidget(actions)
@@ -244,6 +254,22 @@ class MediaTab(QWidget):
         return page, left, right
 
     # ------------------------------------------------------------------ #
+    #  Undo / redo (Ctrl+Z / Ctrl+Shift+Z, `ui.app._Keybinds`)
+    # ------------------------------------------------------------------ #
+    def undo_current(self):
+        """Undo on whichever Video/Audio/Subtitles sub-tab is showing — both Muxing and
+        Encoding keep a per-kind `_undo(kind)`/`_redo(kind)` history; Overview and Chapters
+        have none."""
+        kind = _UNDO_KIND_FOR_SUBTAB.get(self.sub_tab_bar.active())
+        if kind:
+            self._undo(kind)
+
+    def redo_current(self):
+        kind = _UNDO_KIND_FOR_SUBTAB.get(self.sub_tab_bar.active())
+        if kind:
+            self._redo(kind)
+
+    # ------------------------------------------------------------------ #
     #  Change handlers
     # ------------------------------------------------------------------ #
     def _on_control_change(self, *_):
@@ -298,7 +324,8 @@ class MediaTab(QWidget):
         self.av_sync_check.setEnabled(has_file)
         self.preset_save_btn.setEnabled(has_file)
         self.preset_delete_btn.setEnabled(has_file)
-        # Nothing to run without a file (like the Downloader before a fetch).
+        # Nothing to run, or to clear, without a file (like the Downloader before a fetch).
+        self.clear_btn.setEnabled(has_file)
         self.queue_btn.setEnabled(has_file)
         self.go_btn.setEnabled(has_file)
         if has_file:
@@ -321,6 +348,19 @@ class MediaTab(QWidget):
             self, "Select Video File", self._output_directory(), MEDIA_FILTER)
         if path:
             self.app.media.select_file(path)
+
+    def _on_clear(self):
+        """Clear: asks first unless the user has turned that off, then drops the selection and
+        everything decoded from it (the file itself is untouched)."""
+        if not self.app.media.current_file_path:
+            return
+        if self.app.confirm_clear_selection:
+            confirmed, dont_ask = ask_yes_no_remember(self.app, _CLEAR_TITLE, _CLEAR_MESSAGE)
+            if dont_ask:
+                self.app.confirm_clear_selection = False
+            if not confirmed:
+                return
+        self.app.media.clear_selection()
 
     def set_selected_file(self, path):
         """A file was picked: the drop box shows the loading spinner until frames (or the
@@ -518,13 +558,18 @@ class MediaTab(QWidget):
             self.duration_time_spinner.set_seconds(settings["duration_secs"])
         if "av_sync" in settings:
             self.av_sync_check.setChecked(bool(settings["av_sync"]))
+        self._apply_strip_flags(settings)
+        self.chapter_editor.apply(settings)
+
+    def _apply_strip_flags(self, settings):
+        """Strip Video / Audio / Subtitles from an applied settings dict (a preset): each is a
+        checkbox on this tab. Muxing has none (see muxing.py) and overrides this instead."""
         if "strip_video" in settings:
             self.strip_video_check.setChecked(bool(settings["strip_video"]))
         if "strip_audio" in settings:
             self.strip_audio_check.setChecked(bool(settings["strip_audio"]))
         if "strip_subtitles" in settings:
             self.strip_subtitles_check.setChecked(bool(settings["strip_subtitles"]))
-        self.chapter_editor.apply(settings)
 
     def _gather_common(self):
         settings = {
@@ -534,10 +579,15 @@ class MediaTab(QWidget):
             "start_secs": self.start_time_spinner.seconds(),
             "duration_secs": self.duration_time_spinner.seconds(),
             "av_sync": self.av_sync_check.isChecked(),
-            "strip_subtitles": self.strip_subtitles_check.isChecked(),
         }
+        settings.update(self._gather_strip_subtitles())
         settings.update(self.chapter_editor.gather())
         return settings
+
+    def _gather_strip_subtitles(self):
+        """The Strip Subtitles checkbox. Muxing (no checkbox) overrides this, computing it from
+        the track box instead."""
+        return {"strip_subtitles": self.strip_subtitles_check.isChecked()}
 
     @staticmethod
     def _menu_value(menu):
@@ -580,7 +630,7 @@ class MediaTab(QWidget):
         self._resolve_output_tokens(settings)
         if not self._validate_settings(settings):
             return
-        name = os.path.basename(settings["input_file"].replace("\\", "/"))
+        name = os.path.basename(settings["output_path"].replace("\\", "/"))
         queue_tab = self.app.tabs["Queue"]
         task_id = queue_tab.add_task(name, settings=settings,
                                      status="Queued", source_tab=self.TAB)
@@ -596,6 +646,6 @@ class MediaTab(QWidget):
         self._resolve_output_tokens(settings)
         if not self._validate_settings(settings):
             return
-        name = os.path.basename(settings["input_file"].replace("\\", "/"))
+        name = os.path.basename(settings["output_path"].replace("\\", "/"))
         self.app.tabs["Queue"].add_task(name, settings=settings, status="Queued", source_tab=self.TAB)
         self.app.notify(f"{self.VERB_ING} job added to queue.")

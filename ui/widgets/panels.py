@@ -25,7 +25,7 @@ from ui.widgets.text import ScaledLabel, ui_font
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ASSETS = os.path.join(_REPO_ROOT, "assets")
-VERSION = "v0.5.0-beta.4"
+VERSION = "v0.5.0-beta.5"
 
 MEDIA_FILTER = (
     "Media files (*.mp4 *.mkv *.mov *.webm *.avi *.m4v *.mxf *.ts *.vob "
@@ -557,8 +557,10 @@ class LoadingSpinner(QWidget):
         _LOADING["playhead"] = index
         frame = (_LOADING.get("frames") or [None] * _LOADING_FRAMES)[index]
         if frame is not None:
-            primary = T.theme.color("primary")
-            p.drawImage(self.rect(), _recolor(frame, (primary.red(), primary.green(), primary.blue())))
+            # The theme's accent (primary, or secondary for a theme that swaps the action
+            # buttons — Terminal, whose black primary would otherwise vanish on the disc).
+            accent = T.theme.color("theme_accent")
+            p.drawImage(self.rect(), _recolor(frame, (accent.red(), accent.green(), accent.blue())))
 
 
 # --------------------------------------------------------------------------- #

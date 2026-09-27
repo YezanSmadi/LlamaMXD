@@ -1,7 +1,7 @@
 ==============================================================================
 Artwork licenses - the license texts for the files in assets/ that need them
 Creative Commons Attribution 4.0 International (CC BY 4.0):
-    LlamaMXD's RCA Cable Yellow.svg; the SVG Repo icons close-window.svg, maximize-window.svg,
+    LlamaMXD's RCA Cable Yellow.svg, search.svg; the SVG Repo icons close-window.svg, maximize-window.svg,
     select-multiple.svg and expand.svg (credited to their authors in README.txt); and
     deselect-multiple.svg / shrink.svg, which are edits of select-multiple.svg / expand.svg.
     Text: https://creativecommons.org/licenses/by/4.0/legalcode

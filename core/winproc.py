@@ -101,10 +101,13 @@ def contain(proc):
 def run(args, *, timeout, text=False, env=None, below_normal=False):
     """`subprocess.run(args, capture_output=True)` for a tool: no console window, started
     suspended, put in the tools job, then let go — so neither it nor anything it starts can outlive
-    the app. Killed on a timeout or any error; raises like `subprocess.run`."""
+    the app. Killed on a timeout or any error; raises like `subprocess.run`. `text` decodes as UTF-8."""
     flags = NO_WINDOW | (BELOW_NORMAL if below_normal else 0) | (_CREATE_SUSPENDED if os.name == "nt" else 0)
+    # UTF-8, not the system code page: ffprobe writes tags as UTF-8, and cp1252 has undefined bytes (0x8f
+    # in 台 and я) whose decode error kills the pipe reader, leaving empty output and no exception.
+    decoding = {"encoding": "utf-8", "errors": "replace"} if text else {}
     proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=text, env=env, creationflags=flags)
+                            text=text, env=env, creationflags=flags, **decoding)
     try:
         if os.name == "nt":
             contain(proc)

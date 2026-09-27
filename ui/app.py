@@ -23,6 +23,7 @@ from core import downloader, gpu, llamalog, power, window_mode, window_style
 from core.theme import load_settings
 from ui import scale
 from ui import theme as T
+from ui.hover import HoverSync
 from ui.keymap import KeyMap
 from ui.media_session import MediaSession
 from ui.keynav import KeyNav
@@ -139,6 +140,8 @@ class _Keybinds(QObject):
             ("tab_prev", False, lambda: not expanded and win.cycle_tab(-1)),
             ("tab_next", False, lambda: not expanded and win.cycle_tab(1)),
             ("activate", False, lambda: not expanded and win.keynav.activate()),
+            ("undo", False, lambda: self._dispatch_undo(tab, False)),
+            ("redo", False, lambda: self._dispatch_undo(tab, True)),
         )
         for action, may_repeat, handler in table:
             if keys.matches(action, event):
@@ -154,6 +157,16 @@ class _Keybinds(QObject):
         if carousel is None:
             return False
         carousel.step(delta)
+        return True
+
+    @staticmethod
+    def _dispatch_undo(tab, redo):
+        """Ctrl+Z / Ctrl+Shift+Z: whichever Video/Audio/Subtitles sub-tab is showing on Muxing
+        or Encoding, if either has one (`MediaTab.undo_current`/`redo_current`)."""
+        method = getattr(tab, "redo_current" if redo else "undo_current", None)
+        if method is None:
+            return False
+        method()
         return True
 
     def _toggle_queue(self, focus):
@@ -185,6 +198,8 @@ class MainWindow(QWidget):
         # The Downloader's own save folder, used only while separate-save is on and one is set.
         self.downloader_separate_save = bool(settings["downloader_separate_save"])
         self.downloader_save_location = settings["downloader_save_location"] or ""
+        # The Clear button's confirmation, off once the user checks "Don't ask again".
+        self.confirm_clear_selection = bool(settings["confirm_clear_selection"])
         # "When Done" starts over at Do Nothing when its reset flag is set, so a Shutdown chosen
         # last session can't surprise this one.
         self.naming_template = settings["naming_template"]
@@ -265,6 +280,7 @@ class MainWindow(QWidget):
         self.indicator = TabIndicator(self)
         self.toasts = ToastManager(self, lambda: self.tab_frame)
         self.keynav = KeyNav(self)
+        self.hover = HoverSync()
         self._grips = ResizeGrips(self)
         # Borderless has no OS title bar, so it gets its own close / maximise / minimise.
         self.window_controls = WindowControls(self.sidebar)

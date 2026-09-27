@@ -139,6 +139,7 @@ def load_settings():
         "startup_tab": startup_tab.DEFAULT_TAB,
         "log_detail": llamalog.DEFAULT_LEVEL,
         "keybinds": keybinds.defaults(),
+        "confirm_clear_selection": True,
     }
     if not os.path.exists(_SETTINGS_PATH):
         return settings
