@@ -11,10 +11,9 @@ import re
 import subprocess
 import threading
 
-from core import formats, llamalog
+from core import formats, llamalog, winproc
 from core.tools import find_tool, tool_dir, tool_path
 
-_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 MODE_AV = "Video + Audio"
 MODE_VIDEO = "Video Only"
@@ -86,10 +85,7 @@ def deno_path():
             path = find_tool("deno")
             if path:
                 try:
-                    completed = subprocess.run(
-                        [path, "--version"], capture_output=True, text=True,
-                        timeout=15, creationflags=_NO_WINDOW,
-                    )
+                    completed = winproc.run([path, "--version"], text=True, timeout=15)
                     match = re.search(r"deno (\d+)\.(\d+)\.(\d+)", completed.stdout or "")
                     if match and tuple(int(g) for g in match.groups()) >= _DENO_MIN_VERSION:
                         _deno_path = path
@@ -133,10 +129,7 @@ def fetch_info(url):
         return None, "Paste a video link first."
     argv = base_args() + ["--flat-playlist", "-J", url]
     try:
-        completed = subprocess.run(
-            argv, capture_output=True, timeout=_FETCH_TIMEOUT_SECS,
-            creationflags=_NO_WINDOW, env=subprocess_env(),
-        )
+        completed = winproc.run(argv, timeout=_FETCH_TIMEOUT_SECS, env=subprocess_env())
     except FileNotFoundError:
         return None, "yt-dlp wasn't found. Reinstall LlamaMXD."
     except subprocess.TimeoutExpired:

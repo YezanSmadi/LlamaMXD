@@ -12,7 +12,7 @@ import numpy as np
 from PySide6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QFileDialog, QGridLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QGridLayout, QLabel, QVBoxLayout, QWidget
 
 from core import llamalog
 from ui import scale
@@ -240,6 +240,11 @@ _TOLERANCE = 16   # how far off the blend line (in 0-255 colour units) still cou
 _LOADING = {}
 # Frames decoded ahead of the one playing (200ms): enough to stay ahead, not the whole loop.
 _LOADING_LOOKAHEAD = 12
+# With no spinner showing, frames are released: those of another size after the grace, all but
+# the first few (what the next spinner starts on; the rest decode as it plays) after the idle time.
+_LOADING_KEEP = _LOADING_LOOKAHEAD + 1
+_RELEASE_GRACE_MS = 5_000
+_RELEASE_IDLE_MS = 120_000
 
 
 def _candidate_box():
@@ -407,6 +412,44 @@ def _pause_frames():
     _LOADING["playhead"] = 0
 
 
+def _release_frames(idle):
+    """With no spinner showing, drop the frames not needed: past the first `_LOADING_KEEP`, those
+    not at the size a spinner now needs, or with `idle` all of them; the first ones are then
+    re-decoded at that size if they aren't already."""
+    frames, need = _LOADING.get("frames"), _LOADING.get("need")
+    if frames is None or need is None or LoadingSpinner._showing:
+        return
+    for n in range(_LOADING_KEEP, _LOADING_FRAMES):
+        if frames[n] is not None and (idle or frames[n][0].width() != need):
+            frames[n] = None
+    _request_frames(need)
+
+
+class _Release:
+    """The two release timers, shared by every spinner (made on first use, owned by the app)."""
+
+    grace = idle = None
+
+    @classmethod
+    def arm(cls, idle=True):
+        """Restart the grace wait, and with `idle` the idle wait too."""
+        if cls.grace is None:
+            cls.grace, cls.idle = QTimer(QApplication.instance()), QTimer(QApplication.instance())
+            for timer, wait, is_idle in ((cls.grace, _RELEASE_GRACE_MS, False), (cls.idle, _RELEASE_IDLE_MS, True)):
+                timer.setSingleShot(True)
+                timer.setInterval(wait)
+                timer.timeout.connect(lambda is_idle=is_idle: _release_frames(is_idle))
+        cls.grace.start()
+        if idle:
+            cls.idle.start()
+
+    @classmethod
+    def disarm(cls):
+        if cls.grace is not None:
+            cls.grace.stop()
+            cls.idle.stop()
+
+
 def _recolor(frame, rgb):
     """A copy of a frame with its themed pixels moved to `rgb`: the stripe and rim from the
     pink to `rgb`, the hub's inner edge from `_ring_colour(pink)` to `_ring_colour(rgb)`."""
@@ -458,11 +501,17 @@ class LoadingSpinner(QWidget):
         start = self._frame_index() if self.isVisible() else 0
         if (_LOADING.get("frames") or [None] * _LOADING_FRAMES)[start] is not None:
             start += 2
-        _request_frames(self.width() * (self.devicePixelRatioF() or 1.0), start)
+        side = self.width() * (self.devicePixelRatioF() or 1.0)
+        if _LOADING.get("need") != _frame_side(side):
+            _LOADING["need"] = _frame_side(side)
+            if not LoadingSpinner._showing:
+                _Release.arm(idle=False)   # e.g. out of fullscreen: the bigger frames can go
+        _request_frames(side, start)
 
     def showEvent(self, e):
         self._t0 = time.monotonic()
         LoadingSpinner._showing.add(id(self))
+        _Release.disarm()
         self._size_timer.stop()
         self._request_frames()
         self._schedule()
@@ -472,6 +521,7 @@ class LoadingSpinner(QWidget):
         LoadingSpinner._showing.discard(id(self))
         if not LoadingSpinner._showing:
             _pause_frames()
+            _Release.arm()
 
     def set_side(self, side):
         """A `side` x `side` square in real px, from the host. A plain resize: this is a

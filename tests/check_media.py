@@ -4,7 +4,7 @@
 background tone-mapped render and its cancellation by a file change, an audio-only file, an
 unreadable file rejected, a video that decodes to no frames, and the shared scrub position.
 After each step the pipeline's state, both media tabs' preview state and any dialog raised are
-recorded (golden)."""
+recorded (golden). Then the loading spinner's frames being released once it's hidden."""
 import os
 import time
 
@@ -13,7 +13,12 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 import harness  # noqa: E402
 from harness import WORK, check_golden, fixture, report  # noqa: E402
 
-from check_ui import settle, window  # noqa: E402
+import ui.widgets.panels as panels  # noqa: E402
+
+# The spinner's release waits, shortened (read when its timers are made, at the first hide).
+panels._RELEASE_GRACE_MS, panels._RELEASE_IDLE_MS = 1_000, 3_000
+
+from check_ui import set_scale, settle, window  # noqa: E402
 
 try:
     import ui.media_session as pipeline  # noqa: E402
@@ -144,6 +149,48 @@ def run():
     return report(f"selected-file pipeline ({len(trace)} steps)", check_golden("media", trace))
 
 
+def spinner_release():
+    """Frames of another size go after the grace, all but the first few after the idle time;
+    the first ones are always there, at the size needed, for the next spinner."""
+    problems = []
+    window.show_tab("Muxing")
+    window.tabs["Muxing"].clear_selected_file()      # the drop box, not a loaded file's carousel
+    box = window.tabs["Muxing"].drop_box
+
+    def sizes():
+        return [f[0].width() if f else None for f in panels._LOADING.get("frames") or []]
+
+    def expect(label, keep_all):
+        need, got = panels._LOADING.get("need"), sizes()
+        if got[: panels._LOADING_KEEP] != [need] * panels._LOADING_KEEP:
+            problems.append(f"{label}: the first frames aren't all {need}px: {got[:panels._LOADING_KEEP]}")
+        rest = got[panels._LOADING_KEEP:]
+        if keep_all and rest != [need] * len(rest):
+            problems.append(f"{label}: frames were released too early: {sorted(set(map(str, rest)))}")
+        if not keep_all and any(rest):
+            problems.append(f"{label}: {sum(map(bool, rest))} frames past the first few were kept")
+
+    set_scale(2.0)
+    box.collapse()
+    settle(0.1)
+    if not box.spinner.isVisible():
+        return report("the loading spinner's frames are released when hidden", ["the spinner never showed"])
+    settle(4)                                    # the whole loop decodes at the big size
+    box.reset()
+    set_scale(1.0)
+    settle(2)
+    expect("big frames, 1s past the grace after shrinking", keep_all=False)
+    box.collapse()
+    settle(4)                                    # the whole loop decodes as it plays (2.4s)
+    box.reset()
+    settle(0.5)
+    expect("frames at the size needed, before the idle time", keep_all=True)
+    settle(3)
+    expect("after the idle time", keep_all=False)
+    return report("the loading spinner's frames are released when hidden", problems)
+
+
 if __name__ == "__main__":
     run()
+    spinner_release()
     harness.finish()

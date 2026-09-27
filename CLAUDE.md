@@ -135,6 +135,14 @@ change here), and even `os._exit` runs the DLLs' unload code where it happens.
   second probe), the HDR preview (an import tone-maps frames 0-2 and stops, scrubbing to 6 adds 6-8, the
   switch completes the set and the carousel shows it, off shows the raw set, a file change drops or
   cancels it), the Wave Loop for audio, an unreadable file rejected, "No Preview", and the scrub index.
+  Then the spinner's frame release (below, under LoadingSpinner), with its waits cut to 1s / 3s: big
+  frames gone after the grace once the window shrank, a same-size set kept until the idle time, and
+  the first 13 always present at the size needed.
+- `check_orphans` — the real app (`main.main`, sandboxed, offscreen) as a child process imports the HDR
+  fixture and turns HDR->SDR on, then closes its window, and a second run is killed outright
+  (`Popen.kill`, like a crash or End Task) — each at the moment tone-map ffmpegs are running (a run
+  where none was is itself a failure, since it proves nothing). None of the app's descendants may be
+  alive afterwards. Before `core/winproc.py`, both runs left 3 ffmpegs running on for seconds.
 - `check_runners` — the runners' lifecycle offline: a real `YtDlpJob` (its job object included)
   runs `tests/fake_ytdlp.py`, a stand-in speaking yt-dlp's marker lines — a merge, pause / resume,
   priority, Stop killing the tree (a child process too) and removing the work folder, a failure,
@@ -176,6 +184,8 @@ core/process_job.py       ProcessJob, the base of both runners: launch, pause/re
                           events, the job log; set_suspended, replace_output
 core/ffmpeg_runner.py     runs one ffmpeg job off the GUI thread (progress, suspend/resume, stop)
 core/tools.py             resolves ffmpeg/ffprobe/yt-dlp/deno to absolute paths (bundled, then PATH)
+core/winproc.py           the kill-on-close "tools job" every tool joins; run(): a contained subprocess.run;
+                          set_suspended (NtSuspendProcess / NtResumeProcess)
 core/downloader.py        Downloader logic: fetch (-J), format model + option lists, resolve, argv
 core/ytdlp_runner.py      runs one download off the GUI thread (job object, stages, time progress)
 ui/app.py                 MainWindow — the hub: shared state, background work, tab routing,
@@ -336,6 +346,22 @@ text output), which every query in `core/probe.py` and `core/capabilities.py` us
 frames in `core/previews.py` launch through `tool_path` with their own flags (binary output,
 below-normal priority). Verified by running a real Mux and Encode job with every
 ffmpeg folder removed from PATH: both launched `dependables\ffmpeg.exe`.
+
+**No tool outlives the app (`core/winproc.py`).** Windows doesn't end a child with its parent, so a
+close, a crash or End Task used to leave a preview grab or a tone-map ffmpeg running (found by
+`check_orphans`: 3 ffmpegs ran on after both a close and a kill). Every tool the app runs now joins
+one app-wide **kill-on-close job object** (`_tools_job`, made on first use; its handle is never
+closed, so the process exiting — however it exits — closes it and Windows ends everything in it).
+`winproc.run(args, timeout=...)` is the one way to run a tool to completion: `subprocess.run`'s
+shape, no console window, started `CREATE_SUSPENDED` so it joins the job before it can start a child
+of its own, then resumed; killed on a timeout or any exception. Every such call uses it —
+`tools.run_tool` (so every probe and capability check), the preview grabs and tone-mapped frames,
+Deno's version check and the Downloader's fetch, the GPU queries, the log header's version lines.
+`FfmpegJob` joins it right after launch (`ProcessJob.CONTAIN`; ffmpeg starts no children);
+`YtDlpJob` keeps its own kill-on-close job (`CONTAIN = False`), which it also uses for pause / stop of
+the whole tree. **Deliberately not contained**: what the user asked to open — Explorer's
+`/select`, the log folder (`os.startfile`), the license files, the browser — and `core/power.py`'s
+shutdown / sleep, none of which should die with the app.
 
 **Absolute paths are load-bearing for yt-dlp**, not tidiness: a relative
 `--js-runtimes deno:dependables/deno.exe` made yt-dlp report "no JS runtime
@@ -710,6 +736,17 @@ import, three at a time). So:
 - It runs **alongside a running queue job** by design (the user can multitask), at below-normal priority.
   **A file change cancels it** (`_cancel_hdr_render` drops the render; a frame already rendering finishes and
   is discarded by its token), and every media tab's `reset_hdr_preview` turns the switch back off.
+- **The import's short CPU / GPU burst was left as it is — every way to soften it was measured and none
+  helped.** Tried on the real window (4K AV1 then 4K HDR import, 3 runs each, medians; the machine is a
+  Ryzen 9 9950X + NVIDIA, no efficiency cores): Efficiency mode (EcoQoS, `SetProcessInformation`
+  ProcessPowerThrottling) on the preview grabs and tone-map ffmpegs; tone-map `-threads 2` instead of 4
+  and 2 spinner decode threads instead of 3; both together; and OpenCV's pool at 1 or 2 threads. Time to
+  previews stayed 1.13-1.20s (AV1) / 1.54-1.59s (HDR), the first three tone-mapped frames 5.7-5.9s — but
+  the CPU's boost (`% Processor Performance`, 126-128% peak, 121% mean over the first 4s, 118-121% idle),
+  peak cores (4.4-7.4, run-to-run noise larger than any difference) and GPU power (~51W) didn't move
+  either. The burst is ~1s of real work finishing fast, which is the cheaper way to spend it; EcoQoS on a
+  hybrid CPU would move it onto efficiency cores and slow the import instead. Revisit only with a
+  machine where one of these measurably helps.
 
 **Downloader fetches** (`fetch_ytdlp_info`): `downloader.fetch_info` +
 `download_thumbnail` on a worker, token-guarded so a superseded fetch is
@@ -2398,6 +2435,18 @@ autosave when the tab is left and on close.
   growing a spinner from 256 to 640px: stretched frames shown 94 (1.55s) -> 2 (0.03s), the whole set
   1.55s -> 0.9s; frames byte-identical to the previous code at 256 / 384 / 640, cold and cached; a
   live drag up and back ends on one size with every frame present, at about the same total CPU.
+  **Frames are released once no spinner is showing** (`_Release`, two single-shot timers owned by the
+  `QApplication`, armed by the last hide and stopped by any show; `_release_frames`). "Needed" is
+  `_LOADING["need"]`, the decode size of the last spinner whose drop box is on screen, kept up to date
+  while hidden (a window leaving fullscreen re-lays out the box and restarts the grace). **After 5s**
+  (`_RELEASE_GRACE_MS`) every frame past the first `_LOADING_KEEP` (13 — what a hidden prewarm decodes,
+  `_LOADING_LOOKAHEAD` + 1) that isn't the needed size goes, and the first 13 are re-decoded at that size
+  if they aren't; **after 2 minutes** (`_RELEASE_IDLE_MS`) with no spinner shown, everything past the
+  first 13 goes whatever its size, fullscreen included. The next import then starts on the kept frames
+  at once and decodes the rest as it plays (the paced path above). Measured (private bytes, offscreen,
+  2.0x = 512px frames, 1.0x = 256px): played at 2.0x 284MB, hidden and shrunk to 1.0x 265MB, after the
+  grace 121MB (13 frames at 256); played at 1.0x 157MB, kept through the grace, 120MB after the idle
+  time; at 2.0x 288MB -> 144MB after the idle time. Frame 0 was present at every following show.
   Until a frame arrives, or if the frames cannot be loaded, it draws nothing (there is no fallback ring). Plays only while
   shown (`showEvent`/`hideEvent`, one single-shot timer re-armed for each frame's due time) and is
   transparent to the mouse.

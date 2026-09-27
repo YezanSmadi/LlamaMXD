@@ -13,10 +13,10 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from core import llamalog
+from core import llamalog, winproc
 from core.capabilities import VULKAN_DEVICE_FLAGS, libplacebo_tonemap_vf, supports_fps_mode, supports_libplacebo
 from core.probe import _has_previewable_video, _probe_hdr_static_metadata, probe_duration
-from core.tools import NO_WINDOW, tool_path
+from core.tools import tool_path
 
 def _interior_sample_frames(total, count):
     """Frame indices for `count` samples at the fractions 1/(count+1) … count/(count+1), which
@@ -82,13 +82,13 @@ def _grab_frame(video_path, seconds, max_size, exact=False, threads=1):
     """`(PIL image, its time from the file's start)` for the keyframe at or before `seconds`, or
     with `exact` the frame at `seconds` itself; `(None, None)` on a miss."""
     try:
-        completed = subprocess.run(
+        completed = winproc.run(
             [tool_path("ffmpeg"), "-hide_banner", "-nostdin", "-threads", str(threads),
              *([] if exact else ["-noaccurate_seek"]), "-ss", f"{seconds:.3f}", "-i", video_path,
              "-map", "0:v:0", "-frames:v", "1", "-copyts",
              # rgb24: a 10-bit source otherwise gives a 16-bit PPM, ~100x slower for Pillow.
              "-vf", "showinfo,format=rgb24", "-f", "image2pipe", "-c:v", "ppm", "-"],
-            capture_output=True, timeout=30, creationflags=NO_WINDOW,
+            timeout=30,
         )
         pts, start = _PTS.search(completed.stderr), _START.search(completed.stderr)
         with Image.open(io.BytesIO(completed.stdout)) as image:
@@ -204,10 +204,6 @@ def extract_video_thumbnail(video_path):
     return frames[0] if frames else None
 
 
-# The HDR preview is speculative background work that may overlap a queue job, so it yields.
-_BELOW_NORMAL = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
-
-
 # Generous: a frame sharing the machine with an encode takes far longer than ~1.5s, and a
 # timed-out frame is a hole in a set that must stay aligned with the raw one.
 _HDR_FRAME_TIMEOUT = 90
@@ -256,7 +252,7 @@ def hdr_tonemap_frame(video_path, seek, vf, max_size=None, label=""):
     os.close(handle)
     fps_flags = ["-fps_mode", "passthrough"] if supports_fps_mode() else ["-vsync", "0"]
     try:
-        completed = subprocess.run(
+        completed = winproc.run(
             [tool_path("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
              *VULKAN_DEVICE_FLAGS,
              "-threads", str(_decoder_threads()),
@@ -265,8 +261,7 @@ def hdr_tonemap_frame(video_path, seek, vf, max_size=None, label=""):
              "-i", video_path,
              "-vf", vf,
              *fps_flags, "-frames:v", "1", out_path],
-            capture_output=True, timeout=_HDR_FRAME_TIMEOUT,
-            creationflags=NO_WINDOW | _BELOW_NORMAL,
+            timeout=_HDR_FRAME_TIMEOUT, below_normal=True,
         )
         if completed.returncode != 0:
             tail = (completed.stderr or b"").decode("utf-8", "replace").strip().splitlines()

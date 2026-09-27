@@ -14,6 +14,8 @@ import shutil
 import subprocess
 import sys
 
+from core import winproc
+
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BUNDLE_DIR_NAME = "dependables"
 _EXE_SUFFIX = ".exe" if os.name == "nt" else ""
@@ -58,8 +60,7 @@ def tool_dir(name):
 def run_tool(name, *args, timeout=10):
     """Run tool `name` with `args`, no console window, capturing text output; the
     CompletedProcess. Raises like `subprocess.run` (OSError, SubprocessError)."""
-    return subprocess.run([tool_path(name), *args], capture_output=True, text=True, timeout=timeout,
-                          creationflags=NO_WINDOW)
+    return winproc.run([tool_path(name), *args], timeout=timeout, text=True)
 
 
 def ffprobe_json(*args, timeout=10):

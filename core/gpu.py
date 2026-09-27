@@ -6,10 +6,9 @@ cached, and any failure means software encoding, as if the switch were off."""
 import re
 import subprocess
 
-from core import llamalog
+from core import llamalog, winproc
 from core.tools import tool_path
 
-_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # With several dedicated adapters, NVENC wins over AMF over Quick Sync.
 _VENDOR_PRIORITY = ["nvidia", "amd", "intel"]
@@ -52,9 +51,7 @@ def _query_adapter_names():
         ["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_VideoController).Name"],
     ):
         try:
-            completed = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
-            )
+            completed = winproc.run(cmd, text=True, timeout=10)
         except (OSError, subprocess.SubprocessError) as exc:
             llamalog.get("gpu").debug("GPU name query via %s failed: %s", cmd[0], exc)
             continue
@@ -131,10 +128,7 @@ def display_name():
 
 def _query_available_encoders():
     try:
-        completed = subprocess.run(
-            [tool_path("ffmpeg"), "-hide_banner", "-encoders"],
-            capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
-        )
+        completed = winproc.run([tool_path("ffmpeg"), "-hide_banner", "-encoders"], text=True, timeout=10)
         return set(re.findall(r"\s([a-z0-9]+_(?:nvenc|qsv|amf))\s", completed.stdout or ""))
     except (OSError, subprocess.SubprocessError) as exc:
         llamalog.get("gpu").warning("Couldn't list ffmpeg's hardware encoders: %s", exc)

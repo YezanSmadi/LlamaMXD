@@ -21,6 +21,8 @@ import tempfile
 import threading
 from urllib.parse import urlsplit, urlunsplit
 
+from core import winproc
+
 ROOT = "llamamxd"
 NORMAL, DETAILED = "Normal", "Detailed"
 LEVELS = (NORMAL, DETAILED)
@@ -38,7 +40,6 @@ _KEEP_FAILED_JOBS = 50
 _KEEP_DONE_JOBS = 20
 _KEEP_CRASH_FILES = 5
 
-_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _URL = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 
 _state = {"detail": DEFAULT_LEVEL, "dir": None, "dir_checked": False, "ready": False, "crash_file": None}
@@ -254,8 +255,7 @@ def _first_line(exe):
     """The first line of `exe --version` (or `-version` for ffmpeg), or why there isn't one."""
     flag = "-version" if os.path.basename(exe).lower().startswith(("ffmpeg", "ffprobe")) else "--version"
     try:
-        out = subprocess.run([exe, flag], capture_output=True, text=True, timeout=15,
-                             creationflags=_NO_WINDOW).stdout or ""
+        out = winproc.run([exe, flag], text=True, timeout=15).stdout or ""
         return out.strip().splitlines()[0][:120] if out.strip() else "no version output"
     except (OSError, subprocess.SubprocessError) as exc:
         return f"version check failed: {exc}"

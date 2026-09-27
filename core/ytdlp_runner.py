@@ -105,6 +105,7 @@ class YtDlpJob(ProcessJob):
     `core.downloader.resolve()`'s dict, as carried in the task's settings."""
 
     AREA, TOOL = "ytdlp", "yt-dlp"
+    CONTAIN = False        # its tree lives in its own kill-on-close job (_make_job)
     CREATION_FLAGS = ProcessJob.CREATION_FLAGS | (_CREATE_SUSPENDED if os.name == "nt" else 0)
 
     def __init__(self, url, plan, final_path, priority=process_priority.DEFAULT_LEVEL, label=None):

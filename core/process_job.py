@@ -13,45 +13,13 @@ import subprocess
 import threading
 import time
 
-from core import llamalog
+from core import llamalog, winproc
 from core import priority as process_priority
+from core.winproc import set_suspended  # noqa: F401  (also imported from here by ytdlp_runner)
 
 # How often, and how far apart, the final rename is retried (see replace_output).
 _REPLACE_ATTEMPTS = 10
 _REPLACE_DELAY_SECS = 0.3
-
-if os.name == "nt":
-    import ctypes
-
-    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    _ntdll = ctypes.WinDLL("ntdll")
-    _kernel32.OpenProcess.restype = ctypes.c_void_p
-    _kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
-    _kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-    _ntdll.NtSuspendProcess.argtypes = [ctypes.c_void_p]
-    _ntdll.NtResumeProcess.argtypes = [ctypes.c_void_p]
-    _PROCESS_SUSPEND_RESUME = 0x0800
-
-
-def set_suspended(pid, suspended):
-    """Freeze or thaw every thread of process `pid` via ntdll's NtSuspendProcess /
-    NtResumeProcess (Windows has no SIGSTOP). Returns whether it worked."""
-    if os.name != "nt":
-        import signal
-        try:
-            os.kill(pid, signal.SIGSTOP if suspended else signal.SIGCONT)
-            return True
-        except OSError:
-            return False
-    handle = _kernel32.OpenProcess(_PROCESS_SUSPEND_RESUME, False, pid)
-    if not handle:
-        return False
-    try:
-        call = _ntdll.NtSuspendProcess if suspended else _ntdll.NtResumeProcess
-        return call(handle) == 0
-    finally:
-        _kernel32.CloseHandle(handle)
-
 
 def replace_output(temp_path, final_path):
     """`os.replace` that survives Windows "Access is denied": the read-only bit is cleared
@@ -81,6 +49,7 @@ class ProcessJob:
     reports nothing further."""
 
     AREA = ""              # its log area: "ffmpeg" / "ytdlp"
+    CONTAIN = True         # into the tools job (winproc), so it can't outlive the app
     TOOL = ""              # its name in messages: "ffmpeg" / "yt-dlp"
     CREATION_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -124,6 +93,8 @@ class ProcessJob:
         except OSError as exc:
             self._fail_early(f"Couldn't start {self.TOOL}: {exc.strerror or exc}")
             return False
+        if self.CONTAIN:
+            winproc.contain(self._proc)
         if self._priority != process_priority.DEFAULT_LEVEL:
             # The creation flag sets only the CPU class; this adds disk I/O and memory priority.
             self._sync_priority()
