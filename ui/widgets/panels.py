@@ -25,7 +25,7 @@ from ui.widgets.text import ScaledLabel, ui_font
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ASSETS = os.path.join(_REPO_ROOT, "assets")
-VERSION = "v0.5.0-beta.5"
+VERSION = "v1.0.0"
 
 MEDIA_FILTER = (
     "Media files (*.mp4 *.mkv *.mov *.webm *.avi *.m4v *.mxf *.ts *.vob "

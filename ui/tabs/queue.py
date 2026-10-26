@@ -9,9 +9,11 @@ import os
 import subprocess
 import time
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFontMetricsF, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
+    QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
     QScrollArea,
@@ -33,7 +35,9 @@ from ui.widgets.controls import button, button_width_for, draw_cross, IconButton
 from ui.widgets.marquee import _MARQUEE_GAP, _MARQUEE_HOLD, _MARQUEE_SPEED, MarqueeGroup
 from ui.widgets.text import ScaledLabel, ui_font
 from ui.widgets.dialogs import ask_yes_no, show_message
-from ui.widgets.tooltip import tip
+from ui.widgets.tooltip import hold_tips, tip
+from ui.widgets.tracklist import _DragGhost
+from ui.widgets.svg import svg_renderer
 from ui.widgets.queue_controls import GAP, SearchBar, SearchToggle, SlideHost, SortDropdown, WhenDoneButton
 from ui.workers import pil_to_qimage, run_async
 
@@ -44,7 +48,9 @@ _THUMB_W, _THUMB_H = 60, 40
 _ROW_H = 56
 _ROW_CORNER = 8
 _DETAIL_SCROLL_HEIGHT = 140
-_SORTS = ["A to Z", "Z to A", "Recent", "Oldest"]
+_DRAGGED_OPACITY = 0.28      # the row left behind in the list while its ghost is carried
+_AUTOSCROLL_EDGE, _AUTOSCROLL_STEP = 22, 14   # px from the list's edge, and the fastest scroll per tick
+_SORTS = ["A to Z", "Z to A", "Recent", "Oldest", "Custom"]
 _SORT_DEFAULT = "Recent"
 _YTDLP = "Downloader"
 _PREPARING = "Preparing..."
@@ -122,6 +128,10 @@ class QueueRow(QWidget):
 
     clicked = Signal(int)
     removeRequested = Signal(int)
+    retryRequested = Signal(int)
+    dragStarted = Signal(int, QPoint)     # a Queued row was pressed and moved: where the press was
+    dragMoved = Signal(QPoint)
+    dragEnded = Signal()
 
     def __init__(self, task_id, description, status, info=None, group=None):
         super().__init__()
@@ -132,6 +142,9 @@ class QueueRow(QWidget):
         self.fraction = 0.0      # what's painted
         self.thumb = None        # QPixmap
         self._hover_x = False
+        self._hover_retry = False
+        self._press = None       # global position of a Queued row's left press, not yet a click or a drag
+        self._dragging = False
         self._scrolling = False  # the title's marquee, driven by the queue's shared MarqueeGroup
         self._group = group
         if group is not None:
@@ -195,9 +208,14 @@ class QueueRow(QWidget):
     def _x_rect(self):
         return QRectF(scale.ref_size(self)[0] - 38, (_ROW_H - 28) / 2, 28, 28)
 
+    def _retry_rect(self):
+        """The retry icon's slot, left of the ✕; reserved on every row so the columns line up."""
+        x = self._x_rect()
+        return QRectF(x.left() - 4 - x.width(), x.top(), x.width(), x.height())
+
     def _status_rect(self):
         w = _measure_columns()["status"]
-        return QRectF(scale.ref_size(self)[0] - 38 - 6 - w, 0, w, _ROW_H)
+        return QRectF(self._retry_rect().left() - 6 - w, 0, w, _ROW_H)
 
     def _hdr_rect(self):
         w = _measure_columns()["hdr"]
@@ -217,22 +235,56 @@ class QueueRow(QWidget):
     def _time_rect(self):
         return QRectF(self._time_left(), 0, _measure_columns()["time"], _ROW_H)
 
+    def _retry_hit(self, pos):
+        return self.status == "Failed" and self._retry_rect().contains(pos)
+
     def mouseMoveEvent(self, e):
-        over = self._x_rect().contains(scale.ref_pos(e.position()))
-        if over != self._hover_x:
-            self._hover_x = over
+        if self._dragging:
+            self.dragMoved.emit(e.globalPosition().toPoint())
+            return
+        if (self._press is not None and (e.buttons() & Qt.LeftButton)
+                and (e.globalPosition().toPoint() - self._press).manhattanLength()
+                >= QApplication.startDragDistance()):
+            # Pressed and moved: pick the row up, the way Muxing's track lists do.
+            self._dragging = True
+            self.dragStarted.emit(self.task_id, self._press)
+            if self._dragging:
+                self.dragMoved.emit(e.globalPosition().toPoint())
+            else:
+                self._press = None      # nothing to reorder against
+            return
+        pos = scale.ref_pos(e.position())
+        over, over_retry = self._x_rect().contains(pos), self._retry_hit(pos)
+        if over != self._hover_x or over_retry != self._hover_retry:
+            self._hover_x, self._hover_retry = over, over_retry
             self.update()
 
+    def mouseReleaseEvent(self, e):
+        if e.button() != Qt.LeftButton:
+            return
+        press, self._press = self._press, None
+        if self._dragging:
+            self._dragging = False
+            self.dragEnded.emit()
+        elif press is not None and self.rect().contains(e.position().toPoint()):
+            self.clicked.emit(self.task_id)      # released without moving: a click
+
     def leaveEvent(self, e):
-        if self._hover_x:
-            self._hover_x = False
+        if self._hover_x or self._hover_retry:
+            self._hover_x = self._hover_retry = False
             self.update()
 
     def mousePressEvent(self, e):
         if e.button() != Qt.LeftButton:
             return
-        if self._x_rect().contains(scale.ref_pos(e.position())):
+        pos = scale.ref_pos(e.position())
+        if self._x_rect().contains(pos):
             self.removeRequested.emit(self.task_id)
+        elif self._retry_hit(pos):
+            self.retryRequested.emit(self.task_id)
+        elif self.status == "Queued":
+            # A click or a pick-up is decided by whether it moves before the release.
+            self._press = e.globalPosition().toPoint()
         else:
             self.clicked.emit(self.task_id)
 
@@ -313,6 +365,33 @@ class QueueRow(QWidget):
             hover.addRoundedRect(xr, 6, 6)
             p.fillPath(hover, x_hover)
         draw_cross(p, xr, text)
+        if self.status == "Failed":
+            rr = self._retry_rect()
+            if self._hover_retry:
+                hover = QPainterPath()
+                hover.addRoundedRect(rr, 6, 6)
+                p.fillPath(hover, x_hover)
+            # Mirrored at paint time: the asset stays as published.
+            side = 16
+            p.save()
+            p.translate(rr.center())
+            p.scale(-1, 1)
+            svg_renderer("retry.svg", text.name(), "ink").render(p, QRectF(-side / 2, -side / 2, side, side))
+            p.restore()
+
+
+class _RowGhost(QWidget):
+    """A picture of the carried row that follows the cursor (rows paint their own rounded fill)."""
+
+    def __init__(self, row, parent):
+        super().__init__(parent)
+        self._pixmap = _DragGhost.snapshot(row)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setOpacity(0.96)
+        p.drawPixmap(0, 0, self._pixmap)
 
 
 class ProgressStrip(QWidget):
@@ -373,6 +452,13 @@ class QueueTab(QWidget):
         # The one job with a process, running or suspended:
         # {"task_id", "job", "rest", "paused", "fraction", "stage"} — or None.
         self._active = None
+        # Jobs suspended while a retry runs ahead of them, oldest first:
+        # [{"active": <an _active dict>, "paused": bool}].
+        self._shelved = []
+        self._row_drag = None       # {"row", "ghost", "grab_dy", "pos"} while a Queued row is carried
+        self._row_autoscroll = QTimer(self)
+        self._row_autoscroll.setInterval(16)
+        self._row_autoscroll.timeout.connect(self._row_autoscroll_tick)
         self._error_queue = []
         self._error_dialog_open = False
         self._detail_task_id = None
@@ -462,8 +548,9 @@ class QueueTab(QWidget):
         self.sort_menu = SortDropdown("Sort By:", _SORTS)
         self.sort_menu.set(_SORT_DEFAULT)
         self.sort_menu.picked.connect(self._set_sort)
-        tip(self.sort_menu, "How the queue is ordered — and so the order it runs in. Recent puts the "
-                            "newest-added task first, Oldest the oldest-added.")
+        tip(self.sort_menu, "How the queue is ordered which also becomes the order in which the queue runs. Recent puts the "
+                            "newest-added task first, Oldest the oldest-added. The alphabetical ones order from A to Z or "
+                            "Z to A. Custom is the order you make by dragging a queued task.")
         controls.addWidget(self.sort_menu)
         self.search_toggle = SearchToggle()
         self.search_toggle.clicked.connect(self.search_bar.toggle_open)
@@ -510,6 +597,10 @@ class QueueTab(QWidget):
         widget = QueueRow(task_id, description, status, info=shown, group=self._marquee)
         widget.clicked.connect(self._show_details)
         widget.removeRequested.connect(self.remove_task)
+        widget.retryRequested.connect(self.retry_task)
+        widget.dragStarted.connect(lambda tid, pos, w=widget: self._begin_row_drag(w, pos))
+        widget.dragMoved.connect(self._drag_row_to)
+        widget.dragEnded.connect(self._end_row_drag)
         self.list_layout.insertWidget(self.list_layout.count() - 1, widget)
         self._rows[task_id] = {"widget": widget, "settings": settings, "source_tab": source_tab,
                                "error": None, "added": time.time(), "meta": meta}
@@ -691,14 +782,32 @@ class QueueTab(QWidget):
         never outlive its row — and continues if the queue was running."""
         continue_with = None
         llamalog.get("queue").info("Task %s removed", task_id)
+        if self._row_drag is not None and self._row_drag["row"].task_id == task_id:
+            self._finish_row_drag()
         if self._active is not None:
             if self._active["task_id"] == task_id:
                 continue_with = self._active["rest"] if self._is_running else None
                 self._halt_active()
-                if continue_with is None:
+                if self._shelved:
+                    self._unshelve()        # the job this one was holding back carries on
+                    continue_with = None
+                elif continue_with is None:
                     self._set_running(False)
             elif task_id in self._active["rest"]:
                 self._active["rest"].remove(task_id)
+        for i, entry in enumerate(self._shelved):
+            held = entry["active"]
+            if held["task_id"] == task_id:
+                held["job"].stop()
+                self._shelved.pop(i)
+                # Whoever resumes after it inherits the tasks it was going to run next.
+                heir = self._shelved[i]["active"] if i < len(self._shelved) else self._active
+                if heir is not None:
+                    heir["rest"] = held["rest"] + heir["rest"]
+                break
+            if task_id in held["rest"]:
+                held["rest"].remove(task_id)
+                break
 
         row = self._rows.pop(task_id, None)
         if row:
@@ -760,7 +869,10 @@ class QueueTab(QWidget):
 
     def _apply_sort(self):
         """Put the rows, and their run order, in the chosen order: title A-Z / Z-A, or time
-        added (Recent newest first, Oldest oldest first). Stable."""
+        added (Recent newest first, Oldest oldest first). Stable. Custom keeps the order the rows
+        are in (new rows join the end)."""
+        if self._sort == "Custom":
+            return
         by_time = sorted(self._rows, key=lambda tid: (self._rows[tid]["added"], tid))
         if self._sort == "Recent":
             order = by_time[::-1]
@@ -772,9 +884,123 @@ class QueueTab(QWidget):
         self._rows = {tid: self._rows[tid] for tid in order}
         for i, tid in enumerate(order):
             self.list_layout.insertWidget(i, self._rows[tid]["widget"])
-        if self._active is not None:
-            position = {tid: i for i, tid in enumerate(order)}
-            self._active["rest"].sort(key=lambda tid: position.get(tid, len(position)))
+        self._follow_order(order)
+
+    def _follow_order(self, order):
+        """Jobs waiting to run (behind the active one, and behind any a retry or a move to the
+        top has set aside) run in the list's order."""
+        position = {tid: i for i, tid in enumerate(order)}
+        holders = ([self._active] if self._active is not None else []) + [e["active"] for e in self._shelved]
+        for holder in holders:
+            holder["rest"].sort(key=lambda tid: position.get(tid, len(position)))
+
+    # ------------------------------------------------------------------ #
+    #  Rearranging: drag a Queued row, carry it, drop it
+    # ------------------------------------------------------------------ #
+    def _begin_row_drag(self, row, global_pos):
+        """Lifts `row` out of the list: it stays as a faded placeholder while a ghost follows the cursor."""
+        if self._row_drag is not None or len(self._rows) < 2:
+            row._dragging = False       # nothing to reorder against
+            return
+        if self._detail_task_id is not None:
+            self._close_details()       # the panel floats over the list's foot: out of the way while carrying
+        viewport = self.scroll.viewport()
+        top_left = row.mapTo(viewport, QPoint(0, 0))
+        ghost = _RowGhost(row, viewport)
+        ghost.setGeometry(top_left.x(), top_left.y(), row.width(), row.height())
+        ghost.show()
+        ghost.raise_()
+        effect = QGraphicsOpacityEffect(row)
+        effect.setOpacity(_DRAGGED_OPACITY)
+        row.setGraphicsEffect(effect)
+        grab_dy = viewport.mapFromGlobal(global_pos).y() - top_left.y()
+        self._row_drag = {"row": row, "ghost": ghost, "grab_dy": grab_dy, "pos": global_pos}
+        QApplication.setOverrideCursor(Qt.ClosedHandCursor)
+        hold_tips(True)
+        self._row_autoscroll.start()
+
+    def _drag_row_to(self, global_pos):
+        if self._row_drag is not None:
+            self._row_drag["pos"] = global_pos
+            self._follow_row_drag()
+
+    def _follow_row_drag(self):
+        """The ghost goes to the cursor (inside the viewport); the placeholder goes to the slot
+        under the ghost's centre, among the rows that are showing."""
+        drag = self._row_drag
+        viewport = self.scroll.viewport()
+        ghost, row = drag["ghost"], drag["row"]
+        y = viewport.mapFromGlobal(drag["pos"]).y() - drag["grab_dy"]
+        y = max(0, min(y, viewport.height() - ghost.height()))
+        ghost.move(ghost.x(), y)
+        centre = self.scroll.widget().mapFrom(viewport, QPoint(0, y + ghost.height() // 2)).y()
+        layout = self.list_layout
+        shown = [w for w in (layout.itemAt(i).widget() for i in range(layout.count()))
+                 if w is not None and w is not row and not w.isHidden()]
+        before = next((w for w in shown if w.y() + w.height() / 2 >= centre), None)
+        after_row = [w for w in (layout.itemAt(i).widget() for i in range(layout.indexOf(row) + 1, layout.count()))
+                     if w is not None and not w.isHidden()]
+        if (after_row[0] if after_row else None) is before:
+            return
+        layout.removeWidget(row)
+        layout.insertWidget(layout.indexOf(before) if before is not None else layout.count() - 1, row)
+        layout.activate()
+
+    def _row_autoscroll_tick(self):
+        """Scrolls the list while the cursor is held near its top or bottom edge."""
+        if self._row_drag is None:
+            self._row_autoscroll.stop()
+            return
+        viewport = self.scroll.viewport()
+        y = viewport.mapFromGlobal(self._row_drag["pos"]).y()
+        depth = 0
+        if y < _AUTOSCROLL_EDGE:
+            depth = -(_AUTOSCROLL_EDGE - y)
+        elif y > viewport.height() - _AUTOSCROLL_EDGE:
+            depth = y - (viewport.height() - _AUTOSCROLL_EDGE)
+        bar = self.scroll.verticalScrollBar()
+        if depth and bar.maximum() > bar.minimum():
+            amount = max(1, round(_AUTOSCROLL_STEP * min(abs(depth), _AUTOSCROLL_EDGE) / _AUTOSCROLL_EDGE))
+            bar.setValue(bar.value() + (amount if depth > 0 else -amount))
+            self._follow_row_drag()
+
+    def _finish_row_drag(self):
+        """Puts back everything a drag borrowed."""
+        drag, self._row_drag = self._row_drag, None
+        if drag is None:
+            return
+        self._row_autoscroll.stop()
+        drag["ghost"].hide()
+        drag["ghost"].deleteLater()
+        drag["row"].setGraphicsEffect(None)
+        QApplication.restoreOverrideCursor()
+        hold_tips(False)
+
+    def _end_row_drag(self):
+        """The drop. A row that ended up elsewhere makes the order Custom, and one that lands above
+        the running job runs now (that job waits, as for a retry)."""
+        drag = self._row_drag
+        if drag is None:
+            return
+        self._follow_row_drag()
+        dragged = drag["row"].task_id
+        self._finish_row_drag()
+        by_widget = {row["widget"]: tid for tid, row in self._rows.items()}
+        layout = self.list_layout
+        order = [by_widget[w] for w in (layout.itemAt(i).widget() for i in range(layout.count()))
+                 if w in by_widget]
+        if order == list(self._rows):
+            return
+        llamalog.get("queue").info("Task %s moved to position %d", dragged, order.index(dragged) + 1)
+        self._rows = {tid: self._rows[tid] for tid in order}
+        self._sort = "Custom"
+        self.sort_menu.set("Custom")
+        self._follow_order(order)
+        active = self._active
+        if (active is not None and self._is_running and not active["paused"]
+                and self._status(dragged) == "Queued"
+                and order.index(dragged) < order.index(active["task_id"])):
+            self._run_ahead(dragged)
 
     def _place_search(self):
         """The floating overlays: the details panel over the list's bottom edge, and the search row
@@ -857,9 +1083,9 @@ class QueueTab(QWidget):
                 continue
             if (strip_video and key in _VIDEO_DETAIL_KEYS) or (strip_audio and key in _AUDIO_DETAIL_KEYS):
                 continue
-            # "quality" is Encoding's CRF / qscale but the Downloader's Resolution pick.
+            # "quality" is Encoding's CRF / qscale, the Downloader's Resolution, or an audio bitrate.
             if key == "quality" and is_download:
-                label = "Resolution"
+                label = "Bitrate" if settings.get("mode") == downloader.MODE_AUDIO else "Resolution"
             value = settings[key]
             if key == "duration_secs":
                 value = length      # always how long the output is, never the raw 00:00:00 "to the end"
@@ -891,7 +1117,8 @@ class QueueTab(QWidget):
                 where = ("Source" if entry.get("source") == "primary"
                          else os.path.basename((entry.get("file") or "").replace("\\", "/")))
                 label = f"{kind} Track" if len(tracks) == 1 else f"{kind} Track {i + 1}"
-                rows.append((label, f"Track {entry.get('index', 0) + 1}  ·  {where}", False))
+                detail = f"Track {entry.get('index', 0) + 1}  ·  {where}"
+                rows.append((label, detail + ("  ·  Default" if entry.get("default") else ""), False))
         # Subtitles and chapters (Mux and Encode tasks).
         if settings.get("strip_subtitles"):
             rows.append(("Strip Subtitles", "Yes", False))
@@ -997,12 +1224,17 @@ class QueueTab(QWidget):
             self._halt_active()
             if task_id in self._rows:
                 self.update_status(task_id, "Queued")
+            if self._shelved:
+                self._unshelve(keep_paused=True)
         self._set_running(False)
 
     def shutdown(self):
         """App closing: Windows doesn't take a child process down with its
-        parent, so kill the active job now."""
+        parent, so kill the active job (and any a retry suspended) now."""
         self._halt_active()
+        for entry in self._shelved:
+            entry["active"]["job"].stop()
+        self._shelved = []
 
     def start_task(self, task_id):
         """The do-it-now path: start at once, or run next. Returns "started",
@@ -1148,12 +1380,73 @@ class QueueTab(QWidget):
             self._active["job"].stop()
             self._active = None
 
+    def retry_task(self, task_id):
+        """Run a Failed task again, ahead of everything else. A job already running is suspended
+        until the retry ends (done or failed again), then carries on."""
+        row = self._rows.get(task_id)
+        if row is None or self._status(task_id) != "Failed":
+            return
+        llamalog.get("queue").info("Task %s retried", task_id)
+        row["error"] = None
+        self.update_status(task_id, "Queued")
+        if task_id == self._detail_task_id:
+            self._show_details(task_id)
+        self._run_ahead(task_id)
+
+    def _run_ahead(self, task_id):
+        """Run a Queued task now, ahead of the rest; a job already running waits suspended."""
+        if self._active is not None:
+            self._shelve_active()
+        self._set_running(True)
+        self._process_next([task_id])
+
+    def _shelve_active(self):
+        """Suspend the active job and set it aside; a user-paused one stays paused afterwards."""
+        active = self._active
+        was_paused = active["paused"]
+        if not was_paused:
+            if not active["job"].suspend():
+                llamalog.get("queue").warning("Task %s: the job's process could not be suspended", active["task_id"])
+            self.update_status(active["task_id"], "Paused")
+        active["paused"] = True
+        self._shelved.append({"active": active, "paused": was_paused})
+        self._active = None
+        self._stop_timers()
+
+    def _unshelve(self, keep_paused=False):
+        """Bring back the job a retry was holding: resumed, or still paused if it was (or `keep_paused`)."""
+        entry = self._shelved.pop()
+        active = entry["active"]
+        self._active = active
+        if entry["paused"] or keep_paused:
+            active["paused"] = True
+            self.update_status(active["task_id"], "Paused")
+            self._stop_timers()
+            self._set_running(False)
+            return
+        if not active["job"].resume():
+            llamalog.get("queue").warning("Task %s: the job's process could not be resumed", active["task_id"])
+        active["job"].set_priority(self.app.priority_level)
+        active["paused"] = False
+        self.update_status(active["task_id"], self._running_label(active["task_id"], active))
+        self._set_running(True)
+        self._start_timers()
+
+    def _continue(self, rest):
+        """A job ended: the one a retry held back resumes (inheriting `rest`), else the queue moves on."""
+        if self._shelved:
+            held = self._shelved[-1]["active"]
+            held["rest"] = rest + held["rest"]
+            self._unshelve()
+            return
+        self._process_next(rest)
+
     def _finish_task(self, task_id, rest):
         llamalog.get("queue").info("Task %s finished (Done)", task_id)
         self._active = None
         if task_id in self._rows:
             self.update_status(task_id, "Done")
-        self._process_next(rest)
+        self._continue(rest)
 
     def _fail_task(self, task_id, rest, reason):
         """Red row, the reason kept for the details popup, a notice queued,
@@ -1169,7 +1462,7 @@ class QueueTab(QWidget):
             verb = {"Encoding": "encoded", _YTDLP: "downloaded"}.get(row["source_tab"], "muxed")
             self._error_queue.append(f"“{name}” couldn't be {verb}.\n\n{reason}")
             QTimer.singleShot(0, self._show_errors)
-        self._process_next(rest)
+        self._continue(rest)
 
     def _show_errors(self):
         """Failure notices one at a time, never from inside the poll (a modal's nested loop

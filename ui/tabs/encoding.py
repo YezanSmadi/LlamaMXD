@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QSlider, QVBoxLayout, QWidget
 from core import formats
 from core.capabilities import av1_preset_range, libplacebo_checked, libplacebo_problem_text, supports_libplacebo
 from ui import scale
-from ui.tabs.media_tab import STRIP_TIP, MediaTab, hms, hrow, set_line_text
+from ui.tabs.media_tab import AV_SYNC_TIP, STRIP_TIP, MediaTab, hms, hrow, set_line_text
 from ui.widgets.controls import button, field_label, IconButton, labeled, set_enabled
 from ui.widgets.dropdown import Dropdown, NO_OPTION
 from ui.widgets.text import ClickableLabel, ScaledLabel
@@ -36,29 +36,29 @@ _FALLBACK_QUALITY = {
     "default": 22, "low": "Low", "high": "Placebo",
 }
 
-_SPEED_TIP = ("Trades encode speed for compression efficiency — slower settles on a "
+_SPEED_TIP = ("Trades encode speed for compression efficiency. Slower settles on a "
               "smaller file at the same quality.")
 _PROFILE_LEVEL_TIP = ("Constrains playback compatibility (older devices/decoders may "
                        "only support certain profiles/levels).")
-_HDR_TIP = ("Tone-maps HDR (PQ/BT.2020) down to standard SDR (BT.709) using BT.2390 — "
-            "the only curve this app uses, for accurate color.")
-_PASSTHRU_TIP = ("Copies this stream byte-for-byte instead of re-encoding it — Bitrate/"
-                  "Channels/Sample Rate below just show the source's real values.")
+_HDR_TIP = ("Tone-maps HDR (PQ/BT.2020) down to standard SDR (BT.709) using BT.2390 for accurate color.")
+_PASSTHRU_TIP = ("Copies this stream byte-for-byte instead of re-encoding it Bitrate/"
+                  "Channels/Sample Rate below show the source's actual values.")
 _CHOOSE_STREAMS_TIP = ("Pick which audio tracks the output includes and in what order (drag to reorder), "
                        "and add tracks from other files.")
-_CRF_TIP = "Lower = higher quality, larger file. This encoder doesn't target a bitrate — it targets a visual quality level."
-_QSCALE_TIP = "Lower = higher quality, larger file. This is a fixed qscale, not a CRF — this codec has no bitrate-target rate control."
-_RESOLUTION_TIP = ("Downscales the video, keeping its aspect ratio — the width is computed "
-                    "from the source's own ratio, never stretched or cropped. Never upscales: "
+_CRF_TIP = "Lower = higher quality, larger file. This encoder doesn't target a bitrate but rather a visual quality level."
+_QSCALE_TIP = "Lower = higher quality, larger file. This is a fixed qscale, not a CRF; this codec has no bitrate-target rate control."
+_RESOLUTION_TIP = ("Uses either source resolution or downscales the video, keeping its aspect ratio intact. Never upscales; "
                     "only rungs at or below the source's own height are offered.")
-_FPS_TIP = ("Retimes the video to a lower frame rate, duplicating or dropping frames as "
-            "needed. Never speeds up: only rates at or below the source's own are offered.")
+_FPS_TIP = ("Uses source FPS or retimes the video to a lower frame rate, duplicating or dropping frames as "
+            "needed. Never speeds up; only rates at or below the source's own are offered.")
+_AV_SYNC_FPS_TIP = ("Not needed while an FPS is picked; retiming to a set frame rate already "
+                    "holds it constant. Set FPS to Source to choose.")
 _SUBTITLE_TRACK_TIP = "The subtitle track the settings below edit."
 _CHOOSE_SUBTITLES_TIP = ("Pick which subtitle tracks the output includes and in what order (drag to reorder), "
-                         "and add tracks from other files (.srt, .ass, .vtt, .sup...).")
-_BURN_TIP = ("Paints this track into the picture, so it shows on every player and can't be turned off. "
+                         "and add tracks from other files (.srt, .ass, .vtt, .sup, etc.).")
+_BURN_TIP = ("Renders this track into the video frame so it shows on every player and can't be turned off. "
              "Only one track can be burned in; it isn't also kept as a separate track.")
-_UNDO_TIP = "Undoes the last change here — Choose Stream(s), or Strip/Return."
+_UNDO_TIP = "Undoes the last change here; Choose Stream(s), or Strip/Return."
 _REDO_TIP = "Redoes what Undo just took back."
 _HISTORY_LIMIT = 50
 # The list a kind's Choose Stream(s) edits (Video has none — just its own Strip/Return) and the
@@ -76,12 +76,17 @@ class EncodingTab(MediaTab):
     VERB_ING = "Encoding"
     DIRECT_LABEL = "Direct Encode"
     PRESET_NOTE = ("Name this preset. It stores the container and every codec / "
-                   "quality setting — not the trim, and not the file paths.")
+                   "quality setting. Does not include the trim nor the file paths.")
 
     def _init_state(self):
         self._quality_spec = None
         # The auto-picked Encoder (None once the user picks one themselves).
         self._auto_encoder = formats.SELECT
+        # Profile / Level follow each file's own until the user picks one of them.
+        self._auto_profile_level = True
+        # Each encoder's last Profile / Level / Speed / quality, put back when it is picked again.
+        self._encoder_memory = {}
+        self._memory_encoder = formats.SELECT
         # Multi-stream audio. `_audio_list`: every stream on offer in the Choose Stream(s)
         # order (= the output's), each shaped like Muxing's track entries. `_audio_included`:
         # the ids that go into the output. Each stream's settings are kept by id, so switching
@@ -172,9 +177,10 @@ class EncodingTab(MediaTab):
                                         width=Dropdown.width_for(formats.RESOLUTIONS))
         fps_width = Dropdown.width_for(formats.FPS_VALUES)
         self.fps_menu = Dropdown([formats.SOURCE_FPS], width=fps_width)
-        for menu in (self.profile_menu, self.level_menu, self.speed_menu,
-                     self.resolution_menu, self.fps_menu):
+        for menu in (self.speed_menu, self.resolution_menu, self.fps_menu):
             menu.picked.connect(self._on_control_change)
+        for menu in (self.profile_menu, self.level_menu):
+            menu.picked.connect(self._on_profile_level_change)
         box, self.encoder_label = labeled("Encoder:", self.encoder_menu)
         rl.addWidget(box)
         tip(self.profile_menu, _PROFILE_LEVEL_TIP)
@@ -446,6 +452,11 @@ class EncodingTab(MediaTab):
         self._auto_encoder = None
         self._sync_controls()
 
+    def _on_profile_level_change(self, *_):
+        """The user picked a Profile or Level — stop adopting each file's own."""
+        self._auto_profile_level = False
+        self._on_control_change()
+
     def _toggle_hdr(self):
         if self.hdr_switch.isEnabled():
             self.hdr_switch.toggle()
@@ -523,7 +534,8 @@ class EncodingTab(MediaTab):
         stripping_audio = self.strip_audio_check.isChecked()
         info = self.app.media.info
         video_absent = info.get("has_video") is False
-        audio_absent = info.get("has_audio") is False
+        # A source without audio isn't "absent" once a stream from another file has been added.
+        audio_absent = info.get("has_audio") is False and not self._audio_list
 
         # 1.
         self.strip_video_check.setEnabled(not (stripping_audio or video_absent))
@@ -553,11 +565,16 @@ class EncodingTab(MediaTab):
         profiles = formats.profiles_for(encoder)
         levels = formats.levels_for(encoder)
         speeds = self._speed_values(encoder)
+        switched = encoder != self._memory_encoder
+        if switched:
+            self._remember_encoder_settings()
         self._retarget(self.profile_menu, profiles)
         self._retarget(self.level_menu, levels)
         self._apply_speed(encoder)
         self._quality_spec = formats.quality_for(encoder)
         self._apply_quality()
+        if switched:
+            self._restore_encoder_settings(encoder)
         self._retarget_resolution(info.get("height"))
         self._retarget_fps(info.get("fps"))
 
@@ -616,7 +633,9 @@ class EncodingTab(MediaTab):
 
         set_enabled(self.audio_track_menu, self.audio_track_label,
                     audio_live and bool(self._audio_included))
-        self.choose_streams_btn.setEnabled(audio_live)
+        # Live for any file that isn't being stripped of audio: a source with none is exactly when
+        # a stream from another file is wanted.
+        self.choose_streams_btn.setEnabled(bool(self.app.media.current_file_path) and not stripping_audio)
         set_enabled(self.passthru_check, self.passthru_label, audio_live and not passthru_only)
         set_enabled(self.audio_codec_menu, self.audio_codec_label, audio_live and not passthru_only)
         set_enabled(self.audio_bitrate_menu, self.audio_bitrate_label,
@@ -643,6 +662,13 @@ class EncodingTab(MediaTab):
             (self.sub_track_menu, self.sub_track_label),
             (self.sub_language_menu, self.sub_language_label),
         ))
+        # A picked FPS (-r) already makes the output constant-rate, so A/V Sync changes nothing
+        # there; it is greyed with its ticked state kept, and matters again at Source.
+        fps_fixed = (bool(self.app.media.current_file_path) and video_live
+                     and self.fps_menu.value() != formats.SOURCE_FPS)
+        if self.app.media.current_file_path:
+            self.av_sync_check.setEnabled(not fps_fixed)
+        tip(self.av_sync_check, _AV_SYNC_FPS_TIP if fps_fixed else AV_SYNC_TIP)
         # The no-file side only: each enabled state was recomputed above.
         if not self.app.media.current_file_path:
             for widget in (self.crf_slider, self.crf_label, self.crf_low_label, self.crf_high_label,
@@ -728,6 +754,35 @@ class EncodingTab(MediaTab):
         self.crf_high_label.setText(spec["high"])
         tip(self.crf_slider, _CRF_TIP if spec["kind"] == "crf" else _QSCALE_TIP)
         self._update_quality_label()
+
+    def _remember_encoder_settings(self):
+        """Bank the outgoing encoder's real picks (its menus still hold them)."""
+        outgoing = self._memory_encoder
+        if outgoing == formats.SELECT:
+            return
+        memory = {}
+        for key, menu in (("profile", self.profile_menu), ("level", self.level_menu),
+                          ("speed", self.speed_menu)):
+            if menu.value() in menu.values() and menu.value() != NO_OPTION:
+                memory[key] = menu.value()
+        if self._quality_spec:
+            memory["quality"] = self.crf_slider.value()
+        self._encoder_memory[outgoing] = memory
+
+    def _restore_encoder_settings(self, encoder):
+        """Put back what the incoming encoder last had, where it is still offered."""
+        self._memory_encoder = encoder
+        memory = self._encoder_memory.get(encoder, {})
+        for key, menu in (("profile", self.profile_menu), ("level", self.level_menu),
+                          ("speed", self.speed_menu)):
+            if memory.get(key) in menu.values():
+                menu.set(memory[key])
+        quality = memory.get("quality")
+        if quality is not None and self.crf_slider.minimum() <= quality <= self.crf_slider.maximum():
+            self.crf_slider.blockSignals(True)
+            self.crf_slider.setValue(quality)
+            self.crf_slider.blockSignals(False)
+            self._update_quality_label()
 
     def _update_quality_label(self):
         spec = self._quality_spec or _FALLBACK_QUALITY
@@ -1088,7 +1143,7 @@ class EncodingTab(MediaTab):
 
         if self.strip_audio_check.isChecked():
             audio = ("— removed —", "stop")
-        elif info.get("has_audio") is False:
+        elif info.get("has_audio") is False and not self._audio_list:
             audio = ("— no audio stream —", "stop")
         elif not self._audio_included:
             audio = ("— no streams selected —", "stop")
@@ -1148,14 +1203,16 @@ class EncodingTab(MediaTab):
         self._sync_controls()
 
     def _auto_select_codecs(self, info):
-        """Encoder (+ Profile / Level) from the probe, while the user hasn't picked one."""
-        if self._auto_encoder is None:
-            return
+        """Encoder from the probe while the user hasn't picked one; Profile / Level likewise,
+        whenever the Encoder is the source's own codec."""
         video = info.get("video")
-        if video and video in self.encoder_menu.values():
+        if not video or video not in self.encoder_menu.values():
+            return
+        if self._auto_encoder is not None:
             self.encoder_menu.set(video)
             self._auto_encoder = video
             self._sync_controls()
+        if self._auto_profile_level and self.encoder_menu.value() == video:
             profile = info.get("video_profile")
             if profile and profile in formats.profiles_for(video):
                 self.profile_menu.set(profile)
@@ -1225,6 +1282,8 @@ class EncodingTab(MediaTab):
                               (self.speed_menu, "speed")):
                 if settings.get(key) is not None and settings[key] in menu.values():
                     menu.set(settings[key])
+                    if key != "speed":
+                        self._auto_profile_level = False
             if settings.get("resolution") and settings["resolution"] in self.resolution_menu.values():
                 self.resolution_menu.set(settings["resolution"])
             if settings.get("fps") and settings["fps"] in self.fps_menu.values():
@@ -1269,7 +1328,7 @@ class EncodingTab(MediaTab):
                 "Encoder on the Video sub-tab before queueing or encoding.",
             )
             return False
-        if not settings["strip_audio"] and info.get("has_audio") is not False:
+        if not settings["strip_audio"] and (info.get("has_audio") is not False or settings["audio_streams"]):
             streams = settings["audio_streams"]
             unresolved = any(e.get("codec", formats.SELECT) == formats.SELECT for e in streams)
             if not streams or unresolved:

@@ -201,7 +201,7 @@ class MediaSession:
     def clear_selection(self):
         """The Clear button: deliberately drop the selected file and everything derived from it,
         with no message (there's nothing wrong with the file). Unlike a rejected import, this is
-        the only way a tab's own controls (Clear/Queue Task/Mux, all gated on having a file) need
+        the only way a tab's own controls (Clear/Queue Job/Mux, all gated on having a file) need
         to grey out immediately rather than waiting on the next unrelated resync."""
         if not self.current_file_path:
             return

@@ -25,11 +25,13 @@ THEMES = {
     "Luck": {"primary": "#ADBCDE", "secondary": "#0E5914"},
     "Vaporwave": {"primary": "#3B41B8", "secondary": "#ED72D4"},
     "Dreamsicle": {"primary": "#f9be90", "secondary": "#f97c9c"},
-    "Funk": {"primary": "#3dbcc1", "secondary": "#4b3383", "sidebar_text": "white"},
-    # The sidebar title/logo and the selected sub-tab take the green; black's derived hover is
-    # black again, so it names a visible one.
+    "Funk": {"primary": "#3dbcc1", "secondary": "#4b3383", "sidebar_text": "white",
+             "sidebar_footer_text": "white"},
+    # The sidebar title/logo/footer and the selected sub-tab take the green; black's derived hover
+    # is black again, so it names a visible one.
     "Terminal": {"primary": "#000000", "primary_hover": "#1c1c1c", "secondary": "#44fe2c",
-                 "sidebar_text": "secondary", "swap_subtabs": True, "swap_action_buttons": True},
+                 "sidebar_text": "secondary", "sidebar_footer_text": "secondary",
+                 "swap_subtabs": True, "swap_action_buttons": True},
 }
 
 
@@ -90,8 +92,9 @@ def disabled_text_on(hex_color, target_ratio=3.0):
 
 def get_theme(name=None):
     """The full palette for a theme (the default for an unknown name): the stored colours plus
-    derived `*_text` colours. `sidebar_text` (the sidebar title and logo only) is `primary_text`
-    unless the theme names one, as a colour or "primary"/"secondary". `subtab_active` /
+    derived `*_text` colours. `sidebar_text` (the sidebar title and logo) and `sidebar_footer_text`
+    (its copyright / version line) are `primary_text` unless the theme names one, as a colour or
+    "primary"/"secondary". `subtab_active` /
     `subtab_inactive` (+ `_hover`, `_text`) are primary / secondary, swapped for a theme with
     `swap_subtabs`."""
     colors = THEMES.get(name, THEMES[DEFAULT_THEME_NAME])
@@ -108,6 +111,8 @@ def get_theme(name=None):
     }
     sidebar_text = colors.get("sidebar_text") or primary_text
     palette["sidebar_text"] = palette[sidebar_text] if sidebar_text in ("primary", "secondary") else sidebar_text
+    footer_text = colors.get("sidebar_footer_text") or primary_text
+    palette["sidebar_footer_text"] = palette[footer_text] if footer_text in ("primary", "secondary") else footer_text
     active, inactive = ("secondary", "primary") if colors.get("swap_subtabs") else ("primary", "secondary")
     for role, source in (("subtab_active", active), ("subtab_inactive", inactive)):
         for suffix in ("", "_hover", "_text"):

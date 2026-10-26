@@ -82,7 +82,7 @@ _ENCODER_SPECS = {
         "profiles": ["Main", "Main 10", "Main 12"],
         "levels": ["3.1", "4.0", "4.1", "5.0", "5.1", "5.2", "6.0"],
         "quality": {"kind": "crf", "label": "Quality (CRF)", "lo": 0, "hi": 51,
-                    "default": 28, "low": "Low", "high": "Placebo"},
+                    "default": 27, "low": "Low", "high": "Placebo"},
     },
     "MPEG-4": {
         "profiles": ["Simple", "Advanced Simple"],
@@ -112,7 +112,7 @@ _ENCODER_SPECS = {
         "profiles": ["Main", "High", "Professional"],
         "levels": ["4.0", "5.0", "5.1", "6.0"],
         "quality": {"kind": "crf", "label": "Quality (CRF)", "lo": 0, "hi": 63,
-                    "default": 35, "low": "Low", "high": "Placebo"},
+                    "default": 29, "low": "Low", "high": "Placebo"},
     },
     # The intermediates take no CRF / qscale: ProRes / DNxHR's quality is the profile tier,
     # FFV1 is lossless. `quality: None`, like SELECT, but the slider disables here rather

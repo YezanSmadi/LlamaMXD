@@ -267,6 +267,7 @@ def confirm_output_path(parent, output_path, input_file, claimed=False):
 
 # Each kind's files, plus "All Files" so a track inside a video can be picked.
 BROWSE_FILTERS = {
+    "video": "Video Files (*.mp4 *.mkv *.avi *.mov *.webm *.mxf *.ts *.vob);;All Files (*.*)",
     "audio": "Audio Files (%s);;All Files (*.*)" % " ".join("*" + ext for ext in sorted(formats.AUDIO_EXTENSIONS)),
     "subtitle": "Subtitle Files (%s);;All Files (*.*)" % " ".join("*" + ext for ext in formats.SUBTITLE_EXTENSIONS),
 }

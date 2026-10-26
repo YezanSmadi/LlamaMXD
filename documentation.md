@@ -1268,7 +1268,7 @@ and runs the first `_sync_controls`.
   file imported, every Overview/Video/Audio dropdown reads `—` (`NO_OPTION`,
   centred) and disables: Output Format and Preset here, plus whatever
   `(menu, label)` pairs `extra` names. Start Time, Clip Duration, A/V Sync, the
-  preset Save/Delete buttons and the Queue Task / Mux / Encode action buttons
+  preset Save/Delete buttons and the Queue Job / Mux / Encode action buttons
   (`queue_btn` / `go_btn`; roles `queue` / `action`, which a theme can swap) disable
   with them (values untouched). Output Format/Preset/the spinners/the action buttons
   get their enabled state set *both ways* unconditionally, because nothing else ever
