@@ -51,8 +51,15 @@ Name: "{autodesktop}\LlamaMXD"; Filename: "{app}\LlamaMXD.exe"; Tasks: desktopic
 
 [Run]
 Filename: "{app}\LlamaMXD.exe"; Description: "Launch LlamaMXD"; Flags: nowait postinstall skipifsilent
+; An update started from inside the app (ui/updater.py) passes /RELAUNCH=1 so it comes back up.
+Filename: "{app}\LlamaMXD.exe"; Flags: nowait; Check: Relaunching
 
 [Code]
+function Relaunching: Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
+
 { Uninstalling keeps the user's settings, presets and logs unless they say otherwise. }
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var

@@ -151,6 +151,7 @@ change here), and even `os._exit` runs the DLLs' unload code where it happens.
   frames gone after the grace once the window shrank, a same-size set kept until the idle time, and
   the first 13 always present at the size needed.
 - `check_userdata` — where settings.json / presets.json resolve (source vs a simulated frozen build), the data folder made on demand, nothing read from or written beside the exe, and a save that reads back.
+- `check_updates` — `core/updates.py` offline: version ordering (a release above its own beta, `1.0` = `1.0.0`), what `check` reports for a faked GitHub (newer app, pre-releases only for someone on one, drafts and assets without a digest ignored, a 404, every request failing), downloads checked against SHA-256 from a local server, and the tool swap (replaced, rolled back, refused, done over a running exe).
 - `check_orphans` — the real app (`main.main`, sandboxed, offscreen) as a child process imports the HDR
   fixture and turns HDR->SDR on, then closes its window, and a second run is killed outright
   (`Popen.kill`, like a crash or End Task) — each at the moment tone-map ffmpegs are running (a run
@@ -194,6 +195,7 @@ core/startup_tab.py       Settings' "Startup Tab" names: the four main tabs + th
 core/keybinds.py          the remappable shortcuts: action table, default keys, contexts, conflict rule (no Qt)
 core/theme.py             brand palettes, contrast helpers, settings.json read/write
 core/userdata.py          where settings.json / presets.json live: the repo from source, %LOCALAPPDATA%\LlamaMXD once frozen
+core/updates.py           update checks + installs for LlamaMXD and the bundled tools, from GitHub releases (no Qt)
 core/about.py             Settings' About page: repo / issue-tracker URLs, the GPL short notice, paths to LICENSE.txt and licenses/
 core/llamalog.py          LlamaLog: the rotating log file, crash hooks, URL scrubbing, per-job output ring buffer
 core/probe.py             ffprobe: probe_media, a file's real length, the HDR colour-tag check
@@ -218,6 +220,7 @@ ui/scale.py               the one UI scale factor: px()/fpx(), bound setters, de
 ui/workers.py             run_async: daemon thread → result delivered on the GUI thread; pil_to_qimage
 ui/qt_log.py              routes Qt's own warnings/errors into the log
 ui/single_instance.py     InstanceLock: a per-user lock file so only one LlamaMXD runs (main.py checks it first)
+ui/updater.py             UpdateFlow: Settings > About's Check for Updates button, its prompts and progress
 ui/keymap.py              KeyMap: the live shortcuts + matching a QKeyEvent against them
 ui/keynav.py              KeyNav: Tab / Enter selection of a tab's controls (the ring) + an open dropdown's keys
 ui/hover.py               HoverSync: the cursor and hover state under a pointer that isn't moving
@@ -3606,6 +3609,38 @@ how that container stores them.
 **MP4 marks the first subtitle track default when no track is** (the muxer's own rule for enabled
 tracks): a lone Forced track reads `default+forced` there. Not something the app can switch off; the jobs
 check expects it.
+
+## Updates (`core/updates.py`, `ui/updater.py`)
+
+**Settings > About's Check for Updates** (a compact 22px button beside the version, so the row stays no taller than its
+26px caption: the page has no height to spare) asks GitHub's releases API for four things: a newer LlamaMXD
+(`YezanSmadi/LlamaMXD`), ffmpeg (`GyanD/codexffmpeg`, the full build zip), yt-dlp and Deno. **Only when pressed**: nothing
+checks at startup, and the FAQ / manual say so — keep that true. A failure of one lookup doesn't stop the others; a 404
+(no release yet) is "no update", not an error.
+
+- **Release conventions the check relies on.** A tag `vX.Y.Z` (`-beta.N` etc. for pre-releases) with an asset named
+  `LlamaMXD-Setup-<version>.exe`. **Every download is verified against the `digest` GitHub puts on each release asset**
+  (`sha256:...`, added automatically on upload); an asset with no digest is ignored, and a mismatch deletes the file.
+  A pre-release is offered only to someone already running one. The running version is `VERSION` in `ui/widgets/panels.py`.
+- **Flow.** LlamaMXD first, then the tools, one Yes / No each (`ask_yes_no`), the tool prompt listing each `name old -> new
+  (size)`. **A Yes on LlamaMXD skips the tools prompt**: the installer overwrites `dependables/` with the tools it was built
+  with, so updating tools first and then the app would downgrade them; they are checked on the next press. Both are refused
+  while the Queue has unfinished jobs. Downloads run on `run_async` workers and the button shows `Downloading N%` /
+  `Updating N%`.
+- **The app update** downloads the installer to `%TEMP%\LlamaMXD-update`, then starts it detached (`DETACHED_PROCESS`, so
+  it is *not* in the tools job object that would kill it with the app) as `/SILENT /NORESTART /CLOSEAPPLICATIONS
+  /RELAUNCH=1` and closes the app; the installer's `[Run]` entry with `Check: Relaunching` starts it again. A copy that
+  isn't installed (`userdata.is_frozen()` false) can't update itself: its Yes opens the releases page.
+- **Tool swaps** (`install_tool` / `_swap`): download, extract (`ffmpeg` brings `ffprobe` with it), run the new file's
+  `--version`, then rename each old file to `.old`, move the new one in, run it again, and delete the `.old`; any failure
+  restores every old file. A running exe can be renamed but not overwritten, which is why it is a rename. Leftover
+  `.old` / `.new` / `.part` files are removed at the next check. Only a tool found in a bundled folder (`tools.bundled_dir`)
+  is ever touched, never a copy on PATH; **in a source checkout that folder is the repo's `dependables/`**, so the
+  rollback matters there. The ffmpeg update needs a restart to take effect (the dialog says so).
+- **Verified end to end** against the real GitHub with the real button (offscreen), into a copy of the tools in a temp folder:
+  yt-dlp 2026.08.19 -> 2026.10.21 and Deno 2.9.7 -> 2.9.8 downloaded, verified and swapped, progress shown on the button,
+  the repo's `dependables/` untouched. The app-update half (download, launch, relaunch) is covered by `check_updates` and
+  a silent installer run, but not by a real published release: none exists yet.
 
 ## Download flow (YT-DLP)
 

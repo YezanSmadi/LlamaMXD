@@ -31,6 +31,7 @@ from ui.keymap import canonical
 from ui.widgets.dialogs import ask_yes_no, show_message
 from ui.widgets.keyfield import KeyField, display_key
 from ui.widgets.panels import VERSION, BorderedFrame, SubTabBar
+from ui.updater import LABELS, UpdateFlow
 from ui.widgets.tooltip import tip
 
 SETTINGS_PAGES = ("Appearance", "Output", "Performance", "Shortcuts", "About")
@@ -448,6 +449,13 @@ class SettingsTab(QWidget):
         version = ScaledLabel(f"LlamaMXD™ {VERSION}")
         version.setStyleSheet("font-size: 12px;")
         version_l.addWidget(version, 0, Qt.AlignVCenter)
+        scale.spacer(version_l, 6)
+        # The compact (22px) button keeps this row no taller than its 26px caption: the page has no height to spare.
+        self.update_btn = button(LABELS[0], role="compact", width=button_width_for(LABELS), height=22)
+        tip(self.update_btn, "Looks on GitHub for a newer LlamaMXD and for newer versions of ffmpeg, yt-dlp and "
+                             "Deno. Nothing is downloaded until you say yes.")
+        self.update_flow = UpdateFlow(self.app, self.update_btn)
+        version_l.addWidget(self.update_btn, 0, Qt.AlignVCenter)
         page.addWidget(version_row, 0, Qt.AlignLeft)
         scale.spacer(page, 6)
 

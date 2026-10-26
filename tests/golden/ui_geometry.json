@@ -12055,8 +12055,14 @@
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
    220,
    97,
-   148,
+   296,
    26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   380,
+   99,
+   136,
+   22
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#0": [
    220,
@@ -12333,8 +12339,14 @@
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
    330,
    146,
-   222,
+   444,
    39
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   570,
+   149,
+   204,
+   33
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#0": [
    330,
@@ -12611,8 +12623,14 @@
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
    440,
    193,
-   295,
+   591,
    52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
+   759,
+   197,
+   272,
+   44
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledLabel#0": [
    440,
