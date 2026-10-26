@@ -2,6 +2,8 @@
 # Copyright (C) 2026 Yezan Smadi
 """Build the installable app folder: `python packaging/build.py` -> build/dist/LlamaMXD/.
 
+`--installer` then compiles packaging/LlamaMXD.iss (Inno Setup 6) into build/installer/.
+
 Freezes the app with PyInstaller, then adds what the app looks up beside its exe: LICENSE.txt,
 licenses/, the manual, and the bundled tools from dependables/ (read only, never changed)."""
 import os
@@ -24,11 +26,16 @@ def version():
     return re.search(r'^VERSION\s*=\s*["\']v?([^"\']+)["\']', text, re.M).group(1)
 
 
+def numeric_version(ver):
+    """`1.0.0-beta.2` as the four numbers Windows version resources want: [1, 0, 0, 0]."""
+    nums = [int(n) for n in re.findall(r"\d+", ver.split("-")[0])][:3]
+    return nums + [0] * (4 - len(nums))
+
+
 def write_version_info():
     """packaging/version_info.txt, the Windows file-properties block of the exe."""
     ver = version()
-    nums = [int(n) for n in re.findall(r"\d+", ver.split("-")[0])][:3]
-    nums += [0] * (4 - len(nums))
+    nums = numeric_version(ver)
     tup = ", ".join(str(n) for n in nums)
     text = f"""VSVersionInfo(
   ffi=FixedFileInfo(filevers=({tup}), prodvers=({tup}), mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0),
@@ -50,6 +57,29 @@ def write_version_info():
         fh.write(text)
 
 
+def find_iscc():
+    """Inno Setup's command-line compiler, or None."""
+    candidates = [shutil.which("iscc")]
+    for var in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
+        base = os.environ.get(var)
+        if base:
+            sub = os.path.join("Programs", "Inno Setup 6") if var == "LOCALAPPDATA" else "Inno Setup 6"
+            candidates.append(os.path.join(base, sub, "ISCC.exe"))
+    return next((c for c in candidates if c and os.path.isfile(c)), None)
+
+
+def build_installer():
+    """Compile the Inno Setup script around the built app folder."""
+    iscc = find_iscc()
+    if not iscc:
+        sys.exit("Inno Setup 6 not found (install it, or put ISCC.exe on PATH)")
+    ver = version()
+    nums = numeric_version(ver)
+    subprocess.run([iscc, f"/DAppVersion={ver}", "/DAppNumeric=" + ".".join(map(str, nums)),
+                    os.path.join(HERE, "LlamaMXD.iss")], check=True)
+    print(f"installer in {os.path.join(BUILD, 'installer')}")
+
+
 def main():
     write_version_info()
     shutil.rmtree(APP, ignore_errors=True)
@@ -69,6 +99,8 @@ def main():
             sys.exit(f"missing bundled tool: {src}")
         shutil.copy2(src, tools)
     print(f"built {APP} (v{version()})")
+    if "--installer" in sys.argv:
+        build_installer()
 
 
 if __name__ == "__main__":
