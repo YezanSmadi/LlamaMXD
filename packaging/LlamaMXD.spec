@@ -42,7 +42,7 @@ exe = EXE(
     exclude_binaries=True,
     name="LlamaMXD",
     console=False,
-    icon=os.path.join(ROOT, "assets", "llama.ico"),
+    icon=os.path.join(ROOT, "build", "LlamaMXD.ico"),
     version=os.path.join(SPECPATH, "version_info.txt"),
     upx=False,
 )

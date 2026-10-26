@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
 """Where the user's own files (settings.json, presets.json) live: beside main.py when run from source,
-`%LOCALAPPDATA%\LlamaMXD` in an installed (frozen) build, which is writable and survives an update."""
+`%LOCALAPPDATA%/LlamaMXD` in an installed (frozen) build, which is writable and survives an update."""
 import os
 import sys
 

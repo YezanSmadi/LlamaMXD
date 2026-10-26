@@ -32,6 +32,17 @@ def numeric_version(ver):
     return nums + [0] * (4 - len(nums))
 
 
+def make_icon():
+    """build/LlamaMXD.ico: a real multi-size icon made from assets/llama.ico, which is a PNG with an
+    .ico name (Qt and PyInstaller accept that; Inno Setup does not)."""
+    from PIL import Image
+    os.makedirs(BUILD, exist_ok=True)
+    path = os.path.join(BUILD, "LlamaMXD.ico")
+    Image.open(os.path.join(ROOT, "assets", "llama.ico")).convert("RGBA").save(
+        path, format="ICO", sizes=[(s, s) for s in (16, 24, 32, 48, 64, 128, 256)])
+    return path
+
+
 def write_version_info():
     """packaging/version_info.txt, the Windows file-properties block of the exe."""
     ver = version()
@@ -81,6 +92,7 @@ def build_installer():
 
 
 def main():
+    make_icon()
     write_version_info()
     shutil.rmtree(APP, ignore_errors=True)
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--distpath", DIST,
