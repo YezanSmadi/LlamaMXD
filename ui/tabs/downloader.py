@@ -46,7 +46,7 @@ def _codec_tip(value, table, best_tip):
 _KNOWN_EXTS = set(downloader.VIDEO_CONTAINERS) | set(downloader.AUDIO_CONVERSIONS) | {
     ".webm", ".m4a", ".mp4", ".mkv", ".ogg", ".mp3", ".aac", ".flv", ".3gp", ".mov"}
 _URL_RE = re.compile(r"^https?://\S+$")
-_PLACEHOLDER = "Paste a video link above, then press Fetch."
+_PLACEHOLDER = "Paste a link above then press Fetch."
 
 
 def _human_size(num_bytes):
@@ -238,7 +238,7 @@ class DownloaderTab(QWidget):
         scale.spacer(root, 10)
 
         actions, al = hrow(spacing=8, align_bottom=False)
-        self.queue_btn = button("Queue Task", role="queue")
+        self.queue_btn = button("Queue Job", role="queue")
         self.queue_btn.clicked.connect(self.add_to_queue)
         self.download_btn = button("Download", role="action")
         self.download_btn.clicked.connect(self.download_now)
@@ -374,7 +374,7 @@ class DownloaderTab(QWidget):
                            "Audio Format" if announce else None)
             qualities = downloader.qualities_for(fmts, mode, codec, self.format_menu.value())
             self._retarget(self.quality_menu, qualities, qualities[0] if qualities else None,
-                           "Resolution" if announce else None)
+                           "Bitrate" if announce else None)
         else:
             qualities = downloader.qualities_for(fmts, mode, codec)
             self._retarget(self.quality_menu, qualities, downloader.BEST_QUALITY,
@@ -411,7 +411,9 @@ class DownloaderTab(QWidget):
 
     def _show_audio_picker(self, mode):
         self.audio_box.setVisible(mode == downloader.MODE_AV)
-        self.format_label.setText("Audio Format:" if mode == downloader.MODE_AUDIO else "Video Format:")
+        audio_only = mode == downloader.MODE_AUDIO
+        self.format_label.setText("Audio Format:" if audio_only else "Video Format:")
+        self.quality_label.setText("Bitrate:" if audio_only else "Resolution:")
 
     def _retarget(self, menu, values, default, what=None):
         lost = menu.retarget(values or [NO_OPTION], default if values else None)

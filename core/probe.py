@@ -190,6 +190,7 @@ def _describe_video_stream(index, stream):
         "hdr": transfer in _HDR_TRANSFERS,
         "hdr_display": hdr_display,
         "language": (stream.get("tags") or {}).get("language"),
+        "default": bool((stream.get("disposition") or {}).get("default")),
     }
 
 
@@ -229,6 +230,7 @@ def _describe_audio_stream(index, stream):
         # Lossless has no bitrate worth showing (TrueHD reports none at all).
         "lossless": formats.probed_audio_is_lossless(name, stream.get("profile")),
         "language": (stream.get("tags") or {}).get("language"),
+        "default": bool((stream.get("disposition") or {}).get("default")),
     }
 
 

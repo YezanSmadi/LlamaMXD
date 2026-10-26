@@ -23,7 +23,7 @@ from ui import scale
 from ui import theme as T
 from ui.scale import fpx
 from ui.tabs.media_tab import hrow, set_line_text
-from ui.widgets.controls import button, button_width_for, field_label, restyle
+from ui.widgets.controls import button, button_width_for, field_label
 from ui.widgets.dropdown import Dropdown
 from ui.widgets.text import ClickableLabel, ScaledLabel, ScaledLineEdit
 from ui.widgets.toggles import CheckBox, Switch
@@ -41,23 +41,24 @@ _TOP_PAD = 5
 # The About notice's width in reference px (the page's 664 less the side pads).
 _ABOUT_NOTICE_W = 644
 
-_GPU_TIP = ("Uses your GPU's built-in encoder (NVENC/Quick Sync/AMF) when available — "
-            "falls back to software automatically if this encoder isn't supported.")
-_GPU_UNAVAILABLE_TIP = ("Hardware acceleration needs a dedicated GPU (NVIDIA, AMD or Intel Arc) — "
-                        "integrated graphics aren't used. None was detected, so encodes run in software.")
+_GPU_TIP = ("Uses your GPU's built-in encoder (NVENC/Quick Sync/AMF) when available. "
+            "Falls back to software automatically if a GPU encoder isn't supported.")
+_GPU_UNAVAILABLE_TIP = ("Hardware acceleration needs a dedicated GPU (NVIDIA, AMD or Intel Arc). "
+                        "None was detected, so encodes run in software. Integrated graphics aren't eligible. ")
 _SEPARATE_SAVE_TIP = "Lets Downloader save to a different default folder than Muxing/Encoding."
-_NAMING_TIP = ("How output files are named. Tokens in braces are replaced: {source} is the input file's "
-               "name (the site, for a download), {title} its embedded title, {chapters} the chapter "
-               "count. Anything you type around them is kept as-is, e.g. {source}-{title}.")
+_NAMING_TIP = ("How output files are named. Parameters in braces are replaced; {source} is the input file's "
+               "name (for a download it's the site, {title} its embedded title, {chapters} the chapter "
+               "count. Anything you type around them is kept as-is, e.g. Export_{source}-{title}_Last.")
 _NAMING_HELP = ("Filled in as soon as a file is picked: {source} {title} {chapters}\n"
                 "Filled in when a job is queued: {date} {time} {creation-time} {quality} {bitrate}")
-_PRIORITY_TIP = ("How much CPU priority encodes and downloads get over your other programs. Higher "
-                 "finishes sooner but can make the PC feel less responsive; lower keeps it smooth "
-                 "while you work. Applies right away, even to a job that's running.")
-_WINDOW_MODE_TIP = ("Windowed: the usual title bar and frame, resize it freely. Borderless: no title bar "
-                    "or frame (drag the sidebar to move it, its edges to resize). Fixed: the window as the "
+_PRIORITY_TIP = ("How much CPU priority encodes and downloads get over your other programs. Very important on a CPU "
+                 "that needs to ration resources.\n\nHigher finishes sooner but can make the PC feel less responsive. "
+                 "Lower keeps it smooth while keeping resources available to other programs on the PC. "
+                 "Applies right away, even to a job that's running.")
+_WINDOW_MODE_TIP = ("Windowed: the usual title bar and frame, resize it freely.\n\nBorderless: no title bar "
+                    "or frame (drag the top of the sidebar to move it, its edges to resize).\n\nFixed: the window as the "
                     "app is designed, at a fixed size.")
-_FULLSCREEN_TIP = "Fills the whole screen. Alt+F4 closes the app; switch the mode back here to get a frame again."
+_FULLSCREEN_TIP = "Fills the whole screen. Switch the mode back here to get a moveable window again."
 _WHEN_DONE_TIP = ("What happens once the queue has finished its last job. Shutdown, Sleep, Hibernate "
                   "and Log Off give you 30 seconds to cancel first.")
 _WHEN_DONE_RESET_TIP = ("Starts every launch on 'Do Nothing', so a Shutdown you picked for one long "
@@ -263,6 +264,17 @@ class SettingsTab(QWidget):
         self.naming_hint.setWordWrap(True)
         scale.fixed(self.naming_hint, w=400)
         po.addWidget(self.naming_hint)
+        # What's wrong with the typed format sits under the token list, which stays put.
+        self.naming_error_box = QWidget()
+        error_layout = QVBoxLayout(self.naming_error_box)
+        scale.margins(error_layout, 0, 4, 0, 0)
+        self.naming_error = ScaledLabel("")
+        self.naming_error.setProperty("role", "error")
+        self.naming_error.setWordWrap(True)
+        scale.fixed(self.naming_error, w=400)
+        error_layout.addWidget(self.naming_error)
+        po.addWidget(self.naming_error_box)
+        self.naming_error_box.hide()
         scale.spacer(po, 18)
 
         # --- Performance page ---
@@ -491,6 +503,10 @@ class SettingsTab(QWidget):
         tip(third_party_btn, "Opens the folder with the license texts, and links to the source code, of the "
                              "programs, libraries and fonts LlamaMXD uses (ffmpeg, yt-dlp, Qt, ...).")
         licenses_l.addWidget(third_party_btn)
+        manual_btn = button("User Manual", width=button_width_for(["User Manual"]))
+        manual_btn.clicked.connect(self._open_manual)
+        tip(manual_btn, "Opens the user manual in your browser.")
+        licenses_l.addWidget(manual_btn)
         page.addWidget(licenses, 0, Qt.AlignLeft)
         scale.spacer(page, 6)
 
@@ -522,6 +538,11 @@ class SettingsTab(QWidget):
         self._open_local(about.licenses_dir(), "Couldn't Open Folder",
                          "The licenses folder wasn't found next to the app. The same texts are in the "
                          f"project's licenses folder at {about.REPO_URL}")
+
+    def _open_manual(self):
+        """Open the user manual (manual/manual.html) in the default browser."""
+        self._open_local(about.manual_path(), "Couldn't Open Manual",
+                         "The user manual wasn't found next to the app.")
 
     def _open_url(self, url):
         """Open a link in the user's default browser."""
@@ -737,12 +758,11 @@ class SettingsTab(QWidget):
         self.disk_label.setText(f"{system_info.format_bytes(total)} total, {free_text}")
 
     def _validate_naming_text(self, text):
-        """Live feedback on the naming format: the token help, or what's wrong in red. Applied
+        """Live feedback on the naming format: what's wrong, in red under the token list. Applied
         only on Enter / focus out, and never while invalid."""
         error = naming.template_error(text)
-        self.naming_hint.setText(error or _NAMING_HELP)
-        self.naming_hint.setProperty("role", "error" if error else "hint")
-        restyle(self.naming_hint)
+        self.naming_error.setText(error or "")
+        self.naming_error_box.setVisible(bool(error))
 
     def _commit_naming(self, save=True):
         """Adopt the typed naming format if valid and changed; autofilled Save fields follow."""

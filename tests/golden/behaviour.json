@@ -356,7 +356,7 @@
   "save": "<work>/out",
   "step": "downloader: format .mp3",
   "toasts": [
-   "Resolution switched to Best (VBR) — Best isn't available for this pick."
+   "Bitrate switched to Best (VBR) — Best isn't available for this pick."
   ]
  },
  {

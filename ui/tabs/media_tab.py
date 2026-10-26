@@ -37,11 +37,11 @@ SUBTABS = ("Overview", "Video", "Audio", "Subtitles", "Chapters")
 # `_undo(kind)`/`_redo(kind)` history; Overview and Chapters don't.
 _UNDO_KIND_FOR_SUBTAB = {"Video": "video", "Audio": "audio", "Subtitles": "subtitle"}
 
-AV_SYNC_TIP = ("Holds a constant frame rate and keeps timestamps aligned — turn off only "
-               "if you need the source's exact original timing.")
-STRIP_TIP = "Removes this stream entirely from the output — the other panel's stream is unaffected."
-PRESET_TIP = "Presets remember the container and codec/quality choices — never the trim, file paths, or track picks."
-CLEAR_TIP = "Clears the selected file and everything decoded from it, without touching the file itself."
+AV_SYNC_TIP = ("Holds a constant frame rate and keeps timestamps aligned. Turn off only "
+               "if you need the source's exact original timing (this could cause video/audio drift)")
+STRIP_TIP = "Removes this stream entirely from the output. The other panel's stream is unaffected."
+PRESET_TIP = "Presets remember the container and codec/quality choices, never the trim, file paths, or track picks."
+CLEAR_TIP = "Clears the selected file and everything decoded from it without touching the file itself."
 _CLEAR_TITLE = "Clear Selected File?"
 _CLEAR_MESSAGE = "Are you sure you want to clear the currently selected file?"
 
@@ -152,12 +152,12 @@ class MediaTab(QWidget):
         root.addWidget(save)
         scale.spacer(root, 10)
 
-        # --- Clear, then Queue Task + the do-it-now button, by role (a theme can swap the latter two).
+        # --- Clear, then Queue Job + the do-it-now button, by role (a theme can swap the latter two).
         actions, al = hrow(spacing=8, align_bottom=False)
         self.clear_btn = button("Clear", role="danger", width=button_width_for(["Clear"]))
         self.clear_btn.clicked.connect(self._on_clear)
         tip(self.clear_btn, CLEAR_TIP)
-        self.queue_btn = button("Queue Task", role="queue")
+        self.queue_btn = button("Queue Job", role="queue")
         self.queue_btn.clicked.connect(self.add_to_queue)
         self.go_btn = button(self.ACTION_TEXT, role="action")
         self.go_btn.clicked.connect(self.run_now)

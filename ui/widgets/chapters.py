@@ -19,10 +19,10 @@ from ui.widgets.tracklist import TrackListBox
 
 _HISTORY_LIMIT = 50
 
-_LIST_TIP = "The output's chapters, in time order. Tick which ones to keep; untick or remove all to drop chapters entirely."
-_SELECT_ALL_TIP = "Ticks every chapter — include all of them in the output."
-_DESELECT_ALL_TIP = "Unticks every chapter, without removing any of them."
-_ADD_EDIT_TIP = "Opens a window to change a chapter's time or name, or add a new one."
+_LIST_TIP = "The output's chapters in time order. Tick which ones to keep and untick or remove all to drop chapters entirely."
+_SELECT_ALL_TIP = "Ticks every chapter; includes all of them in the output."
+_DESELECT_ALL_TIP = "Unticks every chapter without completely removing any of them."
+_ADD_EDIT_TIP = "Opens a window to change a chapter's time or name or add a new chapter."
 _REMOVE_TIP = "Removes every ticked chapter. Undo brings them back."
 _UNDO_TIP = "Undoes the last add, edit, remove, or change of which chapters are ticked."
 _REDO_TIP = "Redoes what Undo just took back."

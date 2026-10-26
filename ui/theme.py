@@ -247,7 +247,7 @@ def stylesheet():
     QLabel[role="sidebarTitle"] {{
         color: {c('sidebar_text')}; font-family: "Oswald", "Segoe UI"; font-size: 36px; font-weight: bold;
     }}
-    QLabel[role="sidebarFooter"] {{ color: {c('primary_text')}; font-size: 10px; }}
+    QLabel[role="sidebarFooter"] {{ color: {c('sidebar_footer_text')}; font-size: 10px; }}
     QLabel[role="empty"] {{ color: {c('muted')}; }}
     QLabel[role="warn"] {{
         background: {c('warn_bg')}; color: {c('warn_text')};

@@ -665,7 +665,7 @@
     "Professional"
    ],
    "quality": {
-    "default": 35,
+    "default": 29,
     "hi": 63,
     "high": "Placebo",
     "kind": "crf",
@@ -821,7 +821,7 @@
     "Main 12"
    ],
    "quality": {
-    "default": 28,
+    "default": 27,
     "hi": 51,
     "high": "Placebo",
     "kind": "crf",

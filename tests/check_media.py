@@ -11,6 +11,7 @@ import time
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
+from PySide6.QtGui import QCursor  # noqa: E402
 import harness  # noqa: E402
 from harness import WORK, check_golden, fixture, report  # noqa: E402
 
@@ -159,7 +160,10 @@ def overlay_steady():
     select(fixture("hdr.mkv"))
     wait(lambda: enc.carousel.isVisible() and enc.hdr_switch.isEnabled(), 60)
     enc.carousel.step(5)
-    enc.carousel.enterEvent(None)             # the pointer on the preview: chevrons fade in
+    car = enc.carousel
+    QCursor.setPos(car.mapToGlobal(car._frame_rect().center().toPoint()))   # the pointer on the picture
+    settle(0.1)
+    car.enterEvent(None)                      # chevrons fade in
     settle(0.3)
     switch(True)
     low, seen = 1.0, set()
@@ -307,7 +311,7 @@ def subtitle_pages():
 
     mux.format_menu.set(".mp4")
     mux._on_format_change()
-    mux._stream_probed("subtitle", fixture("bar.sup"), core.probe.probe_media(fixture("bar.sup")))
+    run_add_edit(add_inside_and_ok)
     expect("a PGS track narrows the format", (mux.format_menu.value(), mux.format_menu.values()), (".mkv", [".mkv"]))
     expect("its toast", toasts[-1:], ["Container switched to .mkv — .mp4 can't hold PGS subtitles."])
     mux._undo("subtitle")
@@ -324,7 +328,7 @@ def subtitle_pages():
     mux._remove_streams("video")
     expect("removing every video track strips it the same way",
            (mux._gather_settings()["strip_video"], "Video" in mux.sub_tab_bar._marked), (True, True))
-    expect("Add Stream(s) and Undo stay live on an emptied panel",
+    expect("Add/Edit Video and Undo stay live on an emptied panel",
            (mux.video_add_btn.isEnabled(), mux.video_undo_btn.isEnabled()), (True, True))
     mux._undo("video")
     expect("undo brings the video track back", mux._gather_settings()["strip_video"], False)
@@ -442,6 +446,119 @@ def subtitle_pages():
     return report("Subtitles / Chapters pages: Add/Edit popups, strip-by-ticks, chapters, burn-in", problems)
 
 
+def default_flags():
+    """Add/Edit Video and Add/Edit Audio: the buttons' names, each track's Default seeded from the
+    file, one default per kind, the whole session one undo step, Cancel changing nothing, and the
+    flag reaching the job's settings."""
+    import ui.tabs.muxing as muxing_page
+    from ui.widgets.edit_dialogs import EditStreamsDialog
+    problems = []
+
+    def expect(label, got, want):
+        if got != want:
+            problems.append(f"{label}: {got!r}, expected {want!r}")
+
+    multi = fixture("multi.mkv")
+    select(multi)
+    wait(lambda: pipe("_media_info_path") == multi)
+    mux = tabs()[0]
+    window.show_tab("Muxing")
+    expect("the buttons", [mux.video_add_btn.text(), mux.audio_add_btn.text()], ["Add/Edit Video", "Add/Edit Audio"])
+    flags = lambda kind: [t["default"] for t in mux._track_args(kind)]
+    expect("defaults come from the file", (flags("video"), flags("audio")), ([False], [True, False]))
+
+    def run_edit(kind, edits):
+        def fake(parent, k, entries, start_dir=""):
+            dialog = EditStreamsDialog(parent, k, entries, start_dir)
+            choice = edits(dialog)
+            dialog._dismiss(choice or "OK")
+            return dialog.result_entries
+        muxing_page.edit_streams = fake
+        mux._add_edit_streams(kind)
+
+    def make_second_default(dialog):
+        dialog._on_track_pick(next(label for label in dialog._track_ids if label.startswith("Track 2")))
+        dialog.default_check.setChecked(True)
+        dialog._set_default()
+
+    run_edit("audio", make_second_default)
+    expect("one default per kind", flags("audio"), [False, True])
+    expect("the flag reaches the job's settings",
+           [t["default"] for t in mux._gather_settings()["audio_tracks"]], [False, True])
+    mux._undo("audio")
+    expect("the session is one undo step", (flags("audio"), len(mux._history["audio"]["undo"])), ([True, False], 0))
+    run_edit("audio", lambda dialog: (make_second_default(dialog), "Cancel")[1])
+    expect("Cancel changes nothing", (flags("audio"), len(mux._history["audio"]["undo"])), ([True, False], 0))
+    run_edit("audio", lambda dialog: None)
+    expect("OK with no edit adds no undo step", len(mux._history["audio"]["undo"]), 0)
+
+    def video_default(dialog):
+        dialog.default_check.setChecked(True)
+        dialog._set_default()
+
+    run_edit("video", video_default)
+    expect("video works the same", flags("video"), [True])
+    empty = EditStreamsDialog(window, "audio", [])
+    expect("an empty list greys the fields", (empty.track_menu.isEnabled(), empty.default_check.isEnabled()),
+           (False, False))
+    return report("Add/Edit Video / Audio: Default flag", problems)
+
+
+def missing_streams():
+    """A source without audio (or video) still offers Add/Edit for it in Muxing and Choose Stream(s)
+    in Encoding, so a track from another file can be brought in; once one is, the kind stops
+    counting as stripped and absent."""
+    import uuid
+    from core.probe import probe_media
+    problems = []
+
+    def expect(label, got, want):
+        if got != want:
+            problems.append(f"{label}: {got!r}, expected {want!r}")
+
+    mux, enc = tabs()
+    window.show_tab("Muxing")
+    video_only, audio_only = fixture("long.mp4"), fixture("audio.m4a")
+    stream = probe_media(audio_only)["audio_streams"][0]
+    external = {"id": f"ext:{uuid.uuid4().hex[:8]}", "source": "external", "file": audio_only,
+                "index": stream["index"], "stream": stream, "name": "audio.m4a", "default": False}
+
+    select(video_only)
+    wait(lambda: pipe("_media_info_path") == video_only)
+    expect("Muxing, no audio: Add/Edit Audio", mux.audio_add_btn.isEnabled(), True)
+    expect("Muxing, no audio: tab marked", "Audio" in mux.sub_tab_bar._marked, True)
+    expect("Muxing, no audio: nothing to remove yet", mux.audio_remove_btn.isEnabled(), False)
+    mux._edit_tracks("audio", mux._tracks["audio"] + [external])
+    settle(0.3)
+    expect("Muxing, audio added: the track is ticked", len(mux._boxes["audio"].checked_ids()), 1)
+    expect("Muxing, audio added: no longer marked", "Audio" in mux.sub_tab_bar._marked, False)
+    expect("Muxing, audio added: Remove", mux.audio_remove_btn.isEnabled(), True)
+    expect("Muxing, audio added: the job carries it", len(mux._gather_settings()["audio_tracks"]), 1)
+    expect("Muxing, audio added: Undo", mux.audio_undo_btn.isEnabled(), True)
+
+    expect("Encoding, no audio: Choose Stream(s)", enc.choose_streams_btn.isEnabled(), True)
+    expect("Encoding, no audio: Strip Audio", enc.strip_audio_check.isEnabled(), False)
+    entry = dict(external, id=f"ext:{uuid.uuid4().hex[:8]}")
+    enc._audio_list = enc._audio_list + [entry]
+    enc._audio_stream_settings[entry["id"]] = enc._default_audio_settings(entry["stream"])
+    enc._audio_included = enc._audio_included | {entry["id"]}
+    enc._reactivate_audio_stream()
+    enc._load_active_audio_stream()
+    enc._sync_controls()
+    expect("Encoding, audio added: Strip Audio", enc.strip_audio_check.isEnabled(), True)
+    expect("Encoding, audio added: Audio Codec", enc.audio_codec_menu.isEnabled(), True)
+    expect("Encoding, audio added: the job carries it", len(enc._gather_settings()["audio_streams"]), 1)
+    expect("Encoding, audio added: validates", enc._validate_specific(enc._gather_settings()), True)
+
+    select(audio_only)
+    wait(lambda: pipe("_media_info_path") == audio_only)
+    expect("Muxing, no video: Add/Edit Video", mux.video_add_btn.isEnabled(), True)
+    expect("Muxing, no video: Undo / Redo follow history", mux.video_undo_btn.isEnabled(), False)
+    expect("Encoding, no video: Choose Stream(s)", enc.choose_streams_btn.isEnabled(), True)
+    expect("Encoding, no video: Choose Subtitle(s)", enc.choose_subs_btn.isEnabled(), True)
+    return report("a source without audio / video can still take a track from another file", problems)
+
+
 def clear_button():
     """Clear: disabled with no file; asks first (Yes clears, No cancels); "Don't ask again"
     skips the dialog from then on; the cleared file leaves no trace in MediaSession."""
@@ -500,5 +617,7 @@ if __name__ == "__main__":
     overlay_steady()
     spinner_release()
     subtitle_pages()
+    default_flags()
+    missing_streams()
     clear_button()
     harness.finish()
