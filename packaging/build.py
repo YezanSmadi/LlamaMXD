@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yezan Smadi
+"""Build the installable app folder: `python packaging/build.py` -> build/dist/LlamaMXD/.
+
+Freezes the app with PyInstaller, then adds what the app looks up beside its exe: LICENSE.txt,
+licenses/, the manual, and the bundled tools from dependables/ (read only, never changed)."""
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+BUILD = os.path.join(ROOT, "build")
+DIST = os.path.join(BUILD, "dist")
+APP = os.path.join(DIST, "LlamaMXD")
+TOOLS = ["ffmpeg.exe", "ffprobe.exe", "yt-dlp.exe", "deno.exe"]   # ffplay.exe is unused
+
+
+def version():
+    """The app's version string, from ui/widgets/panels.py."""
+    text = open(os.path.join(ROOT, "ui", "widgets", "panels.py"), encoding="utf-8").read()
+    return re.search(r'^VERSION\s*=\s*["\']v?([^"\']+)["\']', text, re.M).group(1)
+
+
+def write_version_info():
+    """packaging/version_info.txt, the Windows file-properties block of the exe."""
+    ver = version()
+    nums = [int(n) for n in re.findall(r"\d+", ver.split("-")[0])][:3]
+    nums += [0] * (4 - len(nums))
+    tup = ", ".join(str(n) for n in nums)
+    text = f"""VSVersionInfo(
+  ffi=FixedFileInfo(filevers=({tup}), prodvers=({tup}), mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0),
+  kids=[
+    StringFileInfo([StringTable('040904B0', [
+      StringStruct('CompanyName', 'Yezan Smadi'),
+      StringStruct('FileDescription', 'LlamaMXD'),
+      StringStruct('FileVersion', '{ver}'),
+      StringStruct('InternalName', 'LlamaMXD'),
+      StringStruct('LegalCopyright', 'Copyright (C) 2026 Yezan Smadi. GPL-3.0-or-later.'),
+      StringStruct('OriginalFilename', 'LlamaMXD.exe'),
+      StringStruct('ProductName', 'LlamaMXD'),
+      StringStruct('ProductVersion', '{ver}')])]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
+"""
+    with open(os.path.join(HERE, "version_info.txt"), "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def main():
+    write_version_info()
+    shutil.rmtree(APP, ignore_errors=True)
+    subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--distpath", DIST,
+                    "--workpath", os.path.join(BUILD, "work"), os.path.join(HERE, "LlamaMXD.spec")],
+                   cwd=ROOT, check=True)
+
+    shutil.copy2(os.path.join(ROOT, "LICENSE.txt"), APP)
+    shutil.copytree(os.path.join(ROOT, "licenses"), os.path.join(APP, "licenses"))
+    shutil.copytree(os.path.join(ROOT, "manual"), os.path.join(APP, "manual"),
+                    ignore=shutil.ignore_patterns("README.md"))
+    tools = os.path.join(APP, "dependables")
+    os.makedirs(tools)
+    for name in TOOLS:
+        src = os.path.join(ROOT, "dependables", name)
+        if not os.path.isfile(src):
+            sys.exit(f"missing bundled tool: {src}")
+        shutil.copy2(src, tools)
+    print(f"built {APP} (v{version()})")
+
+
+if __name__ == "__main__":
+    main()
