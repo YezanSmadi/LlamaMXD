@@ -1,0 +1,930 @@
+/* LlamaMXD User Manual — visual design.
+   Palette and type mirror the app's own Lemon theme (core/theme.py) and bundled fonts
+   (assets/fonts). The page-turning mechanics themselves are vendor/flipbook-core.js
+   (@gullabs/flipbook-core, MPL-2.0, a maintained StPageFlip fork — see
+   licenses/flipbook.txt) — this file styles the content and the book chrome around
+   it; tune the flip's own look via manual.js's PageFlip settings (maxShadowOpacity,
+   flippingTime, ...). The engine draws the leaf's position/size/clip-path and its own
+   opaque paper layer directly onto the `.page` element it adopts, so our own paint
+   (background, shadow) and content layout live one level down, on `.page-inner`
+   (wrapped around each page's markup at runtime — see manual.js). */
+
+@font-face {
+    font-family: 'Oswald';
+    src: url('../assets/fonts/Oswald-VariableFont_wght.ttf') format('truetype-variations'),
+        url('../assets/fonts/Oswald-VariableFont_wght.ttf') format('truetype');
+    font-weight: 200 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Roboto';
+    src: url('../assets/fonts/Roboto-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    /* Requesting weight 500-700 lands on the real Medium file instead of a synthetic
+       (faux) bold — there is no separate Roboto-Bold.ttf bundled with the app. */
+    font-family: 'Roboto';
+    src: url('../assets/fonts/Roboto-Medium.ttf') format('truetype');
+    font-weight: 500 700;
+    font-display: swap;
+}
+
+:root {
+    --primary: #FDCA3C;
+    --primary-hover: #e0b234;
+    --secondary: #3B8ED0;
+    --secondary-hover: #337bb5;
+    --ink: #1a1608;
+    --paper: #ffffff;
+    --muted: #6b6b6b;
+    --stage-bg-1: #232228;
+    --stage-bg-2: #131217;
+    --page-shadow: 0 18px 44px rgba(0, 0, 0, 0.4);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    height: 100%;
+    background: var(--stage-bg-2);
+    color: var(--ink);
+    font-family: 'Roboto', Arial, sans-serif;
+    overflow: hidden;
+}
+
+h1,
+h2,
+h3,
+.crumb,
+.cover-title,
+.cover-subtitle,
+.toc h1 {
+    font-family: 'Oswald', 'Arial Narrow', sans-serif;
+}
+
+/* ---- Stage: the dark backdrop the book floats on ---- */
+
+.stage {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    overflow: hidden;
+    /* manual.js switches it to auto only while a zoomed book outgrows the window */
+    background:
+        radial-gradient(ellipse at 50% 42%, rgba(255, 255, 255, 0.07), transparent 62%),
+        linear-gradient(160deg, var(--stage-bg-1), var(--stage-bg-2));
+    user-select: none;
+}
+
+/* Sized to the spread's own ratio (two pages side by side, 896:540 — the app's own
+   reference window shape). manual.js hands the engine a single page's width/height
+   (half this box) with sizing:"responsive", so it fills whatever this resolves to. */
+/* manual.js sets --shell-w / --shell-ratio from the zoom level and the spread / single-page mode;
+   `margin: auto` centres it and still lets the stage scroll once a zoomed book outgrows the window. */
+.book-shell {
+    position: relative;
+    flex: none;
+    margin: auto;
+    width: var(--shell-w, min(84vw, 155vh));
+    aspect-ratio: var(--shell-ratio, 896 / 540);
+    transition: opacity 0.2s ease;
+}
+
+.book-shell.fading {
+    opacity: 0;
+}
+
+/* Single-page view: no spine, so no rounded outer corners or gutter shading. */
+.single-page .page,
+.single-page .page>.page-inner {
+    border-radius: 0 !important;
+}
+
+.single-page .page::before,
+.single-page .page::after {
+    display: none;
+}
+
+/* ---- A single page's paper look. The engine owns the `.page` root's position, size,
+   clip-path and its own opaque paper layer (rewriting inline style every frame — see
+   manual.js); box-shadow, the gutter shading and overflow clipping don't conflict with
+   that, so they stay here. Everything else — the real background colour, padding and
+   content layout — lives on `.page-inner`, one level down, which the engine never
+   touches. ---- */
+
+.page {
+    box-shadow: var(--page-shadow);
+    overflow: hidden;
+}
+
+/* manual.js tags each page by the side it sits on (even index = right-hand, odd = left-hand).
+   The outer edge is rounded and the spine edge stays flat, like a real book's pages. */
+.page.side-left,
+.page.side-left>.page-inner {
+    border-radius: 14px 0 0 14px;
+}
+
+.page.side-right,
+.page.side-right>.page-inner {
+    border-radius: 0 14px 14px 0;
+}
+
+.page-inner {
+    background: var(--paper);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* A faint gutter-side shading so a settled page still reads as sitting in a book,
+   not floating flat. The engine adds --left / --right to `.page` once it's at rest. */
+.page.--left::after,
+.page.--right::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 26px;
+    pointer-events: none;
+}
+
+.page.--left::after {
+    right: 0;
+    background: linear-gradient(to left, rgba(0, 0, 0, 0.12), transparent);
+}
+
+.page.--right::before {
+    left: 0;
+    background: linear-gradient(to right, rgba(0, 0, 0, 0.12), transparent);
+}
+
+/* Every size below is in cqw (1% of the page's own content width) so a page looks the same at
+   any window size. Inner pages are calibrated to the fullscreen look; the covers to the compact
+   look, with big text and graphics that fill the page. */
+
+.page-inner {
+    container-type: inline-size;
+    position: relative;
+}
+
+/* ---- Cover / back cover (shown alone, on the right / left respectively) ---- */
+
+.page.cover>.page-inner,
+.page.back-cover>.page-inner {
+    background: var(--primary);
+    align-items: center;
+    text-align: center;
+    padding: 12% 9% 0;
+}
+
+.page.back-cover>.page-inner {
+    padding-top: 23%;
+}
+
+.cover-title {
+    font-weight: 700;
+    font-size: 17.5cqw;
+    letter-spacing: 0.1cqw;
+    color: var(--ink);
+    margin: 0;
+    line-height: 1.05;
+    flex-shrink: 0;
+}
+
+.cover-rule {
+    width: 56%;
+    height: 1.5cqw;
+    background: var(--ink);
+    margin: 4cqw auto 5cqw;
+    border-radius: 0.7cqw;
+    flex-shrink: 0;
+}
+
+.cover-subtitle {
+    font-weight: 600;
+    font-size: 8cqw;
+    color: var(--ink);
+    margin: 0 0 4cqw;
+    flex-shrink: 0;
+}
+
+/* Fills whatever height is left and rests on the page's bottom edge. */
+.cover-mascot {
+    flex: 1;
+    min-height: 0;
+    max-width: 100%;
+    object-fit: contain;
+    object-position: center bottom;
+    filter: drop-shadow(0 0.6cqw 1cqw rgba(0, 0, 0, 0.15));
+}
+
+.cover-mascot.missing {
+    display: none;
+}
+
+/* ---- Table of contents ---- */
+
+.page.toc>.page-inner {
+    padding: 7% 8%;
+}
+
+.toc h1 {
+    text-align: center;
+    font-weight: 700;
+    font-size: 5.4cqw;
+    margin: 0 0 0.7cqw;
+    color: var(--ink);
+}
+
+.toc .toc-rule {
+    width: 9cqw;
+    height: 0.72cqw;
+    background: var(--secondary);
+    border-radius: 0.36cqw;
+    margin: 0 auto 5%;
+}
+
+.toc .toc-ghost {
+    visibility: hidden;
+}
+
+.toc-list {
+    flex: 1;
+    overflow: hidden;
+}
+
+.toc-group {
+    margin-bottom: 3.2%;
+}
+
+.toc-group h2 {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 2.25cqw;
+    text-transform: uppercase;
+    letter-spacing: 0.18cqw;
+    color: var(--secondary);
+    margin: 0 0 0.55cqw;
+}
+
+.toc-group ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.toc-group li a {
+    display: block;
+    padding: 0.45cqw 0;
+    font-size: 2.7cqw;
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    cursor: pointer;
+}
+
+.toc-group li a:hover {
+    color: var(--secondary);
+}
+
+/* ---- Standard content page (tab / sub-tab pages, downloader, queue, settings...) ---- */
+
+.page.content>.page-inner {
+    padding: 7% 8% 11%;
+}
+
+.page-head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.36cqw;
+    margin-bottom: 3%;
+    flex-shrink: 0;
+}
+
+/* The section title sits in the page's outer top corner: left on a left page, right on a right one. */
+.side-left .crumb {
+    align-self: flex-start;
+    text-align: left;
+}
+
+.side-right .crumb {
+    align-self: flex-end;
+    text-align: right;
+}
+
+.crumb {
+    font-weight: 700;
+    font-size: 2.35cqw;
+    text-transform: uppercase;
+    letter-spacing: 0.22cqw;
+    color: var(--secondary);
+}
+
+.page-head h1 {
+    text-align: center;
+    font-weight: 700;
+    font-size: 4.5cqw;
+    margin: 0;
+    color: var(--ink);
+}
+
+.head-rule {
+    height: 0.72cqw;
+    background: var(--primary);
+    border-radius: 0.36cqw;
+    margin: 0.72cqw 0 5%;
+    flex-shrink: 0;
+}
+
+.screenshot {
+    margin: 0 0 5%;
+    flex-shrink: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    max-height: 40%;
+    overflow: hidden;
+    position: relative;
+}
+
+.screenshot img {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+    object-fit: contain;
+    border-radius: 0.9cqw;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.stage.can-pan {
+    cursor: grab;
+}
+
+body.panning,
+body.panning * {
+    cursor: grabbing !important;
+    user-select: none;
+}
+
+.screenshot:not(.missing):not(.artwork) img {
+    cursor: zoom-in;
+    -webkit-user-drag: none;
+}
+
+.lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.78);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    cursor: zoom-out;
+}
+
+.lightbox.open {
+    opacity: 1;
+}
+
+.lightbox img {
+    max-width: 92vw;
+    max-height: 92vh;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    cursor: default;
+}
+
+.screenshot.artwork img {
+    border-radius: 0;
+    border: none;
+}
+
+.screenshot .missing-note {
+    display: none;
+}
+
+.screenshot.missing {
+    background: repeating-linear-gradient(135deg, #f4f4f4, #f4f4f4 10px, #ececec 10px, #ececec 20px);
+    border: 1px dashed #b8b8b8;
+}
+
+.screenshot.missing img {
+    display: none;
+}
+
+.screenshot.missing .missing-note {
+    display: block;
+    color: var(--muted);
+    font-size: 2.17cqw;
+    text-align: center;
+    padding: 1.1cqw 1.8cqw;
+}
+
+.screenshot.missing .missing-note code {
+    background: rgba(0, 0, 0, 0.06);
+    padding: 0.2cqw 0.7cqw;
+    border-radius: 0.5cqw;
+}
+
+.callouts {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3%;
+    min-height: 0;
+    overflow: hidden; /* never a scrollbar: long text flows onto the next page (manual.js autoFlow) */
+}
+
+.callout h2 {
+    font-weight: 800;
+    font-size: 3.3cqw;
+    margin: 0 0 0.6cqw;
+    color: var(--ink);
+}
+
+.callout p+h2 {
+    margin-top: 4cqw;
+}
+
+.callout p {
+    font-size: 2.75cqw;
+    line-height: 1.45;
+    color: #333;
+    margin: 0;
+}
+
+.callout figure.shot {
+    margin: 1.6cqw 0 2cqw;
+}
+
+.callout figure.shot:not(.compare) img {
+    display: block;
+    width: 70%;
+    height: auto;
+    margin: 0 auto;
+    border-radius: 0.9cqw;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    cursor: zoom-in;
+    -webkit-user-drag: none;
+}
+
+.callout figure.shot figcaption {
+    margin-top: 0.8cqw;
+    font-size: 2.1cqw;
+    font-style: italic;
+    text-align: center;
+    color: var(--muted);
+}
+
+.callout figure.shot.pair {
+    display: flex;
+    gap: 2cqw;
+}
+
+.callout figure.shot.pair .half {
+    flex: 1;
+    min-width: 0;
+}
+
+.callout figure.shot.pair img {
+    width: 100%;
+}
+
+.callout p.page-text {
+    color: var(--muted);
+}
+
+.callout p.fun-fact {
+    color: var(--muted);
+}
+
+/* ---- Reference / table-style pages (keyboard shortcuts) ---- */
+
+.page.reference>.page-inner {
+    padding: 7% 8% 11%;
+}
+
+.reference table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 2.25cqw;
+}
+
+.reference th {
+    text-align: left;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 2cqw;
+    letter-spacing: 0.09cqw;
+    color: var(--secondary);
+    border-bottom: 0.36cqw solid var(--primary);
+    padding: 0.72cqw 1.1cqw;
+}
+
+.reference td {
+    padding: 0.9cqw 1.1cqw;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    color: #222;
+    vertical-align: top;
+}
+
+.reference td .sub {
+    display: block;
+    color: var(--muted);
+    font-size: 0.85em;
+    font-style: italic;
+}
+
+.reference td.key {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 500;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.reference kbd {
+    display: inline-block;
+    background: #f1f1f1;
+    border: 1px solid #cfcfcf;
+    border-bottom-width: 0.36cqw;
+    border-radius: 0.7cqw;
+    padding: 0.18cqw 0.9cqw;
+    margin-left: 0.36cqw;
+    font-family: 'Roboto', sans-serif;
+    font-size: 0.95em;
+}
+
+.reference td.container-name {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    color: var(--secondary);
+    white-space: nowrap;
+}
+
+.reference table.other-formats {
+    margin-top: 2.2cqw;
+}
+
+.reference-note {
+    margin: 1.8cqw 0 0;
+    font-size: 2.17cqw;
+    color: var(--muted);
+    font-style: italic;
+}
+
+/* ---- Page numbers: a primary-coloured disc at the bottom of every inner page ---- */
+
+.page-num {
+    position: absolute;
+    left: 50%;
+    bottom: 3.2cqw;
+    transform: translateX(-50%);
+    width: 5.6cqw;
+    height: 5.6cqw;
+    border-radius: 50%;
+    background: var(--primary);
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 2.4cqw;
+}
+
+/* ---- Blank leaves, section dividers and the notices page ---- */
+
+.page.divider>.page-inner,
+.page.info>.page-inner {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 10%;
+}
+
+.divider h1 {
+    font-family: 'Oswald', 'Arial Narrow', sans-serif;
+    font-weight: 700;
+    font-size: 11cqw;
+    line-height: 1.1;
+    margin: 0;
+    color: var(--ink);
+}
+
+.divider .divider-rule {
+    width: 22cqw;
+    height: 1.2cqw;
+    background: var(--primary);
+    border-radius: 0.6cqw;
+    margin-top: 5cqw;
+}
+
+.info p {
+    font-size: 3.4cqw;
+    color: rgba(0, 0, 0, 0.75);
+    line-height: 1.5;
+    margin: 0 0 2.5cqw;
+}
+
+.info .fine-print {
+    font-size: 2.9cqw;
+    color: rgba(0, 0, 0, 0.55);
+}
+
+.page-text a[data-goto],
+.page-text a[href] {
+    color: var(--secondary);
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.page a[href] {
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.reference-note a[href] {
+    color: var(--secondary);
+}
+
+.page a[href]:hover {
+    color: var(--secondary-hover);
+}
+
+/* ---- Back cover ---- */
+
+.back-cover .llama-small {
+    width: 100%;
+    height: 54.3%;
+    /* of the height left under the top padding: ~44% of the page */
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.back-cover .llama-small.missing {
+    display: none;
+}
+
+/* The text block starts about two-thirds of the way down the page. */
+.back-cover .back-text {
+    padding-top: 5%;
+    padding-bottom: 3%;
+}
+
+.back-cover p {
+    font-size: 3cqw;
+    color: rgba(0, 0, 0, 0.75);
+    line-height: 1.45;
+    margin: 0 0 1.8cqw;
+}
+
+.back-cover .fine-print {
+    font-size: 2.5cqw;
+    color: rgba(0, 0, 0, 0.55);
+    margin-bottom: 1cqw;
+}
+
+/* ---- Navigation chrome (arrows, counter, TOC jump) ---- */
+
+nav.book-nav {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+}
+
+nav.book-nav .nav-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: background 0.15s, opacity 0.15s, transform 0.15s;
+    backdrop-filter: blur(2px);
+}
+
+nav.book-nav .nav-btn:hover:not(:disabled) {
+    background: var(--secondary);
+}
+
+nav.book-nav .nav-btn:active:not(:disabled) {
+    transform: translateY(-50%) scale(0.92);
+}
+
+nav.book-nav .nav-btn:disabled {
+    opacity: 0.25;
+    cursor: default;
+}
+
+nav.book-nav #prev-btn {
+    left: 4px;
+}
+
+nav.book-nav #next-btn {
+    right: 4px;
+}
+
+.book-footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    pointer-events: none;
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 12px;
+    font-family: 'Roboto', sans-serif;
+}
+
+.book-footer>* {
+    pointer-events: auto;
+}
+
+#page-counter {
+    min-width: 60px;
+    text-align: center;
+}
+
+.book-footer button {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.65);
+    font-family: 'Roboto', sans-serif;
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 4px 6px;
+}
+
+.book-footer button:hover {
+    color: #fff;
+}
+
+.book-footer .on-paper,
+.book-footer button.on-paper,
+.book-footer button.on-paper:hover {
+    color: #000;
+}
+
+#page-counter,
+.book-footer button {
+    transition: color 0.15s ease;
+}
+
+.hint-toast {
+    position: fixed;
+    left: 50%;
+    top: 18px;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-family: 'Roboto', sans-serif;
+    font-size: 12px;
+    padding: 7px 14px;
+    border-radius: 20px;
+    white-space: nowrap;
+    opacity: 1;
+    transition: opacity 0.6s ease;
+    pointer-events: none;
+    z-index: 50;
+}
+
+.hint-toast.hidden {
+    opacity: 0;
+}
+/* ---- Text flowing onto a continuation page ---- */
+
+.flow-continuation .page-head { margin-bottom: 3%; }
+.flow-measure {
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+/* ---- Before/after comparison slider ---- */
+
+.cmp {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 848 / 477;
+    overflow: hidden;
+    border-radius: 0.9cqw;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    cursor: zoom-in;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.cmp img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    -webkit-user-drag: none;
+    pointer-events: none;
+}
+
+.cmp .cmp-b {
+    clip-path: inset(0 0 0 var(--pos));
+}
+
+.cmp-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--pos);
+    width: 0.4cqw;
+    min-width: 2px;
+    transform: translateX(-50%);
+    background: #fff;
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
+    cursor: ew-resize;
+}
+
+.cmp-handle::before {
+    content: "";
+    position: absolute;
+    inset: 0 -8px;
+}
+
+.cmp.dragging,
+.cmp.dragging .cmp-handle {
+    cursor: ew-resize;
+}
+
+.cmp-handle::after {
+    content: "\2194";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 5cqw;
+    height: 5cqw;
+    min-width: 26px;
+    min-height: 26px;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: #fff;
+    color: #222;
+    font-size: 3cqw;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+}
+
+.cmp-tag {
+    position: absolute;
+    top: 1.2cqw;
+    padding: 0.3cqw 1.2cqw;
+    border-radius: 99px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 2cqw;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+.cmp-tag-a { left: 1.2cqw; }
+.cmp-tag-b { right: 1.2cqw; }
+
+.lightbox .cmp {
+    width: min(92vw, calc(92vh * 848 / 477));
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    cursor: default;
+}
+
+.lightbox .cmp-tag { font-size: 16px; top: 12px; padding: 3px 12px; }
+.lightbox .cmp-tag-a { left: 12px; }
+.lightbox .cmp-tag-b { right: 12px; }
+.lightbox .cmp-handle { width: 3px; }
+.lightbox .cmp-handle::after { width: 40px; height: 40px; font-size: 22px; }

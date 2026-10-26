@@ -1,0 +1,1690 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>LlamaMXD User Manual</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="../assets/llama.ico">
+    <link rel="stylesheet" href="manual.css">
+</head>
+
+<body>
+
+    <div class="stage">
+        <div class="book-shell">
+            <div id="book">
+
+                <!-- ============================================================ -->
+                <!--  0. COVER (shown alone, right-hand side, hard/rigid)          -->
+                <!-- ============================================================ -->
+                <section class="page cover" data-id="cover">
+                    <h1 class="cover-title">LlamaMXD</h1>
+                    <div class="cover-rule"></div>
+                    <p class="cover-subtitle">User Manual</p>
+                    <img class="cover-mascot" src="../assets/LlamaMXD-Logo.svg" alt="Pak the Llama">
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  FRONT MATTER - a blank left page, then the notices       -->
+                <!-- ============================================================ -->
+                <section class="page blank" data-id="front-blank"></section>
+
+                <section class="page info" data-id="info">
+                    <div class="info-text">
+                        <p>LlamaMXD™ is free software, licensed under the GNU General Public License v3
+                            (or later). You're free to redistribute and modify it under that license's
+                            terms &mdash; see <code>LICENSE.txt</code> and the <code>licenses/</code> folder
+                            next to the app for full details and every third-party notice.</p>
+                        <p class="fine-print">LlamaMXD™ and Pak the Llama™ are trademarks of Yezan Smadi.
+                            Logo and brand assets Copyright © 2026 Yezan Smadi, all rights reserved.</p>
+                        <p class="fine-print"><a href="https://github.com/YezanSmadi/LlamaMXD" target="_blank"
+                                rel="noopener">github.com/YezanSmadi/LlamaMXD</a></p>
+                    </div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  1. TABLE OF CONTENTS (two pages: a left and a right)         -->
+                <!-- ============================================================ -->
+                <section class="page toc" data-id="toc">
+                    <h1>Table of Contents</h1>
+                    <div class="toc-rule"></div>
+                    <div class="toc-list">
+                        <div class="toc-group">
+                            <h2>Getting Started</h2>
+                            <ul>
+                                <li><a data-goto="welcome">Welcome to LlamaMXD</a></li>
+                            </ul>
+                        </div>
+                        <div class="toc-group">
+                            <h2>Muxing</h2>
+                            <ul>
+                                <li><a data-goto="muxing-overview">Overview</a></li>
+                                <li><a data-goto="muxing-video">Video</a></li>
+                                <li><a data-goto="muxing-audio">Audio</a></li>
+                                <li><a data-goto="muxing-subtitles">Subtitles</a></li>
+                                <li><a data-goto="muxing-chapters">Chapters</a></li>
+                            </ul>
+                        </div>
+                        <div class="toc-group">
+                            <h2>Encoding</h2>
+                            <ul>
+                                <li><a data-goto="encoding-overview">Overview</a></li>
+                                <li><a data-goto="encoding-video">Video</a></li>
+                                <li><a data-goto="encoding-audio">Audio</a></li>
+                                <li><a data-goto="encoding-subtitles">Subtitles</a></li>
+                                <li><a data-goto="encoding-chapters">Chapters</a></li>
+                            </ul>
+                        </div>
+                        <div class="toc-group">
+                            <h2>Downloading</h2>
+                            <ul>
+                                <li><a data-goto="downloader">Downloader</a></li>
+                            </ul>
+                        </div>
+                        <div class="toc-group">
+                            <h2>Queuing</h2>
+                            <ul>
+                                <li><a data-goto="queue">Queue</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page toc" data-id="toc-2">
+                    <!-- invisible copy of page 1's title block, so both lists start on the same row -->
+                    <h1 class="toc-ghost" aria-hidden="true">Table of Contents</h1>
+                    <div class="toc-rule toc-ghost" aria-hidden="true"></div>
+                    <div class="toc-list">
+                        <div class="toc-group">
+                            <h2>Settings</h2>
+                            <ul>
+                                <li><a data-goto="settings-appearance">Appearance</a></li>
+                                <li><a data-goto="settings-output">Output</a></li>
+                                <li><a data-goto="settings-performance">Performance</a></li>
+                                <li><a data-goto="settings-shortcuts">Shortcuts</a></li>
+                                <li><a data-goto="settings-about">About</a></li>
+                            </ul>
+                        </div>
+                        <div class="toc-group">
+                            <h2>Reference</h2>
+                            <ul>
+                                <li><a data-goto="keyboard-shortcuts">Keyboard Shortcuts</a></li>
+                                <li><a data-goto="containers">Containers &amp; Codecs</a></li>
+                                <li><a data-goto="crf-cheatsheet">CRF Cheatsheet</a></li>
+                                <li><a data-goto="naming-parameters">Automatic Naming Parameters</a></li>
+                            </ul>
+                        </div>
+                        <div class="toc-group">
+                            <h2>Troubleshooting &amp; FAQ</h2>
+                            <ul>
+                                <li><a data-goto="troubleshooting">Troubleshooting</a></li>
+                                <li><a data-goto="faq">FAQ</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  GETTING STARTED - divider spread (left blank, right title)-->
+                <!-- ============================================================ -->
+                <section class="page blank" data-id="blank-start"></section>
+
+                <section class="page divider" data-id="divider-start">
+                    <h1>Getting Started</h1>
+                    <div class="divider-rule"></div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  2. WELCOME                                                   -->
+                <!-- ============================================================ -->
+                <section class="page content" data-id="welcome">
+                    <header class="page-head">
+                        <span class="crumb">Getting Started</span>
+                        <h1>Welcome to LlamaMXD</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot artwork">
+                        <img src="images/welcome.svg" alt="Pak Sitting">
+                        <p class="missing-note">Drop a screenshot named <code>welcome.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Say Hi to the Llama</h2>
+                            <p class="page-text">LlamaMXD is a media multiplexer and transcoder with a built in
+                                video downloader. You can mux media, encode it, as well as download off the web.
+                                In this manual, you will learn the ins and outs of LlamaMXD so that you may be better
+                                equipped to handle video and audio in your media workflow.
+                            </p>
+                        </div>
+                        <div class="callout">
+                            <h2>First Things First</h2>
+                            <p class="page-text">LlamaMXD is designed to be as intuitive and friendly to use as
+                                possible. Everything you need will be easily accessible. There are 5 main areas
+                                of LlamaMXD; Muxing, Encoding, Downloader, Queue, and Settings.<br>
+                                <br>
+                                Muxing is where media multiplexing happens. Here, video/audio do not lose quality
+                                as none of the data in these files are being manipulated. This is because muxing
+                                is simply the process of combining media and packing it into a container and/or moving
+                                it from one container to another (e.g. mp4 to mkv). The actual codec of said media isn't
+                                touched (e.g. H.264 to H.265. This is an example of encoding).<br>
+                                <br>
+                                Encoding is where encoding/transcoding [1] happens. Encoding is the process of
+                                compressing media into a file with a codec. This is what the majority of people are
+                                exposed to when handling media (i.e. conversion). It is here that you will mess with
+                                quality sliders, adjust bitrate, and choose media codecs. Encoding is the default tab on
+                                LlamaMXD's launch (this can be changed in Settings).<br>
+                                <br>
+                                Downloader is your station for downloading media from the internet. Powered by yt-dlp,
+                                you can download media from the most popular sites on the web. Just paste a link, fetch,
+                                and get ready to download.<br>
+                                <br>
+                                Queue is the hub for your muxing/encoding/download jobs. Here, jobs get processed,
+                                executed, and outputted to your save folder.<br>
+                                <br>
+                                Settings is the one stop shop for adjusting the look and feel of LlamaMXD, from the
+                                appearance of the program to its performance. Choose your theme from a multitude of
+                                color schemes and finetune how intensively the Llama will work.<br>
+                                <br>
+                                Now that you have a general overview, let's start from the top.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+
+                <!-- ============================================================ -->
+                <!--  MUXING - divider spread (left blank, right title)        -->
+                <!-- ============================================================ -->
+                <section class="page blank" data-id="blank-muxing"></section>
+
+                <section class="page divider" data-id="divider-muxing">
+                    <h1>Muxing</h1>
+                    <div class="divider-rule"></div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  MUXING                                                       -->
+                <!-- ============================================================ -->
+                <section class="page content" data-id="muxing-overview">
+                    <header class="page-head"><span class="crumb">Muxing</span>
+                        <h1>Overview</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/muxing-overview.png" alt="Muxing's Overview sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>muxing-overview.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>What is Muxing?</h2>
+                            <p class="page-text">Multiplexing, also known as muxing, is the process by which pieces of
+                                media (video, audio, subtitles, etc.) are combined and packaged/repackaged into a
+                                container without any sort of encoding. Muxing is a very quick process and even big
+                                files take no time at all. The process is completely lossless.<br>
+                                <br>
+                                Muxing and Encoding have the same 5 subtabs: Overview, Video, Audio, Subtitles, and
+                                Chapters.<br>
+                            </p>
+                        </div>
+                        <div class="callout">
+                            <h2>Quick Glance</h2>
+                            <p class="page-text">Muxing and Encoding have very similar Overview subtabs.<br>
+                                <br>
+                                To begin, import a file by opening up a file explorer with the browse button, by
+                                dragging and dropping a file into the import box, or by double-clicking within the
+                                import box to open up a file explorer as well.<br>
+                                <br>
+                                On the right side is a summary of the imported file's video/audio information and
+                                duration of the file. Here you can also choose your output format, which is simply the
+                                container of the file (e.g. mp4, mkv, mov). You can also create and enable a muxing
+                                preset of your specification that quickly sets up a job. It is also from this subtab
+                                that you can trim your selected file's length, with two fields to set the start time of
+                                the trim and the duration of the trim. Not touching either field will keep the length of
+                                the file intact. Not touching the duration field and leaving the greyed out 00:00:00 as
+                                is will continue the file to its original end. The A/V Sync checkbox enables a constant
+                                framerate mode to align audio and video especially in the cases of variable framerate;
+                                this is on by default.<br>
+                                <br>
+                                At the bottom are 4 options that are consistent across all 5 subtabs. They are the
+                                output field, which allows you to set where your file will export; the browse button
+                                opens up a file explorer to choose an output folder. Then you have Mux, Queue Job, and
+                                Clear. Mux will immediately begin muxing your job in the Queue tab, Queue Job will send
+                                the job to your Queue where it will wait to start. Clear will remove the imported file
+                                as your import.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="muxing-video">
+                    <header class="page-head"><span class="crumb">Muxing</span>
+                        <h1>Video</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/muxing-video.png" alt="Muxing's Video sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>muxing-video.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Managing Video</h2>
+                            <p class="page-text">In the Muxing subtab for Video, an imported file will show you a list
+                                of all video streams included with your file. The vast majority of the time you will
+                                only see 1 video stream, but there are rare cases where you might have a file with
+                                multiple video streams; this list allows you to look over your streams, adjust the order
+                                of them, and select/deselect them. Details for the video streams include the track
+                                number, its codec, the profile and level, resolution, FPS, whether it is SDR or HDR, the
+                                color bit depth, and the language. <br>
+                                <br>
+                                To the right of the track listing are 4 rows of options. From top to bottom they are:
+                                Select/Deselect All, Add/Edit Video, Remove Streams, and Undo/Redo. Select/Deselect All
+                                will check/uncheck every track in the list. Add/Edit Video opens a window where you can
+                                pick a track and make it the Default (the one players use unless told otherwise), or
+                                browse for a video stream in another file to import. Remove Stream(s) will remove any
+                                selected track completely from the list. Undo/Redo provide you undos and redos for every
+                                action you make in this subtab.<br>
+                                <br>
+                                In the case of multiple video streams, you have the ability to drag them up and down the
+                                list to reorder them.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="muxing-audio">
+                    <header class="page-head"><span class="crumb">Muxing</span>
+                        <h1>Audio</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/muxing-audio.png" alt="Muxing's Audio sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>muxing-audio.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Managing Audio</h2>
+                            <p class="page-text">The Audio subtab is very similar to the Video subtab; there is a track
+                                list, Select/Deselect All, Add/Edit and Remove Streams buttons, and an undo redo.
+                                External audio tracks can be imported via Add/Edit Audio -> Browse.<br>
+                                <br>
+                                Just as in the Video subtab, audio tracks can be rearranged, added, and removed as the
+                                controls and track manager in Video and Audio are identical. Audio tracks can also be
+                                edited with the Add/Edit Audio button to set a track as default.
+                            </p>
+                            <figure class="shot">
+                                <img src="images/muxing-audio-edit.png" width="896" height="540"
+                                    alt="Muxing: the Add/Edit Audio window">
+                                <figcaption>The Add/Edit Audio window.</figcaption>
+                            </figure>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="muxing-subtitles">
+                    <header class="page-head"><span class="crumb">Muxing</span>
+                        <h1>Subtitles</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/muxing-subtitles.png" alt="Muxing's Subtitles sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>muxing-subtitles.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Managing Subtitles</h2>
+                            <p class="page-text">
+                                Subtitles, like Video and Audio, have the same buttons and track lister. However, the
+                                Add/Edit button here has an extra feature for subtitles; in addition to setting a
+                                subtitle track as default, the user can also set a subtitle track as "forced".<br>
+                                <br>
+                                Forcing a subtitle track allows subtitles to pop up even when subtitles in your video
+                                player are turned off. This is especially useful when a language foreign to the selected
+                                audio language is being spoken, as subtitles will briefly pop up on screen to translate
+                                if forced is selected. The forced tag itself doesn't automatically mean that the
+                                subtitles preform properly; forced subtitles must already have the data inside of them
+                                (e.g. tag specific lines in PGS subtitles as well as subtitles with only foreign
+                                language translations written). In other words, forced subtitles must be preconfigured
+                                before importing, the forced tag by itself does nothing.<br>
+                                <br>
+                                Some video formats don't support picture subtitles (PGS/VobSub/DVB) and having an import
+                                with these types of subtitles included will narrow down the video format list down to
+                                mkv, as mkv files are the most tolerant.
+                            </p>
+                            <figure class="shot">
+                                <img src="images/muxing-subtitles-edit.png" width="896" height="540"
+                                    alt="Muxing: the Add/Edit Subs window">
+                                <figcaption>The Add/Edit Subs window.</figcaption>
+                            </figure>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="muxing-chapters">
+                    <header class="page-head"><span class="crumb">Muxing</span>
+                        <h1>Chapters</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/muxing-chapters.png" alt="Muxing's Chapters sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>muxing-chapters.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Managing Chapters</h2>
+                            <p class="page-text"> Chapters, like every other subtab within Muxing, has a list on the
+                                left and options on the right. Similar to the Subtitles subtab, there is a button for
+                                adding and editing chapters. Here, the timecode and name of a chapter can be edited and
+                                a new chapter can be added as well.<br>
+                                <br>
+                                Unticking or removing a chapter from the list won't include said chapters in the
+                                outputted file. Chapters within trimmed files are automatically retimed.
+                            </p>
+                            <figure class="shot">
+                                <img src="images/muxing-chapters-edit.png" width="896" height="540"
+                                    alt="Muxing: the Add/Edit Chapter(s) window">
+                                <figcaption>The Add/Edit Chapter(s) window.</figcaption>
+                            </figure>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page blank" data-id="filler-muxing"></section>
+
+                <!-- ============================================================ -->
+                <!--  ENCODING - divider spread (left blank, right title)      -->
+                <!-- ============================================================ -->
+                <section class="page blank" data-id="blank-encoding"></section>
+
+                <section class="page divider" data-id="divider-encoding">
+                    <h1>Encoding</h1>
+                    <div class="divider-rule"></div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  ENCODING                                                     -->
+                <!-- ============================================================ -->
+                <section class="page content" data-id="encoding-overview">
+                    <header class="page-head"><span class="crumb">Encoding</span>
+                        <h1>Overview</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/encoding-overview.png" alt="Encoding's Overview sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>encoding-overview.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>What Encoding is for</h2>
+                            <p class="page-text">Encoding is similar to Muxing in that you can package/repackage footage
+                                but differs in a pretty significant way; it's not lossless. Unlike Muxing, which simply
+                                copies the video, audio, subtitle and chapter streams, Encoding must compress these
+                                streams into a new file. This allows for better size and quality
+                                management as one might not want such a high quality and large file size for storage
+                                purposes. Encoding is the type of process that most users are familar with
+                                (e.g. a generic online mp3 converter reencodes a desired file's audio into mp3).<br>
+                                <br>
+                                Going back to storage management, an added benefit of Encoding is that it offers a
+                                multitude of different codecs to compress your file with. For example, a compatible file
+                                could be reencoded using the AV1 or HEVC codecs, both of which are better at file
+                                compression and retaining quality than the more common AVC codec. More on this later.
+                            </p>
+                        </div>
+                        <div class="callout">
+                            <h2>Quick Glance</h2>
+                            <p class="page-text">Muxing and Encoding have very similar Overview subtabs.<br>
+                                <br>
+                                As with the Muxing tab, import a file by opening up a file explorer with the browse
+                                button, by dragging and dropping a file into the import box, or by double-clicking
+                                within the import box to open up a file explorer as well.<br>
+                                <br>
+                                On the right side is a summary of the imported file's video/audio information and
+                                duration of the file. Here you can also choose your output format, which is simply the
+                                container of the file (e.g. mp4, mkv, mov). You can also create and enable a muxing
+                                preset of your specification that quickly sets up a job. It is also from this subtab
+                                that you can trim your selected file's length, with two fields to set the start time of
+                                the trim and the duration of the trim. Not touching either field will keep the length of
+                                the file intact. Not touching the duration field and leaving the greyed out 00:00:00 as
+                                is will continue the file to its original end. The A/V Sync checkbox enables a constant
+                                framerate mode to align audio and video especially in the cases of variable framerate;
+                                this is on by default.<br>
+                                <br>
+                                At the bottom are 4 options that are consistent across all 5 subtabs. They are the
+                                output field, which allows you to set where your file will export; the browse button
+                                opens up a file explorer to choose an output folder. Then you have Encode, Queue Job,
+                                and Clear. Encode will immediately begin muxing your job in the Queue tab, Queue Job
+                                will send the job to your Queue where it will wait to start. Clear will remove the
+                                imported file as your import.
+                            </p>
+                        </div>
+                </section>
+
+                <section class="page content" data-id="encoding-video">
+                    <header class="page-head"><span class="crumb">Encoding</span>
+                        <h1>Video</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/encoding-video.png" alt="Encoding's Video sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>encoding-video.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <p class="page-text"> Immediately, Encoding begins to show its differences to Muxing in both
+                                its layout and functionality.
+                            </p>
+                            <h2>Encoder, Profile, Level, Speed</h2>
+                            <p class="page-text">
+                                Let's start from left to right then move our way down. Starting from the left is the
+                                Encoder dropdown. It is here that codecs are chosen. A full list of file containers and
+                                their supported codecs can be found towards the end of the manual in the Reference
+                                section under <a data-goto="containers">Containers&nbsp;and&nbsp;Codecs</a>. <br>
+                                <br>
+                                The next two options, Profile and Level, are intertwined. Neither of the are quality
+                                settings (except in the case of editing intermediate codecs such as ProRes, DNxHR, and
+                                CineForm). Profile and Level are compatability settings for video/audio players and
+                                editors. Players and editors must be able to support the file's profile and level to use
+                                them. Profile dictates the compression features available as well as color bit depth (
+                                e.g. Main 10 supports 10 bit color depth, such as for HDR content). Lower profiles are
+                                more widely compatible across devices while higher profiles have less support. Again, a
+                                full list of Profile and Level compatibility can be found in the Reference section under
+                                <a data-goto="containers">Containers&nbsp;and&nbsp;Codecs</a>. If you're not sure what
+                                profile or level to choose, stick with the ones LlamaMXD detects from your source.<br>
+                                <br>
+                            </p>
+                            <h2>The CRF Slider</h2>
+                            <p class="page-text">
+                                The long slider you see is the CRF (Constant Rate Factor) Quality slider. This may be
+                                the most determining factor of your video's quality. CRF is a way to control quality
+                                with a numbered target that helps determine bitrate. NOTE: setting it to 22, for
+                                example, will not get you a consistent 22 Mbps; that would be CBR (Constant Bitrate),
+                                something slightly related, but completely different.<br>
+                                <br>
+                                CRF dynamically allocates bits based on the complexity of each scene in your file.
+                                This is why the same CRF will not produce the same range of file size for every file;
+                                each video is different. CRF for H.264/5 have a range of 0-51, with 0 being lossless and
+                                51 being practically unwatchable. Every +6 roughly halves the bitrate; every −6 roughly
+                                doubles it. H.264 and H.265 use different scales so don't use the same numbers for each;
+                                an H.265 27 roughly equals an H.264 22. Other codecs use different scales such as AV1
+                                using a 0-63 scale.<br>
+                                <br>
+                                This can get overwhelming pretty quick so a cheatsheet has been provided in Reference
+                                under <a data-goto="crf-cheatsheet">CRF&nbsp;Cheatsheet</a>.
+                            </p>
+                        </div>
+                        <div class="callout">
+                            <h2>Quality, Resolution, FPS, HDR&rarr;SDR</h2>
+                            <p class="page-text">The next option is Encoder Preset. This determines the compression
+                                efficiency of your file. A faster preset will export faster but a slower preset will
+                                get you a smaller file size. Choose what's best for you.<br>
+                                <br>
+                                The next couple of options are fairly self explanatory. Resolution and FPS set the
+                                resolution and framerate of your video. You can't encode above the source's resolution
+                                as a) there would be no point, and b) no upscaling is provided. The same is true for
+                                FPS; you can't go above the source's FPS. Resolution retains the source's aspect ratio.
+                                <br>
+                                <br>
+                                The HDRtoSDR switch to the right of resolution allows you to tonemap your compatible
+                                HDR (High Dynamic Range) video down to SDR (Standard Dynamic Range). SDR is normal video
+                                you see everywhere while HDR has a much wider range of brightness and color, but
+                                requires either an HDR display to view it naturally or a video player that will tonemap
+                                HDR for you. The HDR to SDR conversion only utilizes the BT.2390 color curve as it is
+                                the most accurate tonemapping of the original HDR source. HDR to SDR conversion doesn't
+                                retain HDR information so hold on to your original file if you want it. A preview of how
+                                the tonemapping will look is provided upon switching HDRtoSDR on.
+                            </p>
+                            <figure class="shot compare">
+                                <div class="cmp" style="--pos:50%">
+                                    <img class="cmp-a" src="images/encoding-video-hdr.png" width="848" height="477"
+                                        alt="An HDR clip shown without tone mapping" draggable="false">
+                                    <img class="cmp-b" src="images/encoding-video-sdr.png" width="848" height="477"
+                                        alt="The same clip tone-mapped to SDR" draggable="false">
+                                    <span class="cmp-tag cmp-tag-a">HDR</span>
+                                    <span class="cmp-tag cmp-tag-b">SDR</span>
+                                    <span class="cmp-handle"></span>
+                                </div>
+                                <figcaption>Drag the slider: HDR source (left) and the same frame tone-mapped to SDR
+                                    (right)</figcaption>
+                            </figure>
+                            <p class="page-text">
+                                On the right side above Browse are your undo/redo buttons and a Strip Video button,
+                                which will remove all video streams from the export, leaving it an audio only file.
+                                Strip Video, when pressed, becomes a Return Video button that will restore the video of
+                                the file when pressed again.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="encoding-audio">
+                    <header class="page-head"><span class="crumb">Encoding</span>
+                        <h1>Audio</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/encoding-audio.png" alt="Encoding's Audio sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>encoding-audio.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Picking and editing a track</h2>
+                            <p class="page-text"> As with Video, we will start from left to right. First, we have the
+                                Audio Track dropdown. From here you can choose the selected track to adjust the
+                                parameters of. The Choose Stream(s) button will allow you to select/deselect tracks,
+                                annd add/remove streams. The Passthru checkbox will determine if a track is passed
+                                through (copied and left untouched) or not. Options will be greyed out when Passthru is
+                                checked. Passthru is on by default for all tracks. DTS and Dolby TrueHD files are always
+                                passed through as they are lossless.<br>
+                                <br>
+                                On the second row is Audio Codec, which provides access to a multitude of different
+                                audio codecs (e.g. AC3, E-AC-3, mp3, etc.). From here, you can keep the codec the same
+                                or choose a compatible audio codec to convert the source audio track to.<br>
+                                <br>
+                                The next few options are self-explanatory; Bitrate sets the bitrate of the track,
+                                Channels sets the amount of audio channels for the track, and Sample Rate sets the
+                                sample rate of the track. Each track has its own set of parameters, these are not
+                                shared across all the audio streams.<br>
+                                <br>
+                                On the right side above Browse are your undo/redo buttons and a Strip Audio button,
+                                which will remove all audio streams from the export, leaving it a video only file.
+                                Strip Audio, when pressed, becomes a Return Audio button that will restore the audio of
+                                the file when pressed again.
+                            </p>
+                            <figure class="shot">
+                                <img src="images/encoding-audio-streams.png" width="896" height="540"
+                                    alt="Encoding: the Choose Stream(s) window for audio">
+                                <figcaption>The Choose Stream(s) window.</figcaption>
+                            </figure>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="encoding-subtitles">
+                    <header class="page-head"><span class="crumb">Encoding</span>
+                        <h1>Subtitles</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/encoding-subtitles.png" alt="Encoding's Subtitles sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>encoding-subtitles.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Managing Subtitles</h2>
+                            <p class="page-text">Similar to the Audio subtab, Subtitles has a dropdown for selecting a
+                                subtitle track and a Choose Stream(s) button from which you can add/remove streams and
+                                select/deselect streams.<br>
+                                <br>
+                                On the second row is a dropdown for setting the language of the track. This edits the
+                                metadata of the track which helps with media players that choose default audio tracks
+                                based on the user's program language, for the Forced option, and simply for being
+                                organized.<br>
+                                <br>
+                                We now have three checkboxes that are very significant; Default, Forced, and Burn In.
+                                Default, when checked, sets the track as the default track of the file. Again, this is
+                                good for media players. There can only be one default track per file. Forced will force
+                                subtitles onto the screen whenever a foreign language is being spoken (e.g. Elvish in
+                                the Lord of the Rings) even when subtitles are off. Burn In will encode the subtitles
+                                directly into the video frame.<br>
+                                <br>
+                                On the right side above Browse are your undo/redo buttons and a Strip Subtitles button,
+                                which will remove all subtitle streams from the export. Strip subtitles, when pressed,
+                                becomes a Return Subtitles button that will restore the video of the file when pressed
+                                again.
+                            </p>
+                            <figure class="shot">
+                                <img src="images/encoding-subtitles-streams.png" width="896" height="540"
+                                    alt="Encoding: the Choose Stream(s) window for subtitles">
+                                <figcaption>The Choose Stream(s) window.</figcaption>
+                            </figure>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="encoding-chapters">
+                    <header class="page-head"><span class="crumb">Encoding</span>
+                        <h1>Chapters</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/encoding-chapters.png" alt="Encoding's Chapters sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>encoding-chapters.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Managing Chapters</h2>
+                            <p class="page-text"> Chapters in Encoding operate the same way as in Muxing. There is a
+                                list on the left, from where chapters can be selected/deselected and rearranged.
+                                The Remove Chapter(s) button removes only selected chapters. There is also button for
+                                adding and editing chapters. Here, the timecode and name of a chapter can be edited and
+                                a new chapter can be added as well.<br>
+                                <br>
+                                Unticking or removing a chapter from the list won't include said chapters in the
+                                outputted file. Chapters within trimmed files are automatically retimed.
+                            </p>
+                            <figure class="shot">
+                                <img src="images/encoding-chapters-edit.png" width="896" height="540"
+                                    alt="Encoding: the Add/Edit Chapter(s) window">
+                                <figcaption>The Add/Edit Chapter(s) window.</figcaption>
+                            </figure>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page blank" data-id="filler-encoding"></section>
+
+                <!-- ============================================================ -->
+                <!--  DOWNLOADING - divider spread (left blank, right title)   -->
+                <!-- ============================================================ -->
+                <section class="page blank" data-id="blank-downloading"></section>
+
+                <section class="page divider" data-id="divider-downloading">
+                    <h1>Downloading</h1>
+                    <div class="divider-rule"></div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  DOWNLOADER                                                   -->
+                <!-- ============================================================ -->
+                <section class="page content" data-id="downloader">
+                    <header class="page-head"><span class="crumb">Downloader</span>
+                        <h1>Saving Media from the Web</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/downloader.png" alt="The Downloader tab">
+                        <p class="missing-note">Drop a screenshot named <code>downloader.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <p class="page-text">LlamaMXD's Downloader utilizes the YT-DLP project
+                                (<a href="https://github.com/yt-dlp/yt-dlp" target="_blank"
+                                    rel="noopener">https://github.com/yt-dlp/yt-dlp</a>) to provide you with an easy and
+                                accessible way to
+                                download video and audio from the web. A full list of YT-DLP's supported sites can be
+                                found here:
+                                (<a href="https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md"
+                                    target="_blank"
+                                    rel="noopener">https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md</a>).<br>
+                                <br>
+                                The list is extremely extensive but not all sites are guranteed to work. Your mileage
+                                may vary.
+                                <br>
+                            </p>
+                            <h2>Fetching a link</h2>
+                            <p class="page-text"> Fetching a link is very easy. Simply paste your compatible link with
+                                the Paste button, or paste it yourself into the link field, and hit Fetch. The link,
+                                if validated, will be brought into the LlamaMXD Downloader. A preview of the media will
+                                appear within the box.
+                        </div>
+                        <div class="callout">
+                            <h2>Mode, Codec, Resolution, Format</h2>
+                            <p class="page-text">There are many options to consider when downloading your media. Let's
+                                start with Modes, which are self-explanatory; Video + Audio downloads a file with both
+                                video and audio, Video Only will only download the video, and Audio Only will only
+                                download the audio.<br>
+                                <br>
+                                Video Codec provides options for available video codecs for the imported media. The same
+                                goes for Audio Codec. Best Available is chosen by default for both. Resolution sets the
+                                video resolution. Video Format chooses the output container for the video. In Audio
+                                Only, this becomes Audio Format. Audio Only also has the Bitrate option instead of
+                                Resolution.<br>
+                                <br>
+                                A file size estimate is given next to the Video/Audio Format button.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page blank" data-id="filler-downloading"></section>
+
+                <!-- ============================================================ -->
+                <!--  QUEUING - divider spread (left blank, right title)       -->
+                <!-- ============================================================ -->
+                <section class="page blank" data-id="blank-queuing"></section>
+
+                <section class="page divider" data-id="divider-queuing">
+                    <h1>Queuing</h1>
+                    <div class="divider-rule"></div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  QUEUE                                                        -->
+                <!-- ============================================================ -->
+                <section class="page content" data-id="queue">
+                    <header class="page-head"><span class="crumb">Queue</span>
+                        <h1>Running Jobs</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/queue.png" alt="The Queue tab">
+                        <p class="missing-note">Drop a screenshot named <code>queue.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <p class="page-text"> There are two ways to begin a media job in LlamaMXD; the
+                                Mux/Encode/Download buttons in the Muxing/Encoding/Downloader tabs respectively, and the
+                                Queue Job button. Mux/Encode/Download will immediately start a job in the Queue tab.
+                                Queue
+                                Job will set up a job and have it wait to start in Queue.
+                            </p>
+                        </div>
+                        <div class="callout">
+                            <h2>Start, Pause, Stop</h2>
+                            <p class="page-text"> To start a queue of jobs, press the Start Queue button. Jobs will
+                                proccess one at a time. The Start Queue button will become a Pause Queue button when
+                                pressed and will pause the queue when pressed again. The Start/Pause Queue button also
+                                has a dropdown that will decide the behavior of LlamaMXD upon the queue finishing. The
+                                behaviors include do nothing, shutdown, sleep, hibernate, lock system, shut down, and
+                                quit
+                                LlamaMXD. The default is do nothing. Stop queue will completely put a halt to job
+                                processing and delete the partial export (don't worry, the job will stay in the
+                                queue).
+                            </p>
+                        </div>
+                        <div class="callout">
+                            <h2>Sorting, searching, details</h2>
+                            <p class="page-text"> Jobs can be sorted A to Z, Z to A, Recent, and Oldest. Jobs can be
+                                rearranged by dragging them around. A job dragged to the top will become the current job
+                                even if will result in a "Sort By | Custom". Finished jobs can be cleared with Clear
+                                Completed and all jobs can be cleared with Clear All. If Clear All is pressed while
+                                unfinished jobs are in the queue, a confirmation box will appear. Jobs in the list can
+                                be searched with the search button (magnifying glass). Clicking a job will bring up the
+                                details pane for a full rundown of the job. Error messages can be found at the bottom of
+                                the details pane.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page blank" data-id="filler-queuing"></section>
+
+                <!-- ============================================================ -->
+                <!--  SETTINGS - divider spread (left blank, right title)      -->
+                <!-- ============================================================ -->
+                <section class="page blank" data-id="blank-settings"></section>
+
+                <section class="page divider" data-id="divider-settings">
+                    <h1>Settings</h1>
+                    <div class="divider-rule"></div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  SETTINGS                                                     -->
+                <!-- ============================================================ -->
+                <section class="page content" data-id="settings-appearance">
+                    <header class="page-head"><span class="crumb">Settings</span>
+                        <h1>Appearance</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/settings-appearance.png" alt="Settings' Appearance sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>settings-appearance.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Theme &amp; Appearance Mode</h2>
+                            <p class="page-text"> In the Appearance tab, you get to choose your LlamaMXD theme, your
+                                program's appearance mode, and the program's window mode.<br>
+                                <br>
+                                Swatches for your theme sit next to the theme name and indicate the primary and
+                                secondary colors for the selected theme. Themes can be hovered over in the list to
+                                instantly get a preview of how they will look. Appearance Mode changes your programs
+                                appearance between Light, Dark, and System (which will apply the appearance mode
+                                consistent with your system's appearance mode).
+                            </p>
+                        </div>
+                        <div class="callout">
+                            <h2>Window Mode</h2>
+                            <p class="page-text">Window Mode changes your program's
+                                window between Windowed, Borderless, and Fixed. Windowed is a typical program window,
+                                Borderless does away with the bar at the top of the program, and Fixed keeps the window
+                                at the default size and cannot be resized. Below is a checkbox to always keep the window
+                                fullscreen.<br>
+                                <br>
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="settings-output">
+                    <header class="page-head"><span class="crumb">Settings</span>
+                        <h1>Output</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/settings-output.png" alt="Settings' Output sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>settings-output.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Default Save Location</h2>
+                            <p class="page-text">Default Save Location sets the default output path for your exported
+                                files. A readout of your selected output drive's total and current space are printed
+                                below the output field. Seperate Save for Downloader, the checkbox beneath Default Save
+                                Location, allows you to have a separate output path for the LlamaMXD Downloader.
+                        </div>
+                        <div class="callout">
+                            <h2>File Naming</h2>
+                            <p class="page-text">Parameters for file naming can be entered here, with the default being
+                                {source}-{title}. The full list of file naming parameters, as well as naming examples,
+                                can be found in the Reference section under <a
+                                    data-goto="naming-parameters">Automatic&nbsp;Naming&nbsp;Parameters</a>.
+                                You can also enter text without braces and it will be taken as is (e.g.
+                                Export_{source}_final).
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="settings-performance">
+                    <header class="page-head"><span class="crumb">Settings</span>
+                        <h1>Performance</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/settings-performance.png" alt="Settings' Performance sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>settings-performance.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Hardware Acceleration &amp; Priority</h2>
+                            <p class="page-text">When Hardware Acceleration is turned on, the GPU's encoder is used for
+                                jobs rather than the software decoding with the CPU. Hardware Acceleration is on by
+                                default, when available, and is both a faster method and gentler on the CPU.<br>
+                                <br>
+                                Priority affects the CPU priority level of LlamaMXD. Lower is smoother and higher is
+                                faster; a higher priority takes resources away elsewhere on the PC if the CPU has
+                                to ration resources while a lower priority ensures the jobs are not eating up resources
+                                such as I/O priority and memory if they are scarce. On a CPU with enough wiggle room,
+                                for example, Below Normal and Normal work roughly the same. The differences come when
+                                resources must be rationed.<br>
+                                <br>
+                                You might have noticed by now if you've spent any time in the Settings tab that there is
+                                a read out of your system info in the top right of the window. This lists your CPU, GPU,
+                                and RAM.
+                            </p>
+                        </div>
+                        <div class="callout">
+                            <h2>When Done, Startup Tab and LlamaLog</h2>
+                            <p class="page-text">When Done determines the default behavior of LlamaMXD after a queue is
+                                done. These are do nothing, shut down, sleep, hibernate, lock system, log off, and quit
+                                LlamaMXD. Shut down, sleep, hibernate, and log off give you 30 seconds to cancel once
+                                the queue is done. These behaviors can be changed on a per-queue basis in the Queue tab
+                                through the Start Queue dropdown. A checkbox beneath determines if the app will reset
+                                back to Do Nothing on relaunch.<br>
+                                <br>
+                                Startup Tab determines which tab LlamaMXD will start on when it is launched. The choices
+                                are between the 5 tabs; Muxing, Encoding, Downloader, Queue, and Settings.<br>
+                                <br>
+                                LlamaLog is the session log of the program. The Normal version details events such as
+                                file imports, queue starts, if a job failed or finished, ffmpeg errors, downloads, as
+                                well as LlamaMXD warnings and errors. The Detailed version also adds debug messages,
+                                full ffmpeg info including its diagnostics, as well as more detailed Downloader info.
+                                Normal is the default and should be used the vast majority of the time. If you want to
+                                track down a problem, the Detailed LlamaLog will be more beneficial.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="settings-shortcuts">
+                    <header class="page-head"><span class="crumb">Settings</span>
+                        <h1>Shortcuts</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/settings-shortcuts.png" alt="Settings' Shortcuts sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>settings-shortcuts.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>Remapping a key</h2>
+                            <p class="page-text">Here you can look over, enable/disable, and rebind keyboard shortcuts
+                                for the program. To rebind a shortcut, click the field with the shortcut listed and
+                                press a new key. A full list of the default shortcuts can be found in Reference under
+                                Shortcuts.
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="settings-about">
+                    <header class="page-head"><span class="crumb">Settings</span>
+                        <h1>About</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="screenshot">
+                        <img src="images/settings-about.png" alt="Settings' About sub-tab">
+                        <p class="missing-note">Drop a screenshot named <code>settings-about.png</code> into
+                            <code>manual/images/</code>
+                        </p>
+                    </div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>About the Llama</h2>
+                            <p class="page-text"> Here you'll find the version number of the program, the link to
+                                the Github, a link to the Github issue tracker, and the license for the program,
+                                which is licensed under GNU General Public License v3 (or later).<br>
+                                <br>
+                                Below the license box is a button that brings up the full license text, a button for
+                                the licenses of third-party programs and assets used in LlamaMXD, and a button that
+                                opens up this manual.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page blank" data-id="filler-settings"></section>
+
+                <!-- ============================================================ -->
+                <!--  REFERENCE - divider spread (left blank, right title)     -->
+                <!-- ============================================================ -->
+                <section class="page blank" data-id="blank-reference"></section>
+
+                <section class="page divider" data-id="divider-reference">
+                    <h1>Reference</h1>
+                    <div class="divider-rule"></div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  REFERENCE                                                    -->
+                <!-- ============================================================ -->
+                <section class="page reference" data-id="keyboard-shortcuts">
+                    <header class="page-head"><span class="crumb">Reference</span>
+                        <h1>Keyboard Shortcuts</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Action</th>
+                                <th>Key</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Scroll preview left / right <span class="sub">Muxing / Encoding</span></td>
+                                <td class="key"><kbd>&larr;</kbd><kbd>&rarr;</kbd></td>
+                            </tr>
+                            <tr>
+                                <td>Expand preview <span class="sub">Muxing / Encoding</span></td>
+                                <td class="key"><kbd>F</kbd></td>
+                            </tr>
+                            <tr>
+                                <td>Exit expanded preview</td>
+                                <td class="key"><kbd>Esc</kbd></td>
+                            </tr>
+                            <tr>
+                                <td>Start / Pause the queue <span class="sub">Queue tab</span></td>
+                                <td class="key"><kbd>Space</kbd></td>
+                            </tr>
+                            <tr>
+                                <td>Previous / next tab</td>
+                                <td class="key"><kbd>&uarr;</kbd><kbd>&darr;</kbd></td>
+                            </tr>
+                            <tr>
+                                <td>Select next control</td>
+                                <td class="key"><kbd>Tab</kbd></td>
+                            </tr>
+                            <tr>
+                                <td>Press the selected control</td>
+                                <td class="key"><kbd>Enter</kbd></td>
+                            </tr>
+                            <tr>
+                                <td>Move through an open dropdown</td>
+                                <td class="key"><kbd>&uarr;</kbd><kbd>&darr;</kbd></td>
+                            </tr>
+                            <tr>
+                                <td>Toggle fullscreen</td>
+                                <td class="key"><kbd>F11</kbd></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p class="reference-note">Every one of these can be given a different key, or turned off,
+                        from Settings &rsaquo; Shortcuts.</p>
+                </section>
+
+                <section class="page reference" data-id="containers">
+                    <header class="page-head"><span class="crumb">Reference</span>
+                        <h1>Containers &amp; Codecs</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Container</th>
+                                <th>Video codecs</th>
+                                <th>Audio codecs</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="container-name">.mp4</td>
+                                <td>H.264, H.265, MPEG-4, MPEG-2, AV1</td>
+                                <td>AAC, AC3, E-AC-3, MP3, ALAC</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">.mkv</td>
+                                <td>H.264, H.265, MPEG-4, MPEG-2, VP8, VP9, AV1, ProRes, DNxHR, FFV1, CineForm</td>
+                                <td>AAC, AC3, E-AC-3, MP3, FLAC, Opus, Vorbis, ALAC, PCM</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">.mov</td>
+                                <td>H.264, H.265, MPEG-4, ProRes, DNxHR, CineForm</td>
+                                <td>AAC, AC3, E-AC-3, ALAC, PCM</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">.webm</td>
+                                <td>VP8, VP9, AV1</td>
+                                <td>Opus, Vorbis</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <table class="other-formats">
+                        <thead>
+                            <tr>
+                                <th>Other formats</th>
+                                <th>File types</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Video you can import</td>
+                                <td>.mp4, .mkv, .mov, .webm, .avi, .m4v, .mxf, .ts, .vob</td>
+                            </tr>
+                            <tr>
+                                <td>Audio you can import</td>
+                                <td>.mp3, .m4a, .aac, .flac, .wav, .opus, .ogg, .wma, .aiff</td>
+                            </tr>
+                            <tr>
+                                <td>Downloader video outputs</td>
+                                <td>.mp4, .mkv, .webm</td>
+                            </tr>
+                            <tr>
+                                <td>Downloader audio-only outputs</td>
+                                <td>.mp3, .m4a, .opus, .flac, .wav</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <table class="other-formats">
+                        <thead>
+                            <tr>
+                                <th>Codec</th>
+                                <th>Profiles (most &rarr; least compatible)</th>
+                                <th>Levels (smallest &rarr; largest)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="container-name">H.264</td>
+                                <td>High, Main, Baseline, High 10</td>
+                                <td>3.0, 3.1, 4.0, 4.1, 4.2, 5.0, 5.1, 5.2</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">H.265</td>
+                                <td>Main, Main 10, Main 12</td>
+                                <td>3.1, 4.0, 4.1, 5.0, 5.1, 5.2, 6.0</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">AV1</td>
+                                <td>Main, High, Professional</td>
+                                <td>4.0, 5.0, 5.1, 6.0</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">VP9</td>
+                                <td>0, 1, 2, 3</td>
+                                <td>&mdash;</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">MPEG-4</td>
+                                <td>Simple, Advanced Simple</td>
+                                <td>&mdash;</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">MPEG-2</td>
+                                <td>Main, High, Simple</td>
+                                <td>Low, Main, High-1440, High</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p class="reference-note">Muxing and Encoding export to the first table's containers; only
+                        combinations a container can hold are offered. Picture subtitles (PGS, VobSub, DVB) need
+                        .mkv. DTS and Dolby TrueHD pass through untouched. ProRes, DNxHR and CineForm profiles are
+                        quality tiers, lowest to highest. A higher level never looks better; it only allows
+                        bigger or faster video.</p>
+                </section>
+
+                <section class="page reference" data-id="crf-cheatsheet">
+                    <header class="page-head"><span class="crumb">Reference</span>
+                        <h1>CRF Cheatsheet</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>H.264</th>
+                                <th>H.265</th>
+                                <th>What you get</th>
+                                <th>Good for</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="container-name">0</td>
+                                <td class="container-name">0</td>
+                                <td>Lossless</td>
+                                <td>Intermediate steps, archive masters</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">16&ndash;18</td>
+                                <td class="container-name">21&ndash;23</td>
+                                <td>Visually lossless</td>
+                                <td>High-quality archiving</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">20&ndash;23</td>
+                                <td class="container-name">25&ndash;28</td>
+                                <td>High quality (the default range)</td>
+                                <td>Everyday encoding and publishing</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">24&ndash;27</td>
+                                <td class="container-name">29&ndash;32</td>
+                                <td>Slightly noticeable loss, clearly smaller files</td>
+                                <td>Cloud backup, casual sharing</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">28&ndash;35</td>
+                                <td class="container-name">33&ndash;40</td>
+                                <td>Visible compression artifacts</td>
+                                <td>Draft previews</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">36+</td>
+                                <td class="container-name">41+</td>
+                                <td>Mushy</td>
+                                <td>Rarely a reasonable choice</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <table class="other-formats">
+                        <thead>
+                            <tr>
+                                <th>AV1</th>
+                                <th>What you get</th>
+                                <th>Good for</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="container-name">18&ndash;24</td>
+                                <td>Archival quality</td>
+                                <td>Archiving critical sources</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">22&ndash;28</td>
+                                <td>Visually transparent</td>
+                                <td>Film and other high-quality encodes</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">25&ndash;32</td>
+                                <td>Balanced</td>
+                                <td>Blu-ray rips, personal libraries (default is 29)</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">28&ndash;35</td>
+                                <td>Efficient compression</td>
+                                <td>Storage and streaming</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">32&ndash;40</td>
+                                <td>Low bitrate</td>
+                                <td>Small streaming files; keep under 38 for busy footage</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p class="reference-note">CRF is a quality target, not a bitrate: lower numbers look sharper and
+                        make bigger files. Every +6 roughly halves the file size. H.265 numbers run about 5 higher than
+                        H.264 for the same look. AV1 has its own scale: one
+                        guide puts AV1 at 30 close to H.265 at 21 and H.264 at 16, so use the AV1 table rather than
+                        converting. All of these are starting points, so check the preview. The slider starts at 22 for
+                        H.264,
+                        27 for H.265 and 29 for AV1. For more information on CRF, check out these sites:
+                        <a href="https://ffmpegtool.com/en/blog/crf-explained" target="_blank"
+                            rel="noopener">https://ffmpegtool.com/en/blog/crf-explained</a><br>
+                        <a href="https://ffmpeg.party/guides/av1/" target="_blank"
+                            rel="noopener">https://ffmpeg.party/guides/av1/</a>
+                    </p>
+                </section>
+
+                <section class="page reference" data-id="crf-targets">
+                    <header class="page-head"><span class="crumb">Reference</span>
+                        <h1>CRF Targets &amp; Tips</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Scenario</th>
+                                <th>H.264</th>
+                                <th>H.265</th>
+                                <th>AV1</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Phone or camera footage for storage</td>
+                                <td class="container-name">18&ndash;20</td>
+                                <td class="container-name">23&ndash;25</td>
+                                <td class="container-name">24&ndash;28</td>
+                            </tr>
+                            <tr>
+                                <td>YouTube or Instagram upload <span class="sub">they re-encode, so upload the cleanest
+                                        file</span></td>
+                                <td class="container-name">18&ndash;21</td>
+                                <td class="container-name">23&ndash;26</td>
+                                <td class="container-name">22&ndash;28</td>
+                            </tr>
+                            <tr>
+                                <td>Email or messaging <span class="sub">size first, if still watchable</span></td>
+                                <td class="container-name">23&ndash;26</td>
+                                <td class="container-name">28&ndash;31</td>
+                                <td class="container-name">33&ndash;38</td>
+                            </tr>
+                            <tr>
+                                <td>Rescuing old footage for the archive</td>
+                                <td class="container-name">16&ndash;18</td>
+                                <td class="container-name">21&ndash;23</td>
+                                <td class="container-name">18&ndash;24</td>
+                            </tr>
+                            <tr>
+                                <td>Screen recordings and tutorials <span class="sub">text shows loss easily</span></td>
+                                <td class="container-name">16&ndash;20</td>
+                                <td class="container-name">21&ndash;25</td>
+                                <td class="container-name">18&ndash;24</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <table class="other-formats">
+                        <thead>
+                            <tr>
+                                <th>Tip</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Quality and speed are separate: CRF sets how good it looks, Encoder Preset sets
+                                    how long it takes and how small the file ends up at that quality.</td>
+                            </tr>
+                            <tr>
+                                <td>Find the CRF you like on a fast preset, then export with a slower one.</td>
+                            </tr>
+                            <tr>
+                                <td>Below about 18 there is little visible gain and below 16 is a lot of wasted space.
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>If the output is bigger than the source, raise the CRF or lower the Resolution.</td>
+                            </tr>
+                            <tr>
+                                <td>Encode only once from the original where you can; each generation of video will look
+                                    worse.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p class="reference-note">H.264 and H.265 numbers are for those two codecs. AV1 uses its own, higher
+                        scale, so don't reuse H.264 numbers for it. Other codecs use different scales; treat all of
+                        these as a starting point.</p>
+                </section>
+
+                <section class="page reference" data-id="naming-parameters">
+                    <header class="page-head"><span class="crumb">Reference</span>
+                        <h1>Automatic Naming Parameters</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Parameter</th>
+                                <th>What it becomes</th>
+                                <th>Example</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="container-name">{source}</td>
+                                <td>The input file's name (the site, for a download)</td>
+                                <td>MyVideo</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">{title}</td>
+                                <td>The title stored in the file (the video's title, for a download)</td>
+                                <td>MyVideo 2000</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">{chapters}</td>
+                                <td>The number of chapters</td>
+                                <td>12ch</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">{date}</td>
+                                <td>The day you queued the job</td>
+                                <td>2026-10-25</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">{time}</td>
+                                <td>The time you queued the job</td>
+                                <td>20-41-07</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">{creation-time}</td>
+                                <td>When the media was made (the upload date, for a download)</td>
+                                <td>2025-03-14_09-30-00</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">{quality}</td>
+                                <td>Encoding: the CRF or quality value. Downloads: the Resolution (or Bitrate).
+                                    Empty for Muxing</td>
+                                <td>crf22</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">{bitrate}</td>
+                                <td>The source's overall bitrate</td>
+                                <td>8000kbps</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p class="reference-note">{source}, {title} and {chapters} fill in as soon as you pick a file.
+                        The rest are filled in when you queue the job, so each job gets its own date and time. The
+                        examples assume a file called MyVideo with the title "MyVideo 2000", 12 chapters, made on
+                        2025-03-14 at 09:30:00, encoded at CRF 22 and queued on 2026-10-25 at 20:41:07.</p>
+                </section>
+
+                <section class="page reference" data-id="naming-examples">
+                    <header class="page-head"><span class="crumb">Reference</span>
+                        <h1>Naming Examples</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Format</th>
+                                <th>File name</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="container-name">{source}-{title}</td>
+                                <td>MyVideo-MyVideo 2000</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">{source}_{quality}</td>
+                                <td>MyVideo_crf22</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">{title} ({chapters})</td>
+                                <td>MyVideo 2000 (12ch)</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">{source}_{date}_{time}</td>
+                                <td>MyVideo_2026-10-25_20-41-07</td>
+                            </tr>
+                            <tr>
+                                <td class="container-name">{source}-{bitrate}</td>
+                                <td>MyVideo-8000kbps</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p class="reference-note">Anything you type around a parameter is kept as it is. If a parameter has
+                        nothing to fill in, the separator beside it is dropped too, so a file with no title named with
+                        {source}-{title} is just MyVideo. A name can't contain any of &lt; &gt; : " / \ | ? *, and a
+                        misspelt parameter is flagged in red under the box in Settings.</p>
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  TROUBLESHOOTING & FAQ - divider spread (left blank, right title) -->
+                <!-- ============================================================ -->
+                <section class="page blank" data-id="blank-troubleshooting"></section>
+
+                <section class="page divider" data-id="divider-troubleshooting">
+                    <h1>Troubleshooting &amp; FAQ</h1>
+                    <div class="divider-rule"></div>
+                </section>
+
+                <section class="page content" data-id="troubleshooting">
+                    <header class="page-head"><span class="crumb">Troubleshooting &amp; FAQ</span>
+                        <h1>Troubleshooting</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>A job failed. Now what?</h2>
+                            <p class="page-text">A failed job turns red in the Queue and the rest of the queue keeps
+                                going. Click the row to open its details: the Error line at the bottom says what went
+                                wrong. The most common causes are a full drive, an export file that is open in another
+                                program (a player or editor can lock it), or a source file that was moved or deleted
+                                after the job was queued. Fix that and press the retry arrow beside the row's &#10005;
+                                to run it again, ahead of everything else. If the message isn't enough, switch LlamaLog
+                                to Detailed in Settings &rsaquo; Performance, run the job again, and press Open Log
+                                Folder: each failed job leaves a file there with the full ffmpeg or yt-dlp output.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>My export won't play properly</h2>
+                            <p class="page-text">LlamaMXD only offers codecs a container can actually hold, so a file
+                                that won't play is almost always a limit of the player. HEVC (H.265) and AV1 need a
+                                fairly recent device or software, WebM is poorly supported outside browsers, and Opus,
+                                Vorbis and FLAC audio can be silent on older TVs and phones. For the widest
+                                compatibility export an MP4 with H.264 video and AAC audio. An HDR video that looks grey
+                                and washed out in a player without HDR support needs HDR to SDR switched on in Encoding.
+                            </p>
+                        </div>
+                        <div class="callout">
+                            <h2>The Downloader won't fetch or download</h2>
+                            <p class="page-text">A link to a playlist is refused; paste a single video's link instead.
+                                If you edit the link after fetching, press Fetch again. The Downloader won't queue a
+                                link that differs from the one it fetched. A private, age-restricted or region-locked
+                                video fails with the site's own reason, shown in the job's Error line. If a banner says
+                                Deno wasn't found, or the Downloader can't find yt-dlp or ffmpeg at all, a file
+                                belonging to LlamaMXD is missing, so reinstall it. Sites change often and downloads that
+                                worked can stop working; a newer LlamaMXD release carries an updated yt-dlp.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>The HDR to SDR switch is greyed out</h2>
+                            <p class="page-text">It is only available while the selected file is HDR. If you picked an
+                                HDR file and it is still off, hover over the switch, the tooltip gives the reason; tone
+                                mapping needs your graphics card's driver to support Vulkan, so the usual fix is
+                                updating the graphics driver. For a moment after importing an HDR file the switch says
+                                it is checking whether this PC can tone-map. Wait a second and it will enable.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>&ldquo;Couldn't Read This File&rdquo; or &ldquo;No Preview Available&rdquo;</h2>
+                            <p class="page-text">They mean different things. Couldn't Read This File means the file is
+                                damaged or in a format ffmpeg can't open, and it is not selected. Try remuxing it with
+                                another tool, or re-downloading it. No Preview Available means the file opened fine but
+                                no preview pictures could be made, and the file is still selected and usable: Muxing,
+                                Encoding and the queue work as normal.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>An option changed on its own, or is missing</h2>
+                            <p class="page-text">The Output Format decides everything else, so changing it can change
+                                your other choices. A toast says what moved and why, for example &ldquo;Encoder switched
+                                to VP9 &mdash; .webm can't carry H.265&rdquo;. Adding a picture subtitle (PGS, VobSub or
+                                DVB) forces .mkv, since no other container holds them. Resolution and FPS lists stop at
+                                the source's own, because LlamaMXD never upscales. Dolby TrueHD and DTS tracks can't be
+                                re-encoded and always pass through as they are.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>My Mux doesn't start exactly where I set it</h2>
+                            <p class="page-text">Muxing copies streams without re-encoding, and a copied video can only
+                                be cut on a keyframe, so a mux starts at the keyframe at or just before your Start Time.
+                                The Overview page's rundown marks this with &ldquo;keyframe&rdquo;. For a cut to the
+                                exact frame, use Encoding, which re-encodes the video.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>The queue won't start, or is slow</h2>
+                            <p class="page-text">Jobs only run once you press Start Queue; Queue Job just adds them, and
+                                a paused queue stays paused until you press the button again. Only one job runs at a
+                                time. If a job is slower than expected, check Settings &rsaquo; Performance. A Priority
+                                Level of Below Normal or Low deliberately gives way to other programs, and Hardware
+                                Acceleration (GPU) speeds up H.264, H.265 and AV1 encodes if you have a dedicated
+                                graphics card.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="page content" data-id="faq">
+                    <header class="page-head"><span class="crumb">Troubleshooting &amp; FAQ</span>
+                        <h1>FAQ</h1>
+                    </header>
+                    <div class="head-rule"></div>
+                    <div class="callouts">
+                        <div class="callout">
+                            <h2>What's the difference between Muxing and Encoding?</h2>
+                            <p class="page-text">Muxing never re-encodes. It changes the container and picks which
+                                streams to keep, so it is fast and the picture and sound are untouched. Encoding
+                                re-encodes the video and audio, which is slower and always costs a little quality, but
+                                it can change the codec, size, frame rate and quality. If you only want a different file
+                                type, or to drop a track, use Muxing.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>Does LlamaMXD change my original file?</h2>
+                            <p class="page-text">No. An export is written to a temporary <code>.partial</code> file and
+                                moved to its real name only when the job succeeds. A stopped or failed job deletes just
+                                that temporary file, and a file you already had at the export path is never touched
+                                unless you agreed to replace it.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>What kinds of files can I open?</h2>
+                            <p class="page-text">Anything ffmpeg can read; nearly every video and audio format,
+                                audio-only files included. A file that can't be read at all is rejected with a message
+                                when you pick it. The <a data-goto="containers">Containers&nbsp;&amp;&nbsp;Codecs</a>
+                                page lists what each export format can
+                                hold.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>Does it work offline or need an account?</h2>
+                            <p class="page-text">Muxing and Encoding work fully offline. Only the Downloader uses the
+                                internet to fetch a link's details and download it. LlamaMXD has no account and no
+                                telemetry. Its log stays on your PC and web addresses in it are saved without their
+                                query part.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>Why is Encoding slow, and how can I speed it up?</h2>
+                            <p class="page-text">Re-encoding is heavy work, and the slowest settings are the
+                                best-compressing ones. To speed it up, choose a faster Encoder Preset, turn on Hardware
+                                Acceleration (GPU) in Settings if you have a dedicated graphics card, lower the
+                                Resolution or FPS, or use Muxing when you don't need a re-encode. Priority Level in
+                                Settings &rsaquo; Performance decides how much the PC favors other programs over the
+                                job.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>Can I download a playlist?</h2>
+                            <p class="page-text">Not yet. The Downloader takes one video's link at a time and refuses a
+                                playlist link with a message. Open the video you want and paste its own link.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>Can I add subtitles, audio or chapters from another file?</h2>
+                            <p class="page-text">Yes. Use Add/Edit Subs, Add/Edit Video, Add/Edit Audio, or Choose
+                                Stream(s) in Encoding to browse another file and pick its streams. The added track is
+                                lined up against the main file's timeline, so it has to be timed to match; there is no
+                                offset control. Chapters are edited by hand in the Chapters page rather than imported.
+                            </p>
+                        </div>
+                        <div class="callout">
+                            <h2>What happens if I close LlamaMXD during a job?</h2>
+                            <p class="page-text">It asks first. While the question is open the queue is paused, so
+                                choosing No carries on exactly where it left off. Choosing Yes stops the running job,
+                                deletes its partial export, and closes the app. Jobs still waiting in the queue are not
+                                kept for next time.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>Is LlamaMXD free?</h2>
+                            <p class="page-text">Yes. It is free software under the GNU General Public License, version
+                                3 or later, so you can use, share and modify it. Settings &rsaquo; About has the notice
+                                and buttons for the full license and the licenses of everything bundled with it,
+                                including ffmpeg and yt-dlp. The LlamaMXD name, logo, and art are the exception.</p>
+                        </div>
+                        <div class="callout">
+                            <h2>Where do I report a bug or ask for a feature?</h2>
+                            <p class="page-text">On the Issue Tracker linked in Settings &rsaquo; About (the Github's
+                                issue tracker is linked). For a bug, attach the failed job's log file from Settings
+                                &rsaquo; Performance &rsaquo; LlamaLog &rsaquo; Open Log Folder, with the log set to
+                                Detailed before you reproduce the problem.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!--  BACK COVER (shown alone, left-hand side, hard/rigid)         -->
+                <!-- ============================================================ -->
+                <section class="page back-cover" data-id="credits">
+                    <img class="llama-small" src="../assets/LlamaMXD-Logo.svg" alt="Pak the Llama">
+                    <div class="back-text">
+                        <p>LlamaMXD™ is free software, licensed under the GNU General Public License v3
+                            (or later). You're free to redistribute and modify it under that license's
+                            terms &mdash; see <code>LICENSE.txt</code> and the <code>licenses/</code> folder
+                            next to the app for full details and every third-party notice.</p>
+                        <p class="fine-print">LlamaMXD™ and Pak the Llama™ are trademarks of Yezan Smadi.
+                            Logo and brand assets Copyright © 2026 Yezan Smadi, all rights reserved.</p>
+                        <p class="fine-print"><a href="https://github.com/YezanSmadi/LlamaMXD" target="_blank"
+                                rel="noopener">github.com/YezanSmadi/LlamaMXD</a></p>
+                    </div>
+                </section>
+
+            </div><!-- /#book -->
+
+        </div><!-- /.book-shell -->
+
+        <nav class="book-nav">
+            <button id="prev-btn" class="nav-btn" title="Previous page (&larr;)"
+                aria-label="Previous page">&#10094;</button>
+            <button id="next-btn" class="nav-btn" title="Next page (&rarr;)" aria-label="Next page">&#10095;</button>
+        </nav>
+
+        <div class="book-footer">
+            <button id="toc-btn" type="button">Table of Contents</button>
+            <span id="page-counter"></span>
+        </div>
+
+        <div id="hint-toast" class="hint-toast">Drag a corner to turn the page, or use &larr; &rarr;</div>
+    </div><!-- /.stage -->
+
+    <script src="vendor/flipbook-core.js"></script>
+    <script src="manual.js"></script>
+</body>
+
+</html>
