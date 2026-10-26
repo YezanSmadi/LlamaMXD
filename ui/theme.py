@@ -283,7 +283,7 @@ def stylesheet():
     QPushButton[role="danger"]:disabled {{ color: {c('stop_disabled_text')}; }}
     QPushButton[role="ghost"] {{ background: transparent; color: {c('text')}; }}
     QPushButton[role="ghost"]:hover {{ background: {c('row_hover')}; }}
-    QPushButton[role="compact"] {{ min-height: {px(22)}px; }}
+    QPushButton[role="compact"], QPushButton[compact="true"] {{ min-height: {px(22)}px; }}
     QPushButton[role="stepper"] {{
         min-height: {px(13)}px; max-height: {px(13)}px; min-width: {px(30)}px; max-width: {px(30)}px;
         padding: 0; border-radius: {px(3)}px; font-size: {font_px(8)}px;

@@ -451,7 +451,9 @@ class SettingsTab(QWidget):
         version_l.addWidget(version, 0, Qt.AlignVCenter)
         scale.spacer(version_l, 6)
         # The compact (22px) button keeps this row no taller than its 26px caption: the page has no height to spare.
-        self.update_btn = button(LABELS[0], role="compact", width=button_width_for(LABELS), height=22)
+        # role="action" is the primary colour (secondary in Terminal); `compact` is the 22px height.
+        self.update_btn = button(LABELS[0], role="action", width=button_width_for(LABELS), height=22)
+        self.update_btn.setProperty("compact", True)
         tip(self.update_btn, "Looks on GitHub for a newer LlamaMXD and for newer versions of ffmpeg, yt-dlp and "
                              "Deno. Nothing is downloaded until you say yes.")
         self.update_flow = UpdateFlow(self.app, self.update_btn)
