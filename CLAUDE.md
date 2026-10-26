@@ -150,6 +150,7 @@ change here), and even `os._exit` runs the DLLs' unload code where it happens.
   Then the spinner's frame release (below, under LoadingSpinner), with its waits cut to 1s / 3s: big
   frames gone after the grace once the window shrank, a same-size set kept until the idle time, and
   the first 13 always present at the size needed.
+- `check_userdata` — where settings.json / presets.json resolve (source vs a simulated frozen build), the data folder made on demand, nothing read from or written beside the exe, and a save that reads back.
 - `check_orphans` — the real app (`main.main`, sandboxed, offscreen) as a child process imports the HDR
   fixture and turns HDR->SDR on, then closes its window, and a second run is killed outright
   (`Popen.kill`, like a crash or End Task) — each at the moment tone-map ffmpegs are running (a run
@@ -192,6 +193,7 @@ core/window_style.py      Win32 window styles Qt leaves stale on a live window: 
 core/startup_tab.py       Settings' "Startup Tab" names: the four main tabs + the Encoding default
 core/keybinds.py          the remappable shortcuts: action table, default keys, contexts, conflict rule (no Qt)
 core/theme.py             brand palettes, contrast helpers, settings.json read/write
+core/userdata.py          where settings.json / presets.json live: the repo from source, %LOCALAPPDATA%\LlamaMXD once frozen
 core/about.py             Settings' About page: repo / issue-tracker URLs, the GPL short notice, paths to LICENSE.txt and licenses/
 core/llamalog.py          LlamaLog: the rotating log file, crash hooks, URL scrubbing, per-job output ring buffer
 core/probe.py             ffprobe: probe_media, a file's real length, the HDR colour-tag check
@@ -1229,7 +1231,7 @@ Everything with custom geometry (dropdown button, checkbox, switch, segmented
 button, time field, sub-tab bar, drop box, sidebar, tab pipe, carousel, queue
 rows, toasts) paints itself.
 
-**Persistence.** `settings.json` (repo root, gitignored): `theme`,
+**Persistence.** `settings.json` (repo root from source, gitignored; `%LOCALAPPDATA%\LlamaMXD` in a frozen build, with `presets.json` — `core/userdata.py`, and nothing is ever read from or written beside the exe): `theme`,
 `appearance_mode`, `default_save_location`, `gpu_enabled`,
 `downloader_separate_save`, `downloader_save_location`, `naming_template`,
 `priority_level`, `when_done`, `when_done_reset`, `window_mode`,

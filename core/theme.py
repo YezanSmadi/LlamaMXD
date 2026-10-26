@@ -5,11 +5,10 @@
 import json
 import os
 
-from core import keybinds, llamalog, naming, power, priority, startup_tab, window_mode
+from core import keybinds, llamalog, naming, power, priority, startup_tab, userdata, window_mode
 
-# settings.json lives next to main.py, whatever the launch directory.
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_SETTINGS_PATH = os.path.join(_REPO_ROOT, "settings.json")
+# settings.json: beside main.py from source, the user's data folder once installed.
+_SETTINGS_PATH = userdata.user_file("settings.json")
 
 DEFAULT_THEME_NAME = "Lemon"
 
