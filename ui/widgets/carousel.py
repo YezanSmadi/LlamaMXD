@@ -497,6 +497,8 @@ class ThumbnailCarousel(QWidget):
         self.update()
 
     def _fade_to(self, target):
+        if self._fade.state() == QVariantAnimation.Running and self._fade.endValue() == float(target):
+            return
         self._fade.stop()
         self._fade.setStartValue(self._arrow_alpha)
         self._fade.setEndValue(float(target))
@@ -546,6 +548,7 @@ class ThumbnailCarousel(QWidget):
         target = self._hovered_control(pos) if pos is not None else None
         for name in self._hover:
             self._hover_to(name, 1.0 if name == target else 0.0)
+        self._sync_overlay(pos)
         if pos is not None:
             # The expanded preview is a hand only over its controls: one that just went (the last
             # frame's chevron) must not leave the hand behind under a still pointer.
@@ -607,9 +610,16 @@ class ThumbnailCarousel(QWidget):
     #  Input
     # ------------------------------------------------------------------ #
     def enterEvent(self, e):
+        self._sync_overlay(QPointF(self.mapFromGlobal(QCursor.pos())))
+
+    def _sync_overlay(self, pos):
+        """Show the chevrons, dots and badges only while the pointer is on the picture itself."""
         # >= 1 frame: the expand icon is worth showing on a single-frame preview.
-        if self._frames and not self._wave_mode():
+        on = pos is not None and bool(self._frames) and not self._wave_mode() and self._within_frame(pos)
+        if on:
             self._fade_to(1.0)
+        elif self._arrow_alpha > 0.0 or self._fade.state() == QVariantAnimation.Running:
+            self._fade_to(0.0)
 
     def leaveEvent(self, e):
         self._fade_to(0.0)
@@ -667,18 +677,20 @@ class ThumbnailCarousel(QWidget):
                 # A click on the letterbox bars dismisses the expanded view, like the scrim.
                 self.force_collapse()
                 return
+            if not self._wave_mode() and not self._within_frame(e.position()):
+                return
             self._press(e.position(), repeat=False)
 
     def mouseDoubleClickEvent(self, e):
         if e.button() == Qt.LeftButton:
             if self._over_expand_icon(e.position()):
                 return
-            if self._expanded and not self._within_frame(e.position()):
+            if not self._wave_mode() and not self._within_frame(e.position()):
                 return
             self._press(e.position(), repeat=True)
 
     def mouseMoveEvent(self, e):
-        self._sync_hover(e.position())
+        self._sync_hover(e.position())   # also the overlay's fade
         if self._over_info_badge(e.position()):
             # Already up: re-showing it on every move made the popup flicker.
             self._tooltip_grace.stop()
@@ -702,10 +714,10 @@ class ThumbnailCarousel(QWidget):
         return not rect.isEmpty() and rect.contains(pos)
 
     def _hover_cursor(self, pos):
-        """A pointing hand everywhere on the small preview; on the expanded one an arrow except
+        """A pointing hand over the small preview's picture; on the expanded one an arrow except
         over the info badge, chevrons and shrink icon (and never outside the picture)."""
         if not self._expanded:
-            return Qt.PointingHandCursor
+            return Qt.PointingHandCursor if self._wave_mode() or self._within_frame(pos) else Qt.ArrowCursor
         if not self._within_frame(pos):
             return Qt.ArrowCursor
         if self._over_info_badge(pos) or self._over_expand_icon(pos) or self._over_chevron(pos):

@@ -235,6 +235,14 @@ def _ffmetadata(chapters):
     return "\n".join(lines) + "\n"
 
 
+def _default_flag(output_kwargs, letter, position, entry):
+    """Set or clear the Default flag of output stream `letter:position` when the entry says which.
+    `+` / `-` change only that flag: a bare `-disposition` would also wipe the others (cover art's
+    attached_pic, ...)."""
+    if "default" in entry:
+        output_kwargs[f"disposition:{letter}:{position}"] = "+default" if entry["default"] else "-default"
+
+
 def build_mux_command(job, output_path=None):
     """Muxing job -> Stream: one `-map` per checked track (the primary or an added file), all
     `-c copy`. Writes to `output_path` if given, else the job's own."""
@@ -244,14 +252,16 @@ def build_mux_command(job, output_path=None):
 
     streams = []
     if not job.strip_video:
-        for entry in job.video_tracks:
+        for i, entry in enumerate(job.video_tracks):
             src = _mux_input(entry, primary, input_kwargs, external_cache)
             streams.append(src[f"v:{entry['index']}"])
+            _default_flag(output_kwargs, "v", i, entry)
 
     if not job.strip_audio:
-        for entry in job.audio_tracks:
+        for i, entry in enumerate(job.audio_tracks):
             src = _mux_input(entry, primary, input_kwargs, external_cache)
             streams.append(src[f"a:{entry['index']}"])
+            _default_flag(output_kwargs, "a", i, entry)
 
     # Tags travel with a copy by default: a `-map_metadata` here would switch that off for
     # every stream.

@@ -553,12 +553,50 @@ class MainWindow(QWidget):
         for _ in range(3):
             QApplication.sendPostedEvents(None, QEvent.LayoutRequest)
 
+    _TITLE_BAND = 34       # reference px of the window's top that acts as a title bar
+    _title_press = None    # (timestamp, position) of the last press in that band
+    _title_drag = None     # where a press in that band began, until it becomes a move
+
+    def mouseMoveEvent(self, e):
+        """A press in the title band turns into a native window move once the pointer travels."""
+        if self._title_drag is not None:
+            if not e.buttons() & Qt.LeftButton:
+                self._title_drag = None
+            elif (e.position().toPoint() - self._title_drag).manhattanLength() > QApplication.startDragDistance():
+                self._title_drag = None
+                handle = self.windowHandle()
+                if handle is not None:
+                    handle.startSystemMove()
+                return
+        super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        self._title_drag = None
+        super().mouseReleaseEvent(e)
+
     def mousePressEvent(self, e):
         """Borderless: a press on the sidebar or the margin around the tab frame (anything a
-        child didn't take) drags the window. The tab frame itself doesn't."""
+        child didn't take) drags the window, and a double press in the top band maximises or
+        restores it. The tab frame itself doesn't."""
         if (e.button() == Qt.LeftButton and self.window_mode == window_mode.BORDERLESS
-                and not self.isFullScreen()
+                and not self._wants_fullscreen()
                 and not self.tab_frame.geometry().contains(e.position().toPoint())):
+            pos = e.position().toPoint()
+            if pos.y() < scale.px(self._TITLE_BAND):
+                last, self._title_press = self._title_press, (e.timestamp(), pos)
+                # The first press starts a native move, which swallows the second click's
+                # double-click event, so the pair is recognised here from the presses.
+                if (last is not None
+                        and e.timestamp() - last[0] <= QApplication.doubleClickInterval()
+                        and (pos - last[1]).manhattanLength() <= QApplication.startDragDistance()):
+                    self._title_press = None
+                    self._title_drag = None
+                    self._toggle_maximized()
+                    return
+                # The move starts on the first real movement (mouseMoveEvent), not now: a native
+                # move begun on the press takes the mouse and the second click never arrives.
+                self._title_drag = pos
+                return
             handle = self.windowHandle()
             if handle is not None:
                 handle.startSystemMove()

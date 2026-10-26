@@ -55,3 +55,12 @@ def licenses_dir():
     """The folder of third-party license texts (`licenses/`), or None."""
     path = _find("licenses")
     return path if path and os.path.isdir(path) else None
+
+
+def manual_path():
+    """The bundled user manual (manual/manual.html), or None."""
+    folder = _find("manual")
+    if not folder:
+        return None
+    path = os.path.join(folder, "manual.html")
+    return path if os.path.isfile(path) else None

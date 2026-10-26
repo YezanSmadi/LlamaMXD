@@ -41,6 +41,18 @@ Fonts
   fonts.txt           Roboto 2.137                    Apache 2.0
                       Oswald 4.103                    SIL OFL 1.1
 
+Manual (manual/vendor/)
+-----------------------------------------------------------
+  flipbook.txt        @gullabs/flipbook-core 3.2.1    MPL-2.0      https://github.com/gul-labs/flipbook
+                      (the user manual's page-turning effect, as manual/vendor/flipbook-core.js --
+                      repackaged from the package's own build, its one export statement swapped for
+                      a window.Flipbook global so the manual keeps opening straight from disk with
+                      no server; see flipbook.txt for exactly what changed. A maintained fork of
+                      StPageFlip; flipbook.txt carries both the MPL-2.0 text and StPageFlip's
+                      preserved upstream MIT notice. MPL-2.0 is file-level copyleft and places no
+                      license requirement on LlamaMXD's own code -- see flipbook.txt for what it
+                      does require.)
+
 Artwork (assets/)
 -----------------------------------------------------------
 The full texts of CC BY 4.0 and the Lottie Simple License are in artwork.txt (CC BY 4.0 is also at
@@ -57,6 +69,7 @@ Icons sourced from SVG Repo (https://www.svgrepo.com):
   select-multiple.svg     CC BY 4.0 (Author: krystonschwarze)
   expand.svg              CC BY 4.0 (Author: zwicon)
   info.svg                SIL OFL 1.1 (Author: kudakurage)
+  retry.svg               CC BY 4.0 (Author: Dazzle UI)
 
 Modified Icons (changed by Yezan Smadi from the icon named, and licensed as it is):
   redo.svg                MIT License (Author: halfmage, derived from undo.svg)

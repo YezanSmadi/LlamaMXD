@@ -14,44 +14,37 @@ import os
 import uuid
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from core import formats
-from core.probe import probe_media
 from ui import scale
 from ui.scale import px
 from ui.tabs.media_tab import MediaTab, hms, hrow, set_line_text
 from ui.widgets.controls import button, button_width_for, IconButton
-from ui.widgets.dialogs import pick_external_streams, show_message
-from ui.widgets.edit_dialogs import edit_subtitles
+from ui.widgets.dialogs import show_message
+from ui.widgets.edit_dialogs import edit_streams, edit_subtitles
 from ui.widgets.tooltip import tip
 from ui.widgets.tracklist import TrackListBox
-from ui.widgets.tracklist import describe_stream as _describe_stream
 from ui.widgets.tracklist import row_label as _row_label
-from ui.workers import run_async
 
-_TRACK_TIP = ("Check as many streams as the output should carry — muxing never "
-              "re-encodes them. \"Add Stream(s)\" pulls one in from another file. "
-              "Drag a track up or down to reorder it.")
-_REMOVE_TIP = ("Removes every checked track from the list, the source file's own included — "
-               "the tracks below move up to fill the gap. Undo brings them back.")
+_TRACK_TIP = ("Check as many streams as the output should carry. Muxing never "
+              "re-encodes them. \"Add/Edit %s\" pulls one in from another file or sets which "
+              "track is the default. Drag a track up or down to reorder it.")
+_ADD_EDIT_TIP = ("Adds a %s track from another file, or sets which track is the Default. "
+                 "Opens a window with a dropdown of the tracks.")
+_REMOVE_TIP = ("Removes every checked track from the list, including ones from the source file. "
+               "Any tracks below move up to fill the gap. Undo brings them back.")
 _UNDO_TIP = "Undoes the last add, remove, edit, reorder, or change of which tracks are checked."
 _REDO_TIP = "Redoes what Undo just took back."
-_SELECT_ALL_TIP = "Checks every track in the box — include all of them in the output."
-_DESELECT_ALL_TIP = "Unchecks every track in the box, without removing any of them."
-_ADD_EDIT_SUBS_TIP = ("Adds a subtitle track from another file, or changes an existing one's "
-                      "language and Default / Forced flags: opens a window with a dropdown of the tracks.")
-_SUBS_TRACK_TIP = ("Check as many subtitle tracks as the output should carry — muxing never re-encodes them. "
+_SELECT_ALL_TIP = "Checks every track in the box; includes all of them in the output."
+_DESELECT_ALL_TIP = "Unchecks every track in the box without completely removing any of them."
+_ADD_EDIT_SUBS_TIP = ("Adds a subtitle track from another file or changes an existing one's "
+                      "language and Default / Forced flags. Opens a window with a dropdown of the tracks.")
+_SUBS_TRACK_TIP = ("Check as many subtitle tracks as the output should carry. "
                    "\"Add/Edit Subs\" adds one from another file. Drag a track up or down to reorder it.")
-_SUBS_REMOVE_TIP = ("Removes every checked subtitle track from the list, the source file's own included — "
-                    "the tracks below move up to fill the gap. Undo brings them back.")
+_SUBS_REMOVE_TIP = ("Removes every checked subtitle track from the list, including ones from the source file. "
+                    "Any tracks below move up to fill the gap. Undo brings them back.")
 _KINDS = ("video", "audio", "subtitle")
-
-_VIDEO_BROWSE_FILTER = "Video Files (*.mp4 *.mkv *.avi *.mov *.webm *.mxf *.ts *.vob)"
-# Built from the app's audio-extension list, so it can't drift from what counts as audio-only.
-_AUDIO_BROWSE_FILTER = "Audio Files (%s)" % " ".join(
-    "*" + ext for ext in sorted(formats.AUDIO_EXTENSIONS))
-
 
 _HISTORY_LIMIT = 50
 
@@ -63,12 +56,14 @@ def _offered(kind, stream):
 
 
 def _entry(kind, stream, source, file=None, name=None, start_time=None):
-    """A track-list entry for `stream`. A subtitle's language and flags start as the stream's
-    and are edited on the entry; `start_time` is its file's own (see ffmpeg_build)."""
+    """A track-list entry for `stream`. Its Default flag starts as the stream's and is edited on the
+    entry (a subtitle's language and Forced flag too); `start_time` is its file's own (see
+    ffmpeg_build)."""
     entry = {"id": f"src:{stream['index']}" if source == "primary" else f"ext:{uuid.uuid4().hex[:8]}",
-             "source": source, "file": file, "index": stream["index"], "stream": stream, "name": name}
+             "source": source, "file": file, "index": stream["index"], "stream": stream, "name": name,
+             "default": bool(stream.get("default"))}
     if kind == "subtitle":
-        entry.update(language=formats.language_code(stream.get("language")), default=bool(stream.get("default")),
+        entry.update(language=formats.language_code(stream.get("language")),
                      forced=bool(stream.get("forced")), start_time=start_time if source == "external" else None)
     return entry
 
@@ -79,8 +74,8 @@ class MuxingTab(MediaTab):
     OUTPUT_SUFFIX = "_muxed"
     VERB_ING = "Muxing"
     DIRECT_LABEL = "Direct Mux"
-    PRESET_NOTE = ("Name this preset. It stores the container and the strip flags — "
-                   "not the trim, the track picks, or the file paths.")
+    PRESET_NOTE = ("Name this preset. It stores the container and every codec / "
+                   "quality setting. Does not include the trim nor the file paths.")
 
     def _init_state(self):
         # Each box's tracks in order, per kind: the source's streams (from the probe), then any
@@ -88,7 +83,7 @@ class MuxingTab(MediaTab):
         # a snapshot is a copy. Entry: {"id": "src:0" | "ext:ab12cd34", "source": "primary" |
         # "external", "file", "index" (0-based among that file's streams of the kind),
         # "stream" (the probe's description), "name" (an external file's name)}.
-        # A subtitle entry also holds its (editable, in Add/Edit Subs) "language", "default" and "forced".
+        # Every entry holds its (editable, in Add/Edit) "default"; a subtitle also its "language" and "forced".
         self._tracks = {kind: [] for kind in _KINDS}
         # Undo / redo, per kind: stacks of {"entries": [...], "checked": {ids}}.
         self._history = {kind: {"undo": [], "redo": []} for kind in _KINDS}
@@ -107,16 +102,17 @@ class MuxingTab(MediaTab):
     #  Panels
     # ------------------------------------------------------------------ #
     def _track_panel(self, kind, min_width=340):
-        """The track box beside its column of buttons: Select / Deselect All, Add [/ Edit for
-        Subtitles] Stream(s), Remove Stream(s), then Undo / Redo. The box takes Overview's exact
+        """The track box beside its column of buttons: Select / Deselect All, Add/Edit, Remove, then
+        Undo / Redo. The box takes Overview's exact
         height so this page is never taller than Overview (a taller page would shrink this tab's
         preview), which the column's four rows only just fit, hence the compact icon rows and
         4px gaps."""
         subs = kind == "subtitle"
-        add_text = "Add/Edit Subs" if subs else "Add Stream(s)"
+        add_text = {"video": "Add/Edit Video", "audio": "Add/Edit Audio", "subtitle": "Add/Edit Subs"}[kind]
         remove_text = "Remove Subs" if subs else "Remove Stream(s)"
         # One width on every page, so the buttons don't change size between sub-tabs.
-        btn_width = button_width_for(["Add Stream(s)", "Remove Stream(s)", "Add/Edit Subs", "Remove Subs"])
+        btn_width = button_width_for(["Add/Edit Video", "Add/Edit Audio", "Remove Stream(s)", "Add/Edit Subs",
+                                      "Remove Subs"])
         select_spacing = 4      # the column's vertical gap, also between each icon pair
         select_width = (btn_width - select_spacing) // 2
         row, rl = hrow(spacing=10, align_bottom=True)
@@ -141,7 +137,7 @@ class MuxingTab(MediaTab):
                 top.setFixedHeight(max(px(22), box.height() - 2 * px(28) - px(24) - 3 * px(4)))
         box.changed.connect(lambda: self._track_toggled(kind))
         box.reordered.connect(lambda ids: self._reorder_tracks(kind, ids))
-        tip(box, _SUBS_TRACK_TIP if subs else _TRACK_TIP)
+        tip(box, _SUBS_TRACK_TIP if subs else _TRACK_TIP % kind.capitalize())
         rl.addWidget(box, 1)
 
         top, tl = hrow(spacing=select_spacing, align_bottom=False)
@@ -164,8 +160,8 @@ class MuxingTab(MediaTab):
             tl.addWidget(btn)
         sl.addWidget(top)
         add_btn = button(add_text, width=btn_width)
-        add_btn.clicked.connect((lambda: self._add_edit_subtitles()) if subs else (lambda: self._add_stream(kind)))
-        tip(add_btn, _ADD_EDIT_SUBS_TIP if subs else "")
+        add_btn.clicked.connect((lambda: self._add_edit_subtitles()) if subs else (lambda: self._add_edit_streams(kind)))
+        tip(add_btn, _ADD_EDIT_SUBS_TIP if subs else _ADD_EDIT_TIP % kind)
         sl.addWidget(add_btn)
         remove_btn = button(remove_text, role="danger", width=btn_width)
         remove_btn.clicked.connect(lambda: self._remove_streams(kind))
@@ -217,35 +213,18 @@ class MuxingTab(MediaTab):
             self._edit_tracks("subtitle", edited)
 
     # ------------------------------------------------------------------ #
-    #  Add / remove / reorder (Video and Audio; Subtitles adds through the popup above)
-    def _add_stream(self, kind):
-        if kind == "video":
-            title, types = "Select Video Source", _VIDEO_BROWSE_FILTER + ";;All Files (*.*)"
-        else:
-            title, types = "Select Audio Source", _AUDIO_BROWSE_FILTER
-        path, _ = QFileDialog.getOpenFileName(self, title, self._output_directory(), types)
-        if not path:
-            return
-        run_async(probe_media, lambda info: self._stream_probed(kind, path, info), path)
+    #  Add/Edit Video and Audio: adds a track from another file, or sets which one is the default
+    # ------------------------------------------------------------------ #
+    def _add_edit_streams(self, kind):
+        """Open Add/Edit Video or Audio. OK's edits (including any tracks it added) are one undo step."""
+        entries = self._tracks[kind]
+        edited = edit_streams(self.app, kind, entries, self._output_directory())
+        if edited is not None and edited != entries:
+            self._edit_tracks(kind, edited)
 
-    def _stream_probed(self, kind, path, info):
-        streams = [s for s in (info or {}).get(f"{kind}_streams") or [] if _offered(kind, s)]
-        if not streams:
-            show_message(
-                self.app, "No Matching Streams",
-                f"“{os.path.basename(path)}” has no {kind} streams to add.",
-            )
-            return
-        if len(streams) > 1:
-            chosen = pick_external_streams(self.app, kind, streams, lambda s: _describe_stream(kind, s))
-            if chosen is None:
-                return
-            streams = [s for s in streams if s["index"] in chosen]
-        name = os.path.basename(path.replace("\\", "/"))
-        added = [_entry(kind, stream, "external", path, name, (info or {}).get("start_time"))
-                 for stream in streams]
-        self._edit_tracks(kind, self._tracks[kind] + added)
-
+    # ------------------------------------------------------------------ #
+    #  Remove / reorder
+    # ------------------------------------------------------------------ #
     def _remove_streams(self, kind):
         """Remove every checked row, the source's own tracks included (the file is untouched).
         The rows below move up and renumber; undo puts them back."""
@@ -348,19 +327,19 @@ class MuxingTab(MediaTab):
                 for number, entry in enumerate(self._tracks[kind], start=1)]
 
     def _track_args(self, kind):
-        """Every checked row as a `-map` entry, in the box's (= the output's) order; a subtitle
-        also carries its codec, language, flags and its file's start."""
+        """Every checked row as a `-map` entry with its Default flag, in the box's (= the output's)
+        order; a subtitle also carries its codec, language, Forced flag and its file's start."""
         entries = {entry["id"]: entry for entry in self._tracks[kind]}
         args = []
         for row_id in self._boxes[kind].checked_ids():
             entry = entries.get(row_id)
             if not entry:
                 continue
-            arg = {"source": entry["source"], "file": entry["file"], "index": entry["index"]}
+            arg = {"source": entry["source"], "file": entry["file"], "index": entry["index"],
+                   "default": bool(entry.get("default"))}
             if kind == "subtitle":
                 arg.update(codec_name=entry["stream"].get("codec_name"), language=entry.get("language"),
-                           default=bool(entry.get("default")), forced=bool(entry.get("forced")),
-                           start_time=entry.get("start_time"))
+                           forced=bool(entry.get("forced")), start_time=entry.get("start_time"))
             args.append(arg)
         return args
 
@@ -382,9 +361,6 @@ class MuxingTab(MediaTab):
           5. chapters (the shared page)
           6. the Overview rundown"""
         info = self.app.media.info
-        video_absent = info.get("has_video") is False
-        audio_absent = info.get("has_audio") is False
-
         current_path = self.app.media.current_file_path
         reset = current_path != self._tracks_file
         if info is not self._tracks_info:
@@ -395,18 +371,33 @@ class MuxingTab(MediaTab):
             self._checked_baseline[kind] = set(box.checked_ids())
         self._tracks_file = current_path
 
-        # Nothing checked of a kind the source has (or once had, via a still-checked external
-        # track) means no ___ in the output — however that came to be.
-        video_stripped = video_absent or (info.get("has_video") is True and not self.video_box.checked_ids())
-        audio_stripped = audio_absent or (info.get("has_audio") is True and not self.audio_box.checked_ids())
+        # Nothing checked of a kind the source has, or that was added from another file, means no
+        # ___ in the output — however that came to be. A source without the kind starts there, and
+        # stops being stripped once a track of it is added and ticked.
+        def stripped(kind):
+            known = info.get(f"has_{kind}") is not None or bool(self._tracks[kind])
+            return known and not self._boxes[kind].checked_ids()
+
+        video_stripped = stripped("video")
+        audio_stripped = stripped("audio")
         subtitle_stripped = bool(self._tracks["subtitle"]) and not self.subtitle_box.checked_ids()
         self.sub_tab_bar.set_marked("Video", video_stripped)
         self.sub_tab_bar.set_marked("Audio", audio_stripped)
         self.sub_tab_bar.set_marked("Subtitles", subtitle_stripped)
         self.carousel.set_strip_state(video_stripped, audio_stripped)
 
-        video_codec = None if video_stripped else info.get("video")
-        audio_codec = None if audio_stripped else info.get("audio")
+        def codec_of(kind):
+            """The source's codec of this kind; for a source without one, the first ticked track's."""
+            if stripped(kind):
+                return None
+            if info.get(f"has_{kind}") is not False:
+                return info.get(kind)
+            first = next((entry for entry in self._tracks[kind]
+                          if entry["id"] in set(self._boxes[kind].checked_ids())), None)
+            return first["stream"].get("codec") if first else None
+
+        video_codec = codec_of("video")
+        audio_codec = codec_of("audio")
         subtitle_ok = formats.containers_for_subtitles(self._ticked_subtitle_codecs())
         self._retarget_container([c for c in formats.containers_for(video_codec, audio_codec) if c in subtitle_ok]
                                  or subtitle_ok)
@@ -414,10 +405,11 @@ class MuxingTab(MediaTab):
         add_btns = {"video": self.video_add_btn, "audio": self.audio_add_btn,
                    "subtitle": self.subtitle_add_edit_btn}
         has_file = bool(current_path)
-        # "open": the source has this kind — subtitles have no such source flag, so a file being
-        # selected at all stands in for it. "has rows": something to select, check or remove.
-        for kind, absent in (("video", video_absent), ("audio", audio_absent), ("subtitle", not has_file)):
-            open_ = not absent
+        # Add/Edit and Undo/Redo are live for every kind once a file is selected — a source without
+        # audio (or video) is exactly when a track from another file is wanted. "has rows":
+        # something to select, check or remove.
+        for kind in ("video", "audio", "subtitle"):
+            open_ = has_file
             has_rows = open_ and bool(self._tracks[kind])
             history = self._history[kind]
             self._boxes[kind].setEnabled(has_rows)
@@ -456,7 +448,7 @@ class MuxingTab(MediaTab):
         def stream(kind, box):
             if no_file:
                 return "— no streams selected —", "stop"
-            if info.get(f"has_{kind}") is False:
+            if info.get(f"has_{kind}") is False and not self._tracks[kind]:
                 return f"— no {kind} stream —", "stop"
             if info.get(f"has_{kind}") is True and not self._tracks[kind]:
                 return "— removed —", "stop"

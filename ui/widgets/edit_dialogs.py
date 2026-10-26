@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""The Add/Edit popups: a subtitle track's language and flags (plus adding another track), and a
-chapter's time and name (plus adding a new one). Each works on a copy of what it is given and only
+"""The Add/Edit popups: a video or audio track's Default flag and a subtitle track's language and
+flags (each plus adding another track), and a chapter's time and name (plus adding a new one). Each works on a copy of what it is given and only
 OK/the dialog's own Add hands a result back, so Cancel leaves everything as it was. Both show an
 em-dash and grey their fields while the list is empty — the popup is still how you add the first
 one."""
@@ -16,7 +16,8 @@ from core import formats
 from core.probe import probe_media
 from ui import scale
 from ui import theme as T
-from ui.tips import DEFAULT_TIP, FORCED_TIP, LANGUAGE_TIP, SUBTITLE_TRACK_TIP
+from ui.tips import (DEFAULT_TIP, FORCED_TIP, LANGUAGE_TIP, STREAM_DEFAULT_TIP, STREAM_TRACK_TIP,
+                     SUBTITLE_TRACK_TIP)
 from ui.widgets.controls import button, button_width_for, field_label, labeled, set_enabled
 from ui.widgets.dialogs import BROWSE_FILTERS, MessageDialog, pick_external_streams, show_message
 from ui.widgets.dropdown import NO_OPTION, Dropdown
@@ -232,6 +233,127 @@ def edit_subtitles(parent, entries, start_dir=""):
     """Open Add/Edit Subs on the subtitle `entries`, Add browsing from `start_dir`; the edited
     copy of the list, or None if cancelled."""
     dialog = EditSubtitlesDialog(parent, entries, start_dir)
+    dialog.show_modal()
+    return dialog.result_entries
+
+
+# --------------------------------------------------------------------------- #
+#  Add/Edit Video / Audio
+# --------------------------------------------------------------------------- #
+class EditStreamsDialog(MessageDialog):
+    """Muxing's Add/Edit Video and Add/Edit Audio: a Track dropdown (— while there are none), that
+    track's Default flag, and a leading Browse button that adds the stream(s) of another file,
+    selecting the newest. Edits a copy of the entries (Default clears every other track's: one
+    default per kind); `result_entries` is that copy after OK, None after Cancel."""
+
+    def __init__(self, parent, kind, entries, start_dir=""):
+        self._kind = kind
+        self._entries = [dict(entry) for entry in entries]
+        self._start_dir = start_dir       # where Browse's file dialog opens (the tab's output folder)
+        self._finished = False            # a Browse probe landing after OK/Cancel is dropped
+        self._current = self._entries[0]["id"] if self._entries else None
+        self._track_ids = {}              # the Track dropdown's label -> entry id
+        self.result_entries = None
+        super().__init__(parent, f"Add/Edit {kind.capitalize()}", "Choose a track to edit, or add another.",
+                         buttons=("OK", "Cancel"))
+        self._load()
+
+    def _build_leading_buttons(self, row):
+        self.add_btn = button("Browse", width=button_width_for(["Browse"]))
+        self.add_btn.clicked.connect(self._add_stream)
+        row.addWidget(self.add_btn)
+
+    def _build_extra(self, body):
+        scale.spacer(body, 12)
+        top, tl = _row()
+        self.track_menu = Dropdown([NO_OPTION], width=Dropdown.width_for(["Track 99 (Dolby TrueHD)"]))
+        self.track_menu.picked.connect(self._on_track_pick)
+        tip(self.track_menu, STREAM_TRACK_TIP)
+        box, self.track_label = labeled("Track:", self.track_menu)
+        tl.addWidget(box)
+        self.default_check = CheckBox("Default")
+        self.default_check.clicked.connect(self._set_default)
+        tip(self.default_check, STREAM_DEFAULT_TIP)
+        # Level with the dropdown, not its caption: the box's bottom edge, lifted to the dropdown's centre.
+        holder = QWidget()
+        hl = QVBoxLayout(holder)
+        scale.margins(hl, 0, 0, 0, 2)
+        hl.addWidget(self.default_check)
+        tl.addWidget(holder, 0, Qt.AlignBottom)
+        body.addWidget(top)
+
+    def _entry(self):
+        return next((entry for entry in self._entries if entry["id"] == self._current), None)
+
+    def _refresh_track_menu(self):
+        self._track_ids = {
+            f"Track {n} ({entry['stream'].get('codec') or entry['stream'].get('codec_name') or '?'})": entry["id"]
+            for n, entry in enumerate(self._entries, start=1)}
+        self.track_menu.set_values(list(self._track_ids) or [NO_OPTION])
+        label = next((label for label, entry_id in self._track_ids.items() if entry_id == self._current), NO_OPTION)
+        self.track_menu.set(label)
+
+    def _load(self):
+        """Show the chosen track's flag, or grey everything out with none to show."""
+        self._refresh_track_menu()
+        entry = self._entry()
+        self.default_check.setChecked(bool(entry and entry.get("default")))
+        set_enabled(self.track_menu, self.track_label, entry is not None)
+        self.default_check.setEnabled(entry is not None)
+
+    def _on_track_pick(self, label):
+        self._current = self._track_ids.get(label, self._current)
+        self._load()
+
+    def _set_default(self):
+        entry = self._entry()
+        if entry is None:
+            return
+        entry["default"] = self.default_check.isChecked()
+        if entry["default"]:
+            for other in self._entries:
+                if other is not entry:
+                    other["default"] = False
+
+    def _add_stream(self):
+        path, _ = QFileDialog.getOpenFileName(self, f"Select {self._kind.capitalize()} Source", self._start_dir,
+                                              BROWSE_FILTERS[self._kind])
+        if path:
+            run_async(probe_media, lambda info: self._stream_probed(path, info), path)
+
+    def _stream_probed(self, path, info):
+        """The browsed-in file's probe landed: append its stream(s) and select the newest."""
+        if self._finished:
+            return
+        kind = self._kind
+        streams = (info or {}).get(f"{kind}_streams") or []
+        if not streams:
+            show_message(self, "No Matching Streams", f"\u201c{os.path.basename(path)}\u201d has no {kind} streams to add.")
+            return
+        if len(streams) > 1:
+            chosen = pick_external_streams(self, kind, streams, lambda s: describe_stream(kind, s))
+            if chosen is None:
+                return
+            streams = [s for s in streams if s["index"] in chosen]
+        name = os.path.basename(path.replace("\\", "/"))
+        added = [{"id": f"ext:{uuid.uuid4().hex[:8]}", "source": "external", "file": path, "index": stream["index"],
+                  "stream": stream, "name": name, "default": bool(stream.get("default"))}
+                 for stream in streams]
+        self._entries += added
+        self._current = added[0]["id"]
+        self._load()
+
+    def _dismiss(self, choice):
+        if choice == "OK":
+            self.result_entries = self._entries
+        self._finished = True
+        super()._dismiss(choice)
+
+
+def edit_streams(parent, kind, entries, start_dir=""):
+    """Open Add/Edit Video or Audio on the `kind` `entries`, Browse starting at `start_dir`; the
+    edited copy of the list, or None if cancelled."""
+    dialog = EditStreamsDialog(parent, kind, entries, start_dir)
     dialog.show_modal()
     return dialog.result_entries
 

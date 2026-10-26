@@ -140,7 +140,35 @@ def run():
     ok &= report("a job that can't run fails with a reason",
                  [] if failed and failed[-1][1] else [f"events: {events}"])
     ok &= report("subtitles and chapters: tracks, cues, flags, trims, burn-in, chapters", subtitle_problems())
+    ok &= report("Default flags on video and audio tracks", default_flag_problems())
     return ok
+
+
+def _defaults(path):
+    """Each video / audio stream's Default flag, in output order, as "video:1" / "audio:0"."""
+    out = subprocess.run([tool_path("ffprobe"), "-v", "error", "-show_entries",
+                          "stream=codec_type:stream_disposition=default", "-of", "csv=p=0", path],
+                         capture_output=True, text=True).stdout.split()
+    return out
+
+
+def default_flag_problems():
+    """A real Mux with explicit Default flags: what a player reads back. In .mp4 the muxer makes the
+    first track of a kind the default when none is, .mkv leaves it alone."""
+    problems = []
+    base = cases()[0][2]
+    video = {"source": "primary", "file": None, "index": 0}
+    for ext, wants in ((".mkv", {"flip": ["video,1", "audio,0", "audio,1"], "none": ["video,1", "audio,0", "audio,0"]}),
+                       (".mp4", {"flip": ["video,1", "audio,0", "audio,1"], "none": ["video,1", "audio,1", "audio,0"]})):
+        for label, flags in (("flip", (False, True)), ("none", (False, False))):
+            settings = dict(base, output_format=ext, video_tracks=[dict(video, default=True)], audio_tracks=[
+                {"source": "primary", "file": None, "index": 0, "default": flags[0]},
+                {"source": "primary", "file": None, "index": 1, "default": flags[1]}])
+            events, final = _run(settings, "Muxing", f"default_{label}{ext}")
+            got = _defaults(final)
+            if got != wants[label]:
+                problems.append(f"{ext} {label}: {got}, expected {wants[label]}")
+    return problems
 
 
 # --------------------------------------------------------------------------- #

@@ -162,6 +162,11 @@ MUX_CASES = [
     mux("chapters_source_with_external", source_has_chapters=True, audio_tracks=[
         {"source": "external", "file": "C:/in/dub.m4a", "index": 0}]),
     mux("chapters_edited", chapters=CHAPTERS, source_duration=600),
+    mux("default_flags", output_path="C:/out/clip.mkv", output_format=".mkv",
+        video_tracks=[{"source": "primary", "file": None, "index": 0, "default": True}],
+        audio_tracks=[{"source": "primary", "file": None, "index": 0, "default": False},
+                      {"source": "primary", "file": None, "index": 1, "default": True},
+                      {"source": "external", "file": "C:/in/dub.m4a", "index": 0, "default": False}]),
 ]
 
 

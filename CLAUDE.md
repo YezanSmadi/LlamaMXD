@@ -76,7 +76,7 @@ attaching the FFmpeg source archive to each GitHub release is the robust way (a 
 **`licenses/README.txt`'s Artwork section records every asset's origin now**: the SVG Repo icons —
 `audio-mute.svg` (Public Domain), `close-window.svg`/`maximize-window.svg` (CC Attribution, Konstantin
 Filatov), `select-multiple.svg` (CC Attribution, krystonschwarze), `expand.svg` (CC Attribution,
-zwicon), `minimize-window.svg` (Apache 2.0, Richard9394), `undo.svg` (MIT, halfmage), `info.svg` (SIL Open Font License 1.1, kudakurage) —
+zwicon), `minimize-window.svg` (Apache 2.0, Richard9394), `undo.svg` (MIT, halfmage), `info.svg` (SIL Open Font License 1.1, kudakurage), `retry.svg` (CC Attribution, Dazzle UI; drawn mirrored, the file is unmodified) —
 plus `redo.svg`/`deselect-multiple.svg`/`shrink.svg` as Yezan Smadi's own edits of
 `undo.svg`/`select-multiple.svg`/`expand.svg` (not separate SVG Repo downloads, so each inherits the
 license *and* credited author of the one it was made from: MIT, halfmage; CC Attribution, krystonschwarze; CC
@@ -1149,8 +1149,10 @@ never changes a theme's colours. Hover shades are auto-derived by `_darken()`
   (`"white"`: its `#3dbcc1` teal derives black everywhere, but the title and llama
   read better in white) and so does **Terminal** (`"secondary"` — the keyword form,
   resolved in `get_theme`, so it tracks the theme's secondary, `#44fe2c` green). The
-  sidebar footer, the Borderless window controls and everything else on a primary
-  fill keep using `primary_text`.
+  sidebar's copyright / version line has its own key, `sidebar_footer_text` (the
+  `sidebarFooter` role), `primary_text` unless a theme names one — **Terminal** does
+  (`"secondary"`, so it is green too) and so does **Funk** (`"white"`, like its title). The Borderless window
+  controls and everything else on a primary fill keep using `primary_text`.
 - `subtab_active` / `subtab_inactive` (+ `_hover` / `_text` each) — the fills the
   `SubTabBar` uses for the selected tab and the others: primary / secondary, or
   **swapped for a theme with `swap_subtabs`** — **Terminal**, whose black primary
@@ -1200,12 +1202,12 @@ property:
   (STOP_RED), `ghost` (transparent), `stepper` (the TimeSpinner arrows), and two
   that **a theme can swap**: `action` (the do-it-now / affirmative buttons — Mux /
   Encode / Download, Start / Pause Queue, Settings' Save, the Downloader's Fetch and a
-  dialog's first button) and `queue` (their quieter partners — Queue Task, the
+  dialog's first button) and `queue` (their quieter partners — Queue Job, the
   Downloader's Paste and a dialog's decline buttons, No / Cancel). They are primary and
   secondary respectively — pixel-identical to the old `primary` / default — except
   in a theme with `swap_action_buttons` (**Terminal**: black primary, so its
   Mux / Encode / Download / Start Queue / Save / Fetch / a dialog's Yes-OK are the green
-  and Queue Task / Paste / No-Cancel are the black).
+  and Queue Job / Paste / No-Cancel are the black).
   `ui/theme.py`'s `_rebuild_colors` aliases `action_btn*` / `queue_btn*` (fill,
   `_hover`, `_pressed`, `_text`, `_disabled_text`) from whichever colour the theme
   assigns. Any *other* primary-role button is deliberately not swapped.
@@ -1410,7 +1412,7 @@ They share one frame, `MediaTab`, top to bottom:
   worked examples (`TrackListBox`'s fixed height on Muxing, the
   Video-panel layout on Encoding) below.
 - **Save row** (entry + Browse) and the **actions**: **Clear** (small, `role="danger"`, left
-  edge) then `Queue Task` secondary, `Mux` / `Encode` primary — queue *and* start; by role
+  edge) then `Queue Job` secondary, `Mux` / `Encode` primary — queue *and* start; by role
   `queue` / `action`, which a theme can swap — see Theming. **Clear** drops the selected file
   and everything decoded from it (`app.media.clear_selection()` — `MediaSession._clear_state()`,
   shared with a rejected import's own teardown, minus that dialog) without touching the file on
@@ -1452,7 +1454,7 @@ Asking at queue time is what lets the queue run without ever prompting.
 
 **Queue hand-off**: `add_to_queue` toasts "… job added to queue."; `run_now`
 also calls `start_task`, whose result (`started` / `next` / `paused`) picks
-the toast. Queue Task / Mux / Encode are greyed until a file is selected
+the toast. Queue Job / Mux / Encode are greyed until a file is selected
 (`_apply_import_gate`, both ways — same as the Downloader's until a fetch
 succeeds); everything else is validated on click.
 
@@ -1589,13 +1591,21 @@ rate · language). The "Add Stream(s)" picker is a fixed 400px dialog of plain
 checkbox captions, so it gets `compact=True` (codec · profile · size · HDR only when
 it is · language) and its "Track N" is the stream's number in *its own file*.
 
-`Add Stream(s)` browses a second file, probes it off the GUI thread
-(`core.probe.probe_media` via `run_async` — never on the GUI thread,
-same rule as everywhere else), and either adds its lone matching-kind stream
-straight away or — when it has more than one — opens
-`ExternalStreamPickerDialog` (`ui/widgets/dialogs.py`) to choose which. Each
-added stream becomes its own row at the bottom, independent of the primary input,
-so switching the primary file later doesn't clear it.
+**Video's and Audio's button is `Add/Edit Video` / `Add/Edit Audio`** (Subtitles' is `Add/Edit Subs`),
+opening `EditStreamsDialog` (`ui/widgets/edit_dialogs.py`) on a copy of the box's entries: a Track
+dropdown, that track's **Default** checkbox (turning it on clears it on every other track of the kind,
+as only one can be the default), and a leading **Browse** that browses a second file, probes it off the
+GUI thread (`core.probe.probe_media` via `run_async` — never on the GUI thread) and either adds its lone
+matching-kind stream straight away or — when it has more than one — opens `ExternalStreamPickerDialog`
+(`ui/widgets/dialogs.py`) to choose which. Each added stream becomes its own row at the bottom,
+independent of the primary input, so switching the primary file later doesn't clear it. OK is one undo
+step for the whole session. An entry's `default` is seeded from the stream's own disposition (`probe`
+now reports it on video and audio streams too), travels in `video_tracks` / `audio_tracks`, and
+`ffmpeg_build._default_flag` emits `-disposition:v:N` / `:a:N` `+default` or `-default` — `+`/`-` rather
+than a bare value, which would also wipe the other flags (cover art's `attached_pic`). An entry with
+no `default` key (an old preset or hand-built job) emits nothing. The muxer decides what happens when no
+track of a kind is flagged: MP4 makes the first one the default, MKV leaves none. **Not on Encoding**:
+its Audio page keeps Choose Stream(s) and has no Default control yet.
 
 **`MuxingTab._tracks` is the list each box shows — not the probe.**
 `{"video": [...], "audio": [...]}`, each entry `{"id": "src:N" | "ext:xxxxxxxx",
@@ -2019,7 +2029,7 @@ centred (unlike a real value, which stays left-aligned — `Dropdown.
 paintEvent`'s own `NO_OPTION` check) — and disables**, run last in every
 `_sync_controls` via `MediaTab._apply_import_gate(extra=...)`: Output
 Format and Preset (and, unconditionally both ways like those two, the Start Time/Clip
-Duration spinners, A/V Sync, the preset Save/Delete buttons and the Queue Task /
+Duration spinners, A/V Sync, the preset Save/Delete buttons and the Queue Job /
 Mux / Encode action buttons), plus whatever tab-specific dropdowns the subclass names
 (Encoding: Encoder, Profile, Level, Encoder Preset, Resolution, FPS —
 see "Tabs" below — Audio Track, Audio Codec, Bitrate, Channels, Sample
@@ -2064,10 +2074,16 @@ source never had that kind, every track of it was removed, or the user simply de
 all, the effect (and the settings dict's `strip_video`/`strip_audio`/`strip_subtitles`, each
 derived as `not bool(that kind's checked tracks)`) is identical: the sub-tab goes red, the
 carousel shows the Wave Loop (video) / mute badge (audio), and the rundown reads
-`— removed —`. `Add Stream(s)` and Undo/Redo stay live regardless — they're the ways back
-for an emptied-but-not-absent panel — and only a *genuinely absent* stream (the source never
-had it) disables the whole panel including Add; a job left with no track to map anywhere at
-all is refused by `_validate_specific` ("Nothing to Mux"). The rundown (`copy · H.264 · 1
+`— removed —`. `Add/Edit` and Undo/Redo are live for every kind whenever a file is selected —
+they're the ways back for an emptied panel, and *the* way in for a source that never had that
+kind (a video-only file wants an audio file added, so a missing stream must not grey them); only
+Select/Deselect All and Remove need rows. A kind the source lacks counts as stripped until a track
+is added and ticked, and its first ticked track's codec stands in for the source's in the container
+inversion. A job left with no track to map anywhere at
+all is refused by `_validate_specific` ("Nothing to Mux"). Encoding follows the same rule: Choose
+Stream(s) is live for any file that isn't stripped of audio, and a source without audio only counts
+as having none while no stream from another file has been added (Strip Audio, the rundown, the red
+tab and the codec controls all follow `_audio_list`, not the probe's `has_audio`). The rundown (`copy · H.264 · 1
 track` — the codec is the first *checked* track's, not the source's first stream — or `· 2
 tracks` once more than one is checked, and the trim with a `· keyframe` caveat, since a copied
 stream can only be cut on a keyframe).
@@ -2117,6 +2133,24 @@ status column. Clicking a row opens its details; the ✕ removes it.
   front of `rest`; returns `started` / `next` / `paused`.
 - **Removing the active row kills its process first** — a process must never
   outlive its row — and continues with the next job if the queue was running.
+- **Retry** — a Failed row shows a retry icon (`assets/retry.svg`, painted mirrored) left of its ✕;
+  the slot is reserved on every row so the columns line up. `retry_task` resets the row to
+  Queued and runs it ahead of everything: a job already running is suspended and put on
+  `_shelved` (a stack, so a retry of a retry nests), and when the retry ends — Done *or*
+  Failed again — `_continue` brings the top one back (`_unshelve`: resumed, or left paused if
+  the user had paused it), handing it any tasks the retry had queued behind it. Removing a
+  shelved row stops its process and passes its `rest` to whoever resumes next; Stop returns
+  the shelved job as paused; `shutdown` stops them all.
+- **Rearranging** — a Queued row is dragged the way Muxing's track lists are: press it and move past
+  the drag distance and it is lifted at once (no hold), a release without moving is a click and opens
+  the details (and picking a row up closes an open details panel). `QueueRow` decides this itself (a Queued row's click fires on release, other rows'
+  on press). `_begin_row_drag` leaves the row in the list as a 28% fade and carries a `_RowGhost`; the
+  slot is the one under the ghost's centre among the rows showing (a search filter hides some), and
+  the list scrolls near its edges. A drop that changed the order sets Sort By to **Custom**
+  (`_sort == "Custom"`: `_apply_sort` leaves the order alone, new rows join the end) and re-sorts the
+  waiting jobs' `rest` (`_follow_order`). A row dropped *above the running job* (queue running, not
+  paused) runs now through `_run_ahead` — the retry path: the running job is suspended and resumes
+  afterwards. With the queue paused or idle the drop only reorders.
 - `_process_next` derives the job's `JobVars` and compiles the argv **on the GUI
   thread** (workers only ever see a plain list), prints it, and starts an
   `FfmpegJob`; Downloader tasks go to `_start_download` (a `YtDlpJob` from the
@@ -2210,7 +2244,7 @@ link can be dropped on the box** (`_dropped_link`); files and other text are
 refused. Bottom: `Mode` (`SegmentedButton`: Video + Audio / Video Only /
 Audio Only), `Video Codec` / `Audio Codec` (Video + Audio only) /
 `Resolution` / `Video Format` with an `≈ size` readout, the save row, and
-`Queue Task` / `Download`. Everything below the URL row is disabled until a
+`Queue Job` / `Download`. Everything below the URL row is disabled until a
 fetch succeeds — every dropdown among them (`Video Codec`/`Audio Codec`/
 `Resolution`/`Video Format`) also reads `—` until then, same "nothing
 imported" convention `MediaTab._apply_import_gate` uses on Muxing/Encoding,
@@ -2920,7 +2954,7 @@ autosave when the tab is left and on close.
 
 ## Encoding flow
 
-`Encode`/`Mux` and `Queue Task` both build the same settings dict and hand it
+`Encode`/`Mux` and `Queue Job` both build the same settings dict and hand it
 to QueueTab. Both source tabs pass `source_tab="Encoding"` / `"Muxing"`
 explicitly to `add_task()`.
 
@@ -3437,7 +3471,7 @@ picks the toast. **Only one ffmpeg runs at a time.**
 auto-resolves to the source's own codec the moment a file is probed, and
 `_validate_specific` refuses to queue a job that still has a
 present-or-unknown stream sitting on `Select` — there's no path left where
-"do it now"/"Queue Task" silently produces an identical file the way the old
+"do it now"/"Queue Job" silently produces an identical file the way the old
 `Source` (stream-copy) behaviour could. Muxing is still the one tab that's
 *always* a stream copy by design.
 
