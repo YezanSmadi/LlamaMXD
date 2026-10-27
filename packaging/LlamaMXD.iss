@@ -50,6 +50,9 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 [Files]
 ; settings.json and presets.json are never shipped: the app makes them in the user's data folder.
 Source: "..\build\dist\LlamaMXD\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+; The uninstaller can only read the install folder, so its progress window's logo ships with the app.
+Source: "..\build\wizard\light\small-159.png"; DestDir: "{app}\uninstall"; DestName: "logo-light.png"; Flags: ignoreversion
+Source: "..\build\wizard\dark\small-159.png"; DestDir: "{app}\uninstall"; DestName: "logo-dark.png"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\LlamaMXD"; Filename: "{app}\LlamaMXD.exe"
@@ -64,6 +67,20 @@ Filename: "{app}\LlamaMXD.exe"; Flags: nowait; Check: Relaunching
 function Relaunching: Boolean;
 begin
   Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
+
+{ The uninstall progress window shows the logo like the wizard does: white line art on a dark one. }
+procedure InitializeUninstallProgressForm;
+var
+  Name: String;
+begin
+  if IsDarkInstallMode then Name := 'logo-dark.png' else Name := 'logo-light.png';
+  try
+    UninstallProgressForm.WizardSmallBitmapImage.Stretch := True;
+    UninstallProgressForm.WizardSmallBitmapImage.PngImage.LoadFromFile(ExpandConstant('{app}\uninstall\' + Name));
+  except
+    { Keep the default image rather than stop the uninstall. }
+  end;
 end;
 
 { Uninstalling keeps the user's settings, presets and logs unless they say otherwise. }
