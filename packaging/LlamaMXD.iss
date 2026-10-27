@@ -27,6 +27,9 @@ VersionInfoVersion={#AppNumeric}
 ; Per-user install: no admin prompt, and the app can write beside itself.
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=
+; Files with a Check: are left out of Setup's own size estimate, so the four tools (the bulk of the install)
+; are added back here, or the folder page would ask for far less than the install takes.
+ExtraDiskSpaceRequired={#FileSize("..\build\dist\LlamaMXD\dependables\ffmpeg.exe") + FileSize("..\build\dist\LlamaMXD\dependables\ffprobe.exe") + FileSize("..\build\dist\LlamaMXD\dependables\yt-dlp.exe") + FileSize("..\build\dist\LlamaMXD\dependables\deno.exe")}
 DefaultDirName={autopf}\LlamaMXD
 DisableProgramGroupPage=yes
 ArchitecturesAllowed=x64compatible
