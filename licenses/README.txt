@@ -20,8 +20,8 @@ LlamaMXD utilizes the following third-party programs, libraries, fonts, and asse
 Programs LlamaMXD Runs (dependables/)
 -----------------------------------------------------------
   ffmpeg/       FFmpeg 9.0.2 full build (gyan.dev)    GPL v3+      https://github.com/FFmpeg/FFmpeg/commit/946fcce07b
-  yt-dlp/       yt-dlp 2026.08.19                     GPL v3+      https://github.com/yt-dlp/yt-dlp/tree/2026.08.19
-  deno.txt      Deno 2.9.7                            MIT          https://github.com/denoland/deno/tree/v2.9.7
+  yt-dlp/       yt-dlp 2026.10.26                     GPL v3+      https://github.com/yt-dlp/yt-dlp/tree/2026.10.26
+  deno.txt      Deno 2.9.8                            MIT          https://github.com/denoland/deno/tree/v2.9.8
 
 *Note: The GPL entitles you to the source code for ffmpeg and yt-dlp, linked above and in each folder's SOURCE.txt.*
 

@@ -1,6 +1,6 @@
 
 yt-dlp.exe
-yt-dlp 2026.08.19, the official Windows executable from the yt-dlp project
+yt-dlp 2026.10.26, the official Windows executable from the yt-dlp project
 
 License: yt-dlp's own code is the Unlicense (public domain). The executable is a PyInstaller bundle that also
 contains Python and other libraries, some under the GNU GPL, so the executable as a whole is distributed under
@@ -9,6 +9,6 @@ THIRD_PARTY_LICENSES.txt). Every bundled component and its license text is in TH
 the yt-dlp project publishes with the executable.
 
 Source code:
-  yt-dlp 2026.08.19:  https://github.com/yt-dlp/yt-dlp/tree/2026.08.19
+  yt-dlp 2026.10.26:  https://github.com/yt-dlp/yt-dlp/tree/2026.10.26
   Source of the bundled third-party components is available from their original projects (see
   THIRD_PARTY_LICENSES.txt for each one's URL).

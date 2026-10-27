@@ -1,7 +1,7 @@
 ==============================================================================
-Deno 2.9.7 (deno.exe) - runs yt-dlp's JavaScript challenge solver
+Deno 2.9.8 (deno.exe) - runs yt-dlp's JavaScript challenge solver
 License: MIT
-Source:  https://github.com/denoland/deno/tree/v2.9.7
+Source:  https://github.com/denoland/deno/tree/v2.9.8
 
 The release binary also contains third-party components (the V8 JavaScript engine and others)
 under their own licenses, which the Deno project documents.
