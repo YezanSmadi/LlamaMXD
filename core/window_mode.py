@@ -10,4 +10,4 @@ BORDERLESS = "Borderless"  # no title bar or frame; resizable, optionally fullsc
 FIXED = "Fixed"            # the reference-shaped window, not resizable
 
 MODES = [WINDOWED, BORDERLESS, FIXED]
-DEFAULT_MODE = FIXED
+DEFAULT_MODE = WINDOWED
