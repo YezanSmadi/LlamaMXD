@@ -219,7 +219,7 @@ begin
   Note.Caption := 'Repair restores any missing or damaged files. Your settings, presets and any newer tools are kept.';
   ResetBox := TNewCheckBox.Create(ExistingPage);
   ResetBox.Parent := ExistingPage.Surface;
-  ResetBox.Caption := 'Also reset my settings to their defaults (presets and logs are kept)';
+  ResetBox.Caption := 'Reset settings to their defaults (presets and logs are kept)';
   ResetBox.Left := 0;
   ResetBox.Width := ExistingPage.SurfaceWidth;
   ResetBox.Top := Note.Top + Note.Height + ScaleY(6);

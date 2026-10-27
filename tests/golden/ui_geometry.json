@@ -14270,7 +14270,7 @@
    210,
    91,
    664,
-   443
+   519
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/CheckBox#0": [
    220,
@@ -14296,21 +14296,27 @@
    112,
    28
   ],
-  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/Dropdown#3": [
    220,
    478,
+   146,
+   28
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
+   220,
+   554,
    221,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Dropdown#0": [
    220,
-   478,
+   554,
    90,
    28
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
    320,
-   478,
+   554,
    121,
    28
   ],
@@ -14347,6 +14353,12 @@
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/ScaledLabel#5": [
    220,
    448,
+   360,
+   26
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/ScaledLabel#6": [
+   220,
+   524,
    360,
    26
   ],
@@ -14542,7 +14554,7 @@
    315,
    137,
    996,
-   665
+   779
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/CheckBox#0": [
    330,
@@ -14568,21 +14580,27 @@
    168,
    42
   ],
-  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/Dropdown#3": [
    330,
    718,
+   219,
+   42
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
+   330,
+   832,
    332,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Dropdown#0": [
    330,
-   718,
+   832,
    135,
    42
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
    480,
-   718,
+   832,
    182,
    42
   ],
@@ -14619,6 +14637,12 @@
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/ScaledLabel#5": [
    330,
    673,
+   540,
+   39
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/ScaledLabel#6": [
+   330,
+   787,
    540,
    39
   ],
@@ -14814,7 +14838,7 @@
    420,
    181,
    1328,
-   886
+   1038
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/CheckBox#0": [
    440,
@@ -14840,21 +14864,27 @@
    224,
    56
   ],
-  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/Dropdown#3": [
    440,
    955,
+   292,
+   56
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0": [
+   440,
+   1107,
    442,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/Dropdown#0": [
    440,
-   955,
+   1107,
    180,
    56
   ],
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/QWidget#0/ScaledButton#0": [
    640,
-   955,
+   1107,
    242,
    56
   ],
@@ -14891,6 +14921,12 @@
   "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/ScaledLabel#5": [
    440,
    895,
+   720,
+   52
+  ],
+  "/_TabFrame#0/QStackedWidget#0/SettingsTab#0/QStackedWidget#0/QScrollArea#0/QWidget#0/QWidget#0/ScaledLabel#6": [
+   440,
+   1047,
    720,
    52
   ],

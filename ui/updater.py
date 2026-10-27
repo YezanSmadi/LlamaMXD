@@ -68,25 +68,29 @@ class UpdateFlow:
     # ------------------------------------------------------------------ #
     #  Checking
     # ------------------------------------------------------------------ #
-    def start(self):
+    def start(self, startup=False):
+        """Check now. `startup` is the launch-time check: it says nothing unless there is something to offer."""
         if self._busy:
             return
         self._set("Checking...")
-        run_async(updates.check, self._on_report, VERSION)
+        run_async(updates.check, lambda report: self._on_report(report, startup), VERSION)
 
-    def _on_report(self, report):
+    def _on_report(self, report, startup=False):
         self._idle()
         if report is None or not report.reached:
             detail = "\n".join(report.errors) if report else "Something went wrong. The log has the details."
-            show_message(self.app, "Couldn't Check for Updates", detail or "GitHub couldn't be reached.")
+            if startup:
+                llamalog.get("updates").info("The launch-time update check couldn't finish: %s", detail)
+            else:
+                show_message(self.app, "Couldn't Check for Updates", detail or "GitHub couldn't be reached.")
             return
         if report.app and self._offer_app(report.app):
             return
         if report.tools:
             self._offer_tools(report.tools)
             return
-        if report.app:
-            return   # they were offered a LlamaMXD update and said no; nothing else to report
+        if report.app or startup:
+            return   # offered and declined, or a launch-time check with nothing to say
         lines = [f"LlamaMXD {VERSION} is up to date."]
         if report.versions:
             names = {spec["name"]: spec["label"] for spec in updates.TOOLS}

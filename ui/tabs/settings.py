@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core import about, gpu, keybinds, llamalog, naming, power, priority, startup_tab, system_info, window_mode
+from core import (about, gpu, keybinds, llamalog, naming, power, priority, startup_tab, system_info, update_check,
+                  window_mode)
 from core.theme import DEFAULT_THEME_NAME, THEMES, default_output_dir, get_theme, save_settings
 from ui import scale
 from ui import theme as T
@@ -65,6 +66,9 @@ _WHEN_DONE_TIP = ("What happens once the queue has finished its last job. Shutdo
 _WHEN_DONE_RESET_TIP = ("Starts every launch on 'Do Nothing', so a Shutdown you picked for one long "
                         "encode can't catch you out next time.")
 _STARTUP_TAB_TIP = "Which tab the app opens on each time it launches."
+_UPDATE_CHECK_TIP = ("Check on Start Up looks for a newer LlamaMXD, ffmpeg, yt-dlp and Deno a moment after the app "
+                     "launches, and only says something if it finds one; nothing is downloaded until you agree. "
+                     "Never does it only when you press Check for Updates in About.")
 _LOG_DETAIL_TIP = ("Normal records what the app does and any problems. Detailed also records ffmpeg's and "
                    "yt-dlp's full output for each job and the app's debug-level messages, which helps "
                    "when reporting a bug. Applies to the log right away, and to jobs started afterwards.")
@@ -333,6 +337,16 @@ class SettingsTab(QWidget):
         self.startup_tab_menu.picked.connect(self._on_startup_tab_change)
         tip(self.startup_tab_menu, _STARTUP_TAB_TIP)
         pp.addWidget(self.startup_tab_menu)
+        scale.spacer(pp, 18)
+
+        # Whether launch also looks for updates
+        pp.addWidget(field_label("Check for Updates:"))
+        scale.spacer(pp, 4)
+        self.update_check_menu = Dropdown(update_check.MODES, width=Dropdown.width_for(update_check.MODES))
+        self.update_check_menu.set(app.update_check)
+        self.update_check_menu.picked.connect(self._on_update_check_change)
+        tip(self.update_check_menu, _UPDATE_CHECK_TIP)
+        pp.addWidget(self.update_check_menu)
         scale.spacer(pp, 18)
 
         # LlamaLog: detail level and the log folder
@@ -635,6 +649,7 @@ class SettingsTab(QWidget):
             "window_mode": self.app.window_mode,
             "borderless_fullscreen": self.app.borderless_fullscreen,
             "startup_tab": self.app.startup_tab,
+            "update_check": self.app.update_check,
             "log_detail": self.app.log_detail,
             "keybinds": self.app.keymap.to_dict(),
             "confirm_clear_selection": self.app.confirm_clear_selection,
@@ -671,6 +686,7 @@ class SettingsTab(QWidget):
         self.priority_menu.close()
         self.when_done_menu.close()
         self.startup_tab_menu.close()
+        self.update_check_menu.close()
         self.log_detail_menu.close()
         # A half-typed, invalid format isn't kept: show the one in use.
         if naming.template_error(self.naming_entry.text()):
@@ -796,6 +812,11 @@ class SettingsTab(QWidget):
         self.app.startup_tab = tab
         self.autosave()
 
+    def _on_update_check_change(self, mode):
+        """Whether the next launches look for updates; the About button is unaffected."""
+        self.app.update_check = mode
+        self.autosave()
+
     def _on_log_detail_change(self, level):
         """Normal or Detailed: the log follows at once, ffmpeg / yt-dlp from the next job."""
         self.app.log_detail = level
@@ -833,7 +854,7 @@ class SettingsTab(QWidget):
             self.app, "Reset to Default?",
             "This resets the theme, appearance mode, window mode, default save location, "
             "Downloader save location, file naming, hardware acceleration, "
-            "priority level, When Done, Startup Tab, log detail, keyboard shortcuts and the Clear "
+            "priority level, When Done, Startup Tab, the update check, log detail, keyboard shortcuts and the Clear "
             "confirmation back to their defaults. Continue?",
         ):
             return
@@ -870,6 +891,8 @@ class SettingsTab(QWidget):
         self.app.when_done_reset = True
         self.startup_tab_menu.set(startup_tab.DEFAULT_TAB)
         self.app.startup_tab = startup_tab.DEFAULT_TAB
+        self.update_check_menu.set(update_check.DEFAULT_MODE)
+        self.app.update_check = update_check.DEFAULT_MODE
         self.log_detail_menu.set(llamalog.DEFAULT_LEVEL)
         self.app.log_detail = llamalog.DEFAULT_LEVEL
         llamalog.set_detail(llamalog.DEFAULT_LEVEL)

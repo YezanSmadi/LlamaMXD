@@ -152,6 +152,7 @@ change here), and even `os._exit` runs the DLLs' unload code where it happens.
   the first 13 always present at the size needed.
 - `check_userdata` — where settings.json / presets.json resolve (source vs a simulated frozen build), the data folder made on demand, nothing read from or written beside the exe, and a save that reads back.
 - `check_updates` — `core/updates.py` offline: version ordering (a release above its own beta, `1.0` = `1.0.0`), what `check` reports for a faked GitHub (newer app, pre-releases only for someone on one, drafts and assets without a digest ignored, a 404, every request failing), downloads checked against SHA-256 from a local server, and the tool swap (replaced, rolled back, refused, done over a running exe).
+- `check_launch` — the launch-time update check, offscreen with a faked GitHub: the `update_check` setting's default and validation, the Performance dropdown (saving, Reset to Default), that launch starts a check only on Check on Start Up, and that a launch-time check is silent when offline / up to date while the About button is not (both prompt when there is something to offer). Shown to fail with each of those two behaviours broken.
 - `check_orphans` — the real app (`main.main`, sandboxed, offscreen) as a child process imports the HDR
   fixture and turns HDR->SDR on, then closes its window, and a second run is killed outright
   (`Popen.kill`, like a crash or End Task) — each at the moment tone-map ffmpegs are running (a run
@@ -196,6 +197,7 @@ core/keybinds.py          the remappable shortcuts: action table, default keys, 
 core/theme.py             brand palettes, contrast helpers, settings.json read/write
 core/userdata.py          where settings.json / presets.json live: the repo from source, %LOCALAPPDATA%\LlamaMXD once frozen
 core/updates.py           update checks + installs for LlamaMXD and the bundled tools, from GitHub releases (no Qt)
+core/update_check.py      Settings' "Check for Updates" names: Check on Start Up / Never (default Never)
 core/about.py             Settings' About page: repo / issue-tracker URLs, the GPL short notice, paths to LICENSE.txt and licenses/
 core/llamalog.py          LlamaLog: the rotating log file, crash hooks, URL scrubbing, per-job output ring buffer
 core/probe.py             ffprobe: probe_media, a file's real length, the HDR colour-tag check
@@ -1238,7 +1240,7 @@ rows, toasts) paints itself.
 `appearance_mode`, `default_save_location`, `gpu_enabled`,
 `downloader_separate_save`, `downloader_save_location`, `naming_template`,
 `priority_level`, `when_done`, `when_done_reset`, `window_mode`,
-`borderless_fullscreen`, `startup_tab`, `log_detail`, `keybinds`; missing keys or a
+`borderless_fullscreen`, `startup_tab`, `update_check`, `log_detail`, `keybinds`; missing keys or a
 missing/corrupt file — or a stored `naming_template` / `when_done` /
 `priority_level` / `window_mode` / `startup_tab` / `log_detail` that's no longer valid (a hand-edited file) —
 fall back to their defaults: `Lemon` / `System` / `~/Videos/LlamaMXD
@@ -2289,7 +2291,7 @@ Video + Audio only (absent otherwise, so the details popup skips it).
 **Appearance** (Theme, Appearance Mode, Window Mode + its Borderless-only
 Fullscreen checkbox), **Output** (Default Save Location +
 disk space, Separate Save for Downloader, File Naming), **Performance**
-(Hardware Acceleration, Priority Level, When Done, Startup Tab, and a **LlamaLog:** section at the
+(Hardware Acceleration, Priority Level, When Done, Startup Tab, **Check for Updates** (Check on Start Up / Never, default Never — see "Updates"), and a **LlamaLog:** section at the
 bottom), **Shortcuts** (one row per `core.keybinds` action: its name on the left, a `KeyField` in
 the middle — click it, press the new key, it shows "Press a key…" while listening and clicking away
 leaves it unchanged; every key is takeable, Esc and Tab included — and an on/off `Switch` on the right,
@@ -2443,7 +2445,7 @@ else). **Reset to Default** (`role="danger"`, `ask_yes_no` confirmation)
 resets theme, appearance mode, window mode (back to Fixed, Fullscreen off),
 default save location, the Downloader's
 separate-save toggle and location, GPU acceleration, file naming, priority
-level, When Done, Startup Tab, log detail and the keyboard shortcuts all back to their defaults in one action, then autosaves — the one Settings control that
+level, When Done, Startup Tab, the update check, log detail and the keyboard shortcuts all back to their defaults in one action, then autosaves — the one Settings control that
 touches every persisted key at once rather than just its own. **File
 Naming** (an entry under the output paths, with the token list beneath it
 turning into a STOP_RED reason while what's typed is invalid — unknown
@@ -3614,8 +3616,8 @@ check expects it.
 
 **Settings > About's Check for Updates** (a compact 22px button beside the version, so the row stays no taller than its
 26px caption: the page has no height to spare) asks GitHub's releases API for four things: a newer LlamaMXD
-(`YezanSmadi/LlamaMXD`), ffmpeg (`GyanD/codexffmpeg`, the full build zip), yt-dlp and Deno. **Only when pressed**: nothing
-checks at startup, and the FAQ / manual say so — keep that true. A failure of one lookup doesn't stop the others; a 404
+(`YezanSmadi/LlamaMXD`), ffmpeg (`GyanD/codexffmpeg`, the full build zip), yt-dlp and Deno. **The default is only when pressed** (Settings > Performance > Check for Updates is `Never`); `Check on Start Up`
+also runs one 2.5s after the window is shown (`MainWindow.run_startup_update_check`, called from `main.py`). A launch-time check is silent when offline, up to date or declined — `UpdateFlow.start(startup=True)` — and only prompts (the same Yes / No questions) when it finds something. The FAQ / manual say so; keep them true if the default changes. A failure of one lookup doesn't stop the others; a 404
 (no release yet) is "no update", not an error.
 
 - **Release conventions the check relies on.** A tag `vX.Y.Z` (`-beta.N` etc. for pre-releases) with an asset named
