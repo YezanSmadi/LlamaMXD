@@ -13,9 +13,10 @@ location and whether you'd like a desktop/start menu shortcut or not, and you're
 LlamaMXD comes with a User Manual that details everything you need to know about using the program, including what each feature does and cheatsheets for 
 setting parameters. The manual is easily accessible within LlamaMXD through **Settings -> About -> User Manual**. You can also click the manual cover below to 
 go directly to the User Manual.
+
 <p align="center">
   <a href="https://yezansmadi.github.io/LlamaMXD/manual/manual.html">
-    <img width="443" height="506.5" alt="LlamaMXD User Manual" src="https://github.com/user-attachments/assets/3c550d32-585b-4f97-a922-cff13b0de921" />
+    <img width="489.5" height="590" alt="LlamaMXD User Manual" src="https://github.com/user-attachments/assets/47bb2c6a-549f-4d4a-9b2d-baef22ea36c0" />
   </a>
 </p>
 
