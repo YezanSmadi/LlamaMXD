@@ -12,3 +12,12 @@ presets.json
 # Bundled helper binaries (ffmpeg/ffprobe/ffplay, yt-dlp, deno) — copied in by
 # the setup wizard at build time; each is far over GitHub's 100MB file limit
 dependables/
+build/
+dist/
+packaging/version_info.txt
+
+# Editor and assistant notes, kept locally only
+.vscode/
+CLAUDE.md
+.claude/
+documentation.md

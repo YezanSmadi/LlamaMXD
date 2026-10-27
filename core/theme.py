@@ -5,11 +5,10 @@
 import json
 import os
 
-from core import keybinds, llamalog, naming, power, priority, startup_tab, window_mode
+from core import keybinds, llamalog, naming, power, priority, startup_tab, update_check, userdata, window_mode
 
-# settings.json lives next to main.py, whatever the launch directory.
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_SETTINGS_PATH = os.path.join(_REPO_ROOT, "settings.json")
+# settings.json: beside main.py from source, the user's data folder once installed.
+_SETTINGS_PATH = userdata.user_file("settings.json")
 
 DEFAULT_THEME_NAME = "Lemon"
 
@@ -142,6 +141,7 @@ def load_settings():
         "window_mode": window_mode.DEFAULT_MODE,
         "borderless_fullscreen": False,
         "startup_tab": startup_tab.DEFAULT_TAB,
+        "update_check": update_check.DEFAULT_MODE,
         "log_detail": llamalog.DEFAULT_LEVEL,
         "keybinds": keybinds.defaults(),
         "confirm_clear_selection": True,
@@ -163,6 +163,8 @@ def load_settings():
         settings["window_mode"] = window_mode.DEFAULT_MODE
     if settings["startup_tab"] not in startup_tab.TABS:
         settings["startup_tab"] = startup_tab.DEFAULT_TAB
+    if settings["update_check"] not in update_check.MODES:
+        settings["update_check"] = update_check.DEFAULT_MODE
     if settings["log_detail"] not in llamalog.LEVELS:
         settings["log_detail"] = llamalog.DEFAULT_LEVEL
     settings["borderless_fullscreen"] = settings["borderless_fullscreen"] is True

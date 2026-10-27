@@ -33,6 +33,15 @@ def _search_dirs():
     return dirs
 
 
+def bundled_dir(name):
+    """The folder holding the bundled copy of tool `name` (what an update replaces), or None when the
+    tool isn't bundled (missing, or only on PATH)."""
+    for folder in _search_dirs():
+        if os.path.isfile(os.path.join(folder, name + _EXE_SUFFIX)):
+            return os.path.abspath(folder)
+    return None
+
+
 @functools.lru_cache(maxsize=None)
 def find_tool(name):
     """Absolute path to tool `name` ("ffmpeg", "yt-dlp", ...), or None when

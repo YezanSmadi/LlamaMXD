@@ -7,10 +7,9 @@ loading one can't re-trim a clip or repoint its output. Reads are best-effort.""
 import json
 import os
 
-from core import llamalog
+from core import llamalog, userdata
 
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PRESETS_PATH = os.path.join(_REPO_ROOT, "presets.json")
+_PRESETS_PATH = userdata.user_file("presets.json")
 
 # The menu entry meaning "no preset applied" (never saved).
 NONE_LABEL = "— none —"

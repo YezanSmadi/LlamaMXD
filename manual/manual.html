@@ -938,7 +938,7 @@
                             </p>
                         </div>
                         <div class="callout">
-                            <h2>When Done, Startup Tab and LlamaLog</h2>
+                            <h2>When Done, Startup Tab, Check for Updates and LlamaLog</h2>
                             <p class="page-text">When Done determines the default behavior of LlamaMXD after a queue is
                                 done. These are do nothing, shut down, sleep, hibernate, lock system, log off, and quit
                                 LlamaMXD. Shut down, sleep, hibernate, and log off give you 30 seconds to cancel once
@@ -948,6 +948,10 @@
                                 <br>
                                 Startup Tab determines which tab LlamaMXD will start on when it is launched. The choices
                                 are between the 5 tabs; Muxing, Encoding, Downloader, Queue, and Settings.<br>
+                                <br>
+                                Check for Updates decides whether LlamaMXD looks for a newer LlamaMXD, ffmpeg, yt-dlp
+                                and Deno by itself. Check on Start Up does it a moment after launch and only says
+                                something if it finds an update.<br>
                                 <br>
                                 LlamaLog is the session log of the program. The Normal version details events such as
                                 file imports, queue starts, if a job failed or finished, ffmpeg errors, downloads, as
@@ -998,11 +1002,12 @@
                             <h2>About the Llama</h2>
                             <p class="page-text"> Here you'll find the version number of the program, the link to
                                 the Github, a link to the Github issue tracker, and the license for the program,
-                                which is licensed under GNU General Public License v3 (or later).<br>
+                                which is licensed under GNU General Public License v3 (or later). Check for Updates,
+                                beside the version, looks for a newer LlamaMXD or a newer version of its dependables
+                                (ffmpeg, yt-dlp and Deno). Repair reinstalls over damaged files.<br>
                                 <br>
-                                Below the license box is a button that brings up the full license text, a button for
-                                the licenses of third-party programs and assets used in LlamaMXD, and a button that
-                                opens up this manual.
+                                Below the license box are buttons for the full license text, the licenses of
+                                third-party programs and assets used in LlamaMXD, and this manual.
                             </p>
                         </div>
                     </div>
@@ -1597,10 +1602,11 @@
                         </div>
                         <div class="callout">
                             <h2>Does it work offline or need an account?</h2>
-                            <p class="page-text">Muxing and Encoding work fully offline. Only the Downloader uses the
-                                internet to fetch a link's details and download it. LlamaMXD has no account and no
-                                telemetry. Its log stays on your PC and web addresses in it are saved without their
-                                query part.</p>
+                            <p class="page-text">Muxing and Encoding work fully offline. Only the Downloader and the
+                                Check for Updates button in Settings &rsaquo; About use the internet, and the update
+                                check runs only when you press it, unless you set Check for Updates to Check on Start
+                                Up in Settings &rsaquo; Performance. LlamaMXD has no account and no telemetry. Its log
+                                stays on your PC and web addresses in it are saved without their query part.</p>
                         </div>
                         <div class="callout">
                             <h2>Why is Encoding slow, and how can I speed it up?</h2>

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import isValid
 
-from core import downloader, gpu, llamalog, power, window_mode, window_style
+from core import downloader, gpu, llamalog, power, update_check, window_mode, window_style
 from core.theme import load_settings
 from ui import scale
 from ui import theme as T
@@ -44,6 +44,8 @@ from ui.workers import pil_to_qimage, run_async
 TAB_NAMES = ("Muxing", "Encoding", "Downloader", "Queue", "Settings")
 
 _QWIDGETSIZE_MAX = 16777215   # Qt's "no maximum size"
+# How long after launch the update check waits, so it never competes with the window appearing.
+_STARTUP_UPDATE_CHECK_MS = 2500
 
 class _MainLayout(QHBoxLayout):
     """The window's layout, opted out of height-for-width: word-wrapped labels otherwise made
@@ -211,13 +213,14 @@ class MainWindow(QWidget):
         # F11 in Windowed / Fixed: fullscreen for this session only (Borderless's is a setting).
         self._session_fullscreen = False
         self.log_detail = settings["log_detail"]
+        self.update_check = settings["update_check"]
         llamalog.set_detail(self.log_detail)
         self.keymap = KeyMap(settings["keybinds"])
         llamalog.get("settings").info(
             "Settings: theme=%s appearance=%s window=%s gpu=%s priority=%s when_done=%s startup_tab=%s "
-            "naming=%r save=%s", settings["theme"], settings["appearance_mode"], self.window_mode,
+            "update_check=%s naming=%r save=%s", settings["theme"], settings["appearance_mode"], self.window_mode,
             self.gpu_enabled, self.priority_level, self.when_done, settings["startup_tab"],
-            self.naming_template, self.default_save_location)
+            self.update_check, self.naming_template, self.default_save_location)
         if self.default_save_location:
             try:
                 os.makedirs(self.default_save_location, exist_ok=True)
@@ -515,6 +518,11 @@ class MainWindow(QWidget):
             self.showFullScreen()
         else:
             self.show()
+
+    def run_startup_update_check(self):
+        """After launch, look for updates if Settings says to; nothing is shown unless something is found."""
+        if self.update_check == update_check.STARTUP:
+            QTimer.singleShot(_STARTUP_UPDATE_CHECK_MS, lambda: self.tabs["Settings"].update_flow.start(startup=True))
 
     def _prescale_for_screen(self, screen):
         """Adopt the scale a fullscreen window will need before it is shown."""

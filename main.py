@@ -86,6 +86,7 @@ def main():
     from ui.app import MainWindow
     window = MainWindow()
     window.present()
+    window.run_startup_update_check()
     code = app.exec()
     llamalog.get("app").info("LlamaMXD exiting (code %s)", code)
     instance.release()
