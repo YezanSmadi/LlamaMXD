@@ -51,9 +51,6 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 [Files]
 ; settings.json and presets.json are never shipped: the app makes them in the user's data folder.
 Source: "..\build\dist\LlamaMXD\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
-; The uninstaller can only read the install folder, so its progress window's logo ships with the app.
-Source: "..\build\wizard\light\small-159.png"; DestDir: "{app}\uninstall"; DestName: "logo-light.png"; Flags: ignoreversion
-Source: "..\build\wizard\dark\small-159.png"; DestDir: "{app}\uninstall"; DestName: "logo-dark.png"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\LlamaMXD"; Filename: "{app}\LlamaMXD.exe"; Tasks: startmenuicon
@@ -70,7 +67,6 @@ Type: filesandordirs; Name: "{app}\dependables"
 Type: filesandordirs; Name: "{app}\_internal"
 Type: filesandordirs; Name: "{app}\manual"
 Type: filesandordirs; Name: "{app}\licenses"
-Type: filesandordirs; Name: "{app}\uninstall"
 
 [Code]
 function AppRunning: Boolean;
@@ -116,18 +112,32 @@ begin
   Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
 end;
 
-{ The uninstall progress window shows the logo like the wizard does: white line art on a dark one. }
+{ The uninstaller is not given the wizard images, so the same two logos are built into its script
+  (logos.inc, generated from them) and shown on the progress window: white line art on a dark one. }
+#include "..\build\wizard\logos.inc"
+
 procedure InitializeUninstallProgressForm;
 var
-  Name: String;
+  Data: String;
+  Size: Integer;
+  Path: String;
+  Stream: TFileStream;
 begin
-  if IsDarkInstallMode then Name := 'logo-dark.png' else Name := 'logo-light.png';
+  Path := ExpandConstant('{tmp}\logo.png');
   try
+    if IsDarkInstallMode then LogoDark(Data, Size) else LogoLight(Data, Size);
+    Stream := TFileStream.Create(Path, fmCreate);
+    try
+      Stream.WriteBuffer(Data, Size);
+    finally
+      Stream.Free;
+    end;
     UninstallProgressForm.WizardSmallBitmapImage.Stretch := True;
-    UninstallProgressForm.WizardSmallBitmapImage.PngImage.LoadFromFile(ExpandConstant('{app}\uninstall\' + Name));
+    UninstallProgressForm.WizardSmallBitmapImage.PngImage.LoadFromFile(Path);
   except
     { Keep the default image rather than stop the uninstall. }
   end;
+  DeleteFile(Path);
 end;
 
 { Uninstalling keeps the user's settings, presets and logs unless they say otherwise. }
