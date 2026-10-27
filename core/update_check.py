@@ -6,4 +6,4 @@ works; this only decides whether a check also runs at launch."""
 STARTUP = "Check on Start Up"
 NEVER = "Never"
 MODES = [STARTUP, NEVER]
-DEFAULT_MODE = NEVER
+DEFAULT_MODE = STARTUP

@@ -198,7 +198,7 @@ core/keybinds.py          the remappable shortcuts: action table, default keys, 
 core/theme.py             brand palettes, contrast helpers, settings.json read/write
 core/userdata.py          where settings.json / presets.json live: the repo from source, %LOCALAPPDATA%\LlamaMXD once frozen
 core/updates.py           update checks + installs for LlamaMXD and the bundled tools, from GitHub releases (no Qt)
-core/update_check.py      Settings' "Check for Updates" names: Check on Start Up / Never (default Never)
+core/update_check.py      Settings' "Check for Updates" names: Check on Start Up / Never (default Check on Start Up)
 core/repair.py            files.json (every file's size + SHA-256, written at build) and verify(): what an installed copy is missing
 core/about.py             Settings' About page: repo / issue-tracker URLs, the GPL short notice, paths to LICENSE.txt and licenses/
 core/llamalog.py          LlamaLog: the rotating log file, crash hooks, URL scrubbing, per-job output ring buffer
@@ -2293,7 +2293,7 @@ Video + Audio only (absent otherwise, so the details popup skips it).
 **Appearance** (Theme, Appearance Mode, Window Mode + its Borderless-only
 Fullscreen checkbox), **Output** (Default Save Location +
 disk space, Separate Save for Downloader, File Naming), **Performance**
-(Hardware Acceleration, Priority Level, When Done, Startup Tab, **Check for Updates** (Check on Start Up / Never, default Never — see "Updates"), and a **LlamaLog:** section at the
+(Hardware Acceleration, Priority Level, When Done, Startup Tab, **Check for Updates** (Check on Start Up / Never, default Check on Start Up — see "Updates"), and a **LlamaLog:** section at the
 bottom), **Shortcuts** (one row per `core.keybinds` action: its name on the left, a `KeyField` in
 the middle — click it, press the new key, it shows "Press a key…" while listening and clicking away
 leaves it unchanged; every key is takeable, Esc and Tab included — and an on/off `Switch` on the right,
@@ -3618,8 +3618,7 @@ check expects it.
 
 **Settings > About's Check for Updates** (a compact 22px button beside the version, so the row stays no taller than its
 26px caption: the page has no height to spare) asks GitHub's releases API for four things: a newer LlamaMXD
-(`YezanSmadi/LlamaMXD`), ffmpeg (`GyanD/codexffmpeg`, the full build zip), yt-dlp and Deno. **The default is only when pressed** (Settings > Performance > Check for Updates is `Never`); `Check on Start Up`
-also runs one 2.5s after the window is shown (`MainWindow.run_startup_update_check`, called from `main.py`). A launch-time check is silent when offline, up to date or declined — `UpdateFlow.start(startup=True)` — and only prompts (the same Yes / No questions) when it finds something. The FAQ / manual say so; keep them true if the default changes. A failure of one lookup doesn't stop the others; a 404
+(`YezanSmadi/LlamaMXD`), ffmpeg (`GyanD/codexffmpeg`, the full build zip), yt-dlp and Deno. **The default is a check at launch** (Settings > Performance > Check for Updates is `Check on Start Up`; `Never` leaves it to the button): it runs one 2.5s after the window is shown (`MainWindow.run_startup_update_check`, called from `main.py`). A launch-time check is silent when offline, up to date or declined — `UpdateFlow.start(startup=True)` — and only prompts (the same Yes / No questions) when it finds something. The FAQ / manual say so; keep them true if the default changes. A failure of one lookup doesn't stop the others; a 404
 (no release yet) is "no update", not an error.
 
 - **Release conventions the check relies on.** A tag `vX.Y.Z` (`-beta.N` etc. for pre-releases) with an asset named

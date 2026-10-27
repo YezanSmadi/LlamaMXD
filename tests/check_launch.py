@@ -26,22 +26,22 @@ def _asset(name):
 
 def _setting():
     problems = []
-    if update_check.DEFAULT_MODE != update_check.NEVER:
-        problems.append("the default should be Never, which keeps 'only when you press the button' true")
+    if update_check.DEFAULT_MODE != update_check.STARTUP:
+        problems.append("the default should be Check on Start Up")
     if update_check.MODES != ["Check on Start Up", "Never"]:
         problems.append(f"modes: {update_check.MODES}")
     keep = theme._SETTINGS_PATH
     with tempfile.TemporaryDirectory() as folder:
         theme._SETTINGS_PATH = os.path.join(folder, "settings.json")
         try:
-            for stored, want in ((update_check.STARTUP, update_check.STARTUP), ("sometimes", update_check.NEVER), (None, update_check.NEVER)):
+            for stored, want in ((update_check.STARTUP, update_check.STARTUP), (update_check.NEVER, update_check.NEVER), ("sometimes", update_check.STARTUP), (None, update_check.STARTUP)):
                 theme.save_settings({"update_check": stored})
                 got = theme.load_settings()["update_check"]
                 if got != want:
                     problems.append(f"stored {stored!r} loaded as {got!r}, expected {want!r}")
             os.remove(theme._SETTINGS_PATH)
-            if theme.load_settings()["update_check"] != update_check.NEVER:
-                problems.append("a missing settings file should give Never")
+            if theme.load_settings()["update_check"] != update_check.STARTUP:
+                problems.append("a missing settings file should give Check on Start Up")
         finally:
             theme._SETTINGS_PATH = keep
     return problems
@@ -56,14 +56,14 @@ def _dropdown():
     try:
         if tab.update_check_menu.value() != window.update_check:
             problems.append("the menu doesn't show the app's setting")
-        tab._on_update_check_change(update_check.STARTUP)
-        if window.update_check != update_check.STARTUP or saved.get("update_check") != update_check.STARTUP:
-            problems.append(f"picking Check on Start Up: app={window.update_check!r} saved={saved.get('update_check')!r}")
+        tab._on_update_check_change(update_check.NEVER)
+        if window.update_check != update_check.NEVER or saved.get("update_check") != update_check.NEVER:
+            problems.append(f"picking Never: app={window.update_check!r} saved={saved.get('update_check')!r}")
         st.ask_yes_no = lambda *a, **k: True
         tab._on_reset_defaults()
-        if window.update_check != update_check.NEVER or tab.update_check_menu.value() != update_check.NEVER:
-            problems.append("Reset to Default didn't put the update check back to Never")
-        if saved.get("update_check") != update_check.NEVER:
+        if window.update_check != update_check.STARTUP or tab.update_check_menu.value() != update_check.STARTUP:
+            problems.append("Reset to Default didn't put the update check back to Check on Start Up")
+        if saved.get("update_check") != update_check.STARTUP:
             problems.append("Reset to Default didn't save it")
     finally:
         st.save_settings, st.ask_yes_no = keep
