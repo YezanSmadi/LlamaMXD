@@ -45,6 +45,7 @@ CloseApplications=yes
 RestartApplications=no
 
 [Tasks]
+Name: "startmenuicon"; Description: "Create a &Start Menu shortcut"; GroupDescription: "Shortcuts:"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Files]
@@ -55,7 +56,7 @@ Source: "..\build\wizard\light\small-159.png"; DestDir: "{app}\uninstall"; DestN
 Source: "..\build\wizard\dark\small-159.png"; DestDir: "{app}\uninstall"; DestName: "logo-dark.png"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\LlamaMXD"; Filename: "{app}\LlamaMXD.exe"
+Name: "{autoprograms}\LlamaMXD"; Filename: "{app}\LlamaMXD.exe"; Tasks: startmenuicon
 Name: "{autodesktop}\LlamaMXD"; Filename: "{app}\LlamaMXD.exe"; Tasks: desktopicon
 
 [Run]
