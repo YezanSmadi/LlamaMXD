@@ -190,6 +190,12 @@ h3,
     padding-top: 23%;
 }
 
+/* The rule spans exactly the title: it is as wide as this box, which is as wide as the word. */
+.cover-head {
+    width: fit-content;
+    flex-shrink: 0;
+}
+
 .cover-title {
     font-weight: 700;
     font-size: 17.5cqw;
@@ -201,10 +207,10 @@ h3,
 }
 
 .cover-rule {
-    width: 56%;
     height: 1.5cqw;
     background: var(--ink);
-    margin: 4cqw auto 5cqw;
+    margin: 4cqw 1cqw 5cqw;
+    width: calc(100% - 2cqw);
     border-radius: 0.7cqw;
     flex-shrink: 0;
 }
