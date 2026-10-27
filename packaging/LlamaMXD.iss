@@ -132,8 +132,16 @@ begin
     finally
       Stream.Free;
     end;
-    UninstallProgressForm.WizardSmallBitmapImage.Stretch := True;
-    UninstallProgressForm.WizardSmallBitmapImage.PngImage.LoadFromFile(Path);
+    { The form's own picture slot is 32px and inset; the installer's fills the 58px header, flush right. }
+    with UninstallProgressForm.WizardSmallBitmapImage do
+    begin
+      Width := ScaleX(58);
+      Height := ScaleY(58);
+      Left := UninstallProgressForm.MainPanel.Width - Width;
+      Top := 0;
+      Stretch := True;
+      PngImage.LoadFromFile(Path);
+    end;
   except
     { Keep the default image rather than stop the uninstall. }
   end;
