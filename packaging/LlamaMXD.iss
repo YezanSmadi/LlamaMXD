@@ -30,10 +30,13 @@ ArchitecturesInstallIn64BitMode=x64compatible
 InfoBeforeFile=..\LICENSE.txt
 SetupIconFile=..\build\LlamaMXD.ico
 UninstallDisplayIcon={app}\LlamaMXD.exe
-WizardStyle=modern
-; Drawn by wizard_images.py from the logo, one file per DPI size; Setup picks the closest.
-WizardImageFile=..\build\wizard\side-*.png
-WizardSmallImageFile=..\build\wizard\small-*.png
+WizardStyle=modern dynamic
+; The logo alone, drawn by wizard_images.py: black line art for a light wizard, white for a dark one
+; (dynamic follows Windows' setting, read once at startup). One file per DPI size; Setup picks the closest.
+WizardImageFile=..\build\wizard\light\side-*.png
+WizardImageFileDynamicDark=..\build\wizard\dark\side-*.png
+WizardSmallImageFile=..\build\wizard\light\small-*.png
+WizardSmallImageFileDynamicDark=..\build\wizard\dark\small-*.png
 OutputDir=..\build\installer
 OutputBaseFilename=LlamaMXD-Setup-{#AppVersion}
 Compression=lzma2/ultra64

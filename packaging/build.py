@@ -87,7 +87,7 @@ def build_installer():
     ver = version()
     nums = numeric_version(ver)
     import wizard_images
-    wizard_images.make(os.path.join(BUILD, "wizard"), ver)
+    wizard_images.make(os.path.join(BUILD, "wizard"))
     subprocess.run([iscc, f"/DAppVersion={ver}", "/DAppNumeric=" + ".".join(map(str, nums)),
                     os.path.join(HERE, "LlamaMXD.iss")], check=True)
     print(f"installer in {os.path.join(BUILD, 'installer')}")
