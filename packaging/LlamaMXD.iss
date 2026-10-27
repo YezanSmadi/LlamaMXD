@@ -63,7 +63,53 @@ Filename: "{app}\LlamaMXD.exe"; Description: "Launch LlamaMXD"; Flags: nowait po
 ; An update started from inside the app (ui/updater.py) passes /RELAUNCH=1 so it comes back up.
 Filename: "{app}\LlamaMXD.exe"; Flags: nowait; Check: Relaunching
 
+[UninstallDelete]
+; Folders the app itself adds to (an update leaves .old files in dependables); each is the app's own, never a shared one.
+Type: filesandordirs; Name: "{app}\dependables"
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}\manual"
+Type: filesandordirs; Name: "{app}\licenses"
+Type: filesandordirs; Name: "{app}\uninstall"
+
 [Code]
+function AppRunning: Boolean;
+var
+  Code: Integer;
+begin
+  Result := Exec(ExpandConstant('{cmd}'),
+    '/C tasklist /FI "IMAGENAME eq LlamaMXD.exe" /NH | find /I "LlamaMXD.exe" > nul',
+    '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
+end;
+
+{ Close every running LlamaMXD: politely first (it saves its settings), then by force. Its tools end with it. }
+procedure CloseApp;
+var
+  Code, I: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM LlamaMXD.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  for I := 1 to 16 do
+  begin
+    if not AppRunning then Break;
+    Sleep(500);
+  end;
+  if AppRunning then
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM LlamaMXD.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  for I := 1 to 10 do
+  begin
+    if not AppRunning then Break;
+    Sleep(500);
+  end;
+  Sleep(1000);   { let Windows release the files }
+end;
+
+function InitializeUninstall: Boolean;
+begin
+  Result := True;
+  if UninstallSilent or not AppRunning then Exit;
+  Result := MsgBox('LlamaMXD is running. It has to be closed to uninstall it, and any unfinished jobs will be lost.' + #13#10#13#10 +
+                   'Close it and continue?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+end;
+
 function Relaunching: Boolean;
 begin
   Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
@@ -88,6 +134,8 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: String;
 begin
+  { After the confirmation, before any file is removed. }
+  if CurUninstallStep = usUninstall then CloseApp;
   if CurUninstallStep <> usPostUninstall then Exit;
   DataDir := ExpandConstant('{localappdata}\LlamaMXD');
   if UninstallSilent or not DirExists(DataDir) then Exit;
