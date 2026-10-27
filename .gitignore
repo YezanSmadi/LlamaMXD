@@ -15,3 +15,8 @@ dependables/
 build/
 dist/
 packaging/version_info.txt
+
+# Editor and assistant notes, kept locally only
+.vscode/
+CLAUDE.md
+.claude/
