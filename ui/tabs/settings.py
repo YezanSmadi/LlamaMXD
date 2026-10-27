@@ -387,6 +387,11 @@ class SettingsTab(QWidget):
         `MainWindow._style_tab`)."""
         return (self._header_row, self.pages.currentWidget(), self._actions_row)
 
+    def show_page(self, name):
+        """Select a page without styling it; `MainWindow.show_tab` does that once, when shown."""
+        self.sub_tab_bar.set_active(name, emit=False)
+        self.pages.setCurrentIndex(SETTINGS_PAGES.index(name))
+
     def _on_subtab_changed(self, name):
         """Switch pages, then catch the new one up to the current stylesheet and scale."""
         self.pages.setCurrentIndex(SETTINGS_PAGES.index(name))

@@ -49,10 +49,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -321,10 +327,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -593,10 +605,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -865,10 +883,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -1221,10 +1245,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -1577,10 +1607,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -1933,10 +1969,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -2205,10 +2247,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -2477,10 +2525,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -2749,10 +2803,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -2937,7 +2997,7 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/ScaledLabel#0": [
    369,
    392,
-   68,
+   66,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/TimeSpinner#0": [
@@ -3147,10 +3207,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -3335,7 +3401,7 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/ScaledLabel#0": [
    369,
    392,
-   68,
+   66,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/TimeSpinner#0": [
@@ -3527,10 +3593,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -3715,7 +3787,7 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/ScaledLabel#0": [
    554,
    586,
-   102,
+   99,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/TimeSpinner#0": [
@@ -3907,10 +3979,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -4095,7 +4173,7 @@
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/ScaledLabel#0": [
    738,
    784,
-   136,
+   132,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/EncodingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/TimeSpinner#0": [
@@ -4287,10 +4365,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -4589,10 +4673,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -4891,10 +4981,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -5193,10 +5289,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -5591,10 +5693,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -5989,10 +6097,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -6387,10 +6501,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -6689,10 +6809,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -6991,10 +7117,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -7293,10 +7425,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -7565,10 +7703,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -7837,10 +7981,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -8109,10 +8259,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -8297,7 +8453,7 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/ScaledLabel#0": [
    369,
    392,
-   68,
+   66,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/TimeSpinner#0": [
@@ -8507,10 +8663,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -8695,7 +8857,7 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/ScaledLabel#0": [
    369,
    392,
-   68,
+   66,
    26
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/TimeSpinner#0": [
@@ -8887,10 +9049,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -9075,7 +9243,7 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/ScaledLabel#0": [
    554,
    586,
-   102,
+   99,
    39
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/TimeSpinner#0": [
@@ -9267,10 +9435,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -9455,7 +9629,7 @@
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/ScaledLabel#0": [
    738,
    784,
-   136,
+   132,
    52
   ],
   "/_TabFrame#0/QStackedWidget#0/MuxingTab#0/QStackedWidget#0/QWidget#0/QWidget#1/QWidget#1/TimeSpinner#0": [
@@ -9647,10 +9821,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -9919,10 +10099,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -10191,10 +10377,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -10463,10 +10655,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -10765,10 +10963,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -11067,10 +11271,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -11369,10 +11579,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -11563,10 +11779,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -11757,10 +11979,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -11951,10 +12179,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -12241,10 +12475,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -12531,10 +12771,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -12821,10 +13067,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -13051,10 +13303,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -13281,10 +13539,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -13511,10 +13775,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -13741,10 +14011,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -13971,10 +14247,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -14201,10 +14483,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -14485,10 +14773,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -14769,10 +15063,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,
@@ -15053,10 +15353,16 @@
    54
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   8,
    518,
-   200,
+   192,
    12
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   164,
+   509,
+   28,
+   28
   ],
   "/Sidebar#0/_AccentBar#0": [
    24,
@@ -15511,10 +15817,16 @@
    80
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   12,
    777,
-   300,
+   288,
    18
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   246,
+   764,
+   42,
+   42
   ],
   "/Sidebar#0/_AccentBar#0": [
    37,
@@ -15969,10 +16281,16 @@
    107
   ],
   "/Sidebar#0/ScaledLabel#1": [
-   0,
+   16,
    1036,
-   400,
+   384,
    24
+  ],
+  "/Sidebar#0/_AboutButton#0": [
+   328,
+   1019,
+   56,
+   56
   ],
   "/Sidebar#0/_AccentBar#0": [
    49,

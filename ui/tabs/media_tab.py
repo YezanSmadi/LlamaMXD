@@ -219,7 +219,7 @@ class MediaTab(QWidget):
             spinner.valueChanged.connect(self._on_trim_change)
         box, self.start_label = labeled("Start Time:", self.start_time_spinner)
         r2.addWidget(box)
-        box, self.duration_label = labeled("Clip Duration:", self.duration_time_spinner)
+        box, self.duration_label = labeled("File Duration:", self.duration_time_spinner)
         r2.addWidget(box)
         scale.spacer(r2, 2)
         self.av_sync_check = CheckBox("A/V Sync", checked=True)
@@ -284,8 +284,18 @@ class MediaTab(QWidget):
         self.sub_tab_bar.set_marked("Chapters", stripped)
 
     def _on_trim_change(self, *_):
-        """A trim spinner changed — refresh just the rundown."""
+        """A trim spinner changed — keep the output at least a second long, then refresh the rundown."""
         if self._ready:
+            total = int(self.app.media.info.get("duration") or 0)
+            if total > 1 and self.app.media.current_file_path:
+                start = self.start_time_spinner.seconds()
+                if start > total - 1:
+                    self.start_time_spinner.set_seconds(total - 1)    # re-enters; refreshes then
+                    return
+                duration = self.duration_time_spinner.seconds()
+                if duration > total - start:
+                    self.duration_time_spinner.set_seconds(total - start)
+                    return
             self._refresh_summary()
 
     def _update_format_tip(self):

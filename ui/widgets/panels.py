@@ -9,10 +9,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import numpy as np
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEasingCurve, QEvent, QPointF, QRectF, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QApplication, QFileDialog, QGridLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from core import llamalog
 from ui import scale
@@ -22,6 +22,7 @@ from ui.scale import px
 from ui.widgets.controls import button, restyle
 from ui.widgets.marquee import MarqueeGroup, MarqueeLabel
 from ui.widgets.text import ScaledLabel, ui_font
+from ui.widgets.tooltip import tip
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ASSETS = os.path.join(_REPO_ROOT, "assets")
@@ -766,6 +767,61 @@ class _AccentBar(QWidget):
         p.drawRoundedRect(rect, r, r)
 
 
+class _AboutButton(QWidget):
+    """A small secondary-coloured disc holding the open-book icon: the sidebar footer's link to
+    Settings > About."""
+
+    clicked = Signal()
+    SIZE = 28
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        scale.fixed(self, self.SIZE, self.SIZE)
+        self.setCursor(Qt.PointingHandCursor)
+        self._hover = False
+        self._renderer = QSvgRenderer(os.path.join(ASSETS, "open-book.svg"))
+        T.theme.changed.connect(self.update)
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, event):
+        # Taking the press is what routes the release here; left to the default it goes to the
+        # window behind (which may start dragging it).
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        scale.begin(p)
+        rect = scale.ref_rect(self)
+        p.setPen(Qt.NoPen)
+        p.setBrush(T.theme.color("secondary_hover" if self._hover else "secondary"))
+        p.drawEllipse(rect)
+        if self._renderer.isValid():
+            # Tinted like the button text; SourceIn keeps the icon's alpha.
+            side = rect.width() * 0.62
+            icon = QImage(256, 256, QImage.Format_ARGB32_Premultiplied)
+            icon.fill(Qt.transparent)
+            ip = QPainter(icon)
+            ip.setRenderHint(QPainter.Antialiasing)
+            self._renderer.render(ip, QRectF(0, 0, 256, 256))
+            ip.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            ip.fillRect(icon.rect(), T.theme.color("secondary_text"))
+            ip.end()
+            p.setRenderHint(QPainter.SmoothPixmapTransform)
+            p.drawImage(QRectF(rect.center().x() - side / 2, rect.center().y() - side / 2, side, side), icon)
+
+
 # --------------------------------------------------------------------------- #
 #  Sidebar + active-tab pipe
 # --------------------------------------------------------------------------- #
@@ -773,6 +829,7 @@ class Sidebar(QWidget):
     """Title, logo, the four nav buttons, then Settings and the footer at the bottom."""
 
     navigate = Signal(str)
+    about_requested = Signal()
     WIDTH = 200
     LOGO_SIZE = 170
 
@@ -810,11 +867,37 @@ class Sidebar(QWidget):
 
         footer = ScaledLabel(f"© {datetime.now().year} Yezan Smadi     {VERSION}")
         footer.setProperty("role", "sidebarFooter")
-        footer.setAlignment(Qt.AlignCenter)
-        lay.addWidget(footer)
+        footer.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        footer_row = QHBoxLayout()
+        scale.margins(footer_row, 8, 0, 0, 0)
+        footer_row.addWidget(footer)
+        lay.addLayout(footer_row)
+        # Floats over the footer's right end instead of sitting in the layout, so it never
+        # changes the spacing of the buttons above.
+        self._footer = footer
+        self._about = _AboutButton(self)
+        self._about.clicked.connect(self.about_requested)
+        tip(self._about, "About LlamaMXD")
+        footer.installEventFilter(self)
         T.theme.changed.connect(self._load_logo)
         scale.changed.connect(self._load_logo)
         T.theme.changed.connect(self.update)
+
+    def eventFilter(self, obj, event):
+        if obj is self._footer and event.type() in (QEvent.Move, QEvent.Resize, QEvent.Show):
+            self._place_about()
+        return super().eventFilter(obj, event)
+
+    def _place_about(self):
+        """The About button: the footer's vertical centre, a small margin in from the right."""
+        button_ = self._about
+        y = self._footer.geometry().center().y() - button_.height() // 2
+        button_.move(self.width() - button_.width() - px(8), y)
+        button_.raise_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._place_about()
 
     NAV_BUTTON_WIDTH = 110  # narrower than the sidebar, so the cable's lead shows behind it
 

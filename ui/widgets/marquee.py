@@ -169,8 +169,10 @@ class MarqueeLabel(QWidget):
         fm = QFontMetricsF(self._font)
         tw = fm.horizontalAdvance(self._text)
         rect = scale.ref_rect(self)
+        # A fixed baseline, so a glyph from a fallback font (the "→") can't shift the line.
+        baseline = (rect.height() + fm.ascent() - fm.descent()) / 2
         if tw <= rect.width():
-            p.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, self._text)
+            p.drawText(QPointF(0, baseline), self._text)
             return
         span = tw + _MARQUEE_GAP
         sweep = span / _MARQUEE_SPEED
@@ -179,6 +181,5 @@ class MarqueeLabel(QWidget):
         # Holds at rest before the sweep and after it ends (waiting for a slower groupmate);
         # travel pinned at `sweep` looks identical to 0.
         travel = max(0.0, min(cycle_t - _MARQUEE_HOLD, sweep)) * _MARQUEE_SPEED
-        baseline = (rect.height() + fm.ascent() - fm.descent()) / 2
         p.drawText(QPointF(-travel, baseline), self._text)
         p.drawText(QPointF(-travel + span, baseline), self._text)

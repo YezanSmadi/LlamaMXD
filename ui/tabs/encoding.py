@@ -1173,12 +1173,13 @@ class EncodingTab(MediaTab):
 
         start = self.start_time_spinner.seconds()
         duration = self.duration_time_spinner.seconds()
+        total = int(self.app.media.info.get("duration") or 0)
         if no_file:
             length = ("— no file imported —", "stop")
         elif not start and not duration:
-            length = ("Whole File", None)
+            length = (hms(total) if total else "Whole File", None)
         elif not duration:
-            length = (f"{hms(start)} → end", None)
+            length = (f"{hms(start)} → {hms(total) if total else 'end'}", None)
         else:
             length = (f"{hms(start)} → {hms(start + duration)}", None)
         self.summary.set_values([video, audio, length])

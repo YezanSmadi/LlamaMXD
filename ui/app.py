@@ -254,6 +254,7 @@ class MainWindow(QWidget):
         layout.setSizeConstraint(QLayout.SetNoConstraint)
         self.sidebar = Sidebar()
         self.sidebar.navigate.connect(self.show_tab)
+        self.sidebar.about_requested.connect(self._show_about)
         layout.addWidget(self.sidebar)
 
         frame_host = QVBoxLayout()
@@ -302,6 +303,16 @@ class MainWindow(QWidget):
     # ------------------------------------------------------------------ #
     #  Tabs
     # ------------------------------------------------------------------ #
+    def _show_about(self):
+        """The sidebar's open-book button: Settings, on its About page."""
+        # Swap the page before showing the tab, so only About is styled (not the page that was
+        # showing, then About).
+        self.tabs["Settings"].show_page("About")
+        self.show_tab("Settings")
+        # Once the switch has been laid out, a second pass, as `showEvent` does: the freshly
+        # shown page otherwise isn't measured until the window next resizes.
+        QTimer.singleShot(0, lambda: self.current_tab == "Settings" and self.show_tab("Settings", animate=False))
+
     def show_tab(self, name, animate=True):
         outgoing = self.tabs.get(self.current_tab)
         incoming = self.tabs[name]
