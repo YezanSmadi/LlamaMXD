@@ -31,6 +31,9 @@ InfoBeforeFile=..\LICENSE.txt
 SetupIconFile=..\build\LlamaMXD.ico
 UninstallDisplayIcon={app}\LlamaMXD.exe
 WizardStyle=modern
+; Drawn by wizard_images.py from the logo, one file per DPI size; Setup picks the closest.
+WizardImageFile=..\build\wizard\side-*.png
+WizardSmallImageFile=..\build\wizard\small-*.png
 OutputDir=..\build\installer
 OutputBaseFilename=LlamaMXD-Setup-{#AppVersion}
 Compression=lzma2/ultra64

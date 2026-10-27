@@ -86,6 +86,8 @@ def build_installer():
         sys.exit("Inno Setup 6 not found (install it, or put ISCC.exe on PATH)")
     ver = version()
     nums = numeric_version(ver)
+    import wizard_images
+    wizard_images.make(os.path.join(BUILD, "wizard"), ver)
     subprocess.run([iscc, f"/DAppVersion={ver}", "/DAppNumeric=" + ".".join(map(str, nums)),
                     os.path.join(HERE, "LlamaMXD.iss")], check=True)
     print(f"installer in {os.path.join(BUILD, 'installer')}")
