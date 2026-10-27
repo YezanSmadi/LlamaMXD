@@ -32,7 +32,7 @@ from ui.keymap import canonical
 from ui.widgets.dialogs import ask_yes_no, show_message
 from ui.widgets.keyfield import KeyField, display_key
 from ui.widgets.panels import VERSION, BorderedFrame, SubTabBar
-from ui.updater import LABELS, UpdateFlow
+from ui.updater import LABELS, REPAIR_LABELS, REPAIR_TEXT, UpdateFlow
 from ui.widgets.tooltip import tip
 
 SETTINGS_PAGES = ("Appearance", "Output", "Performance", "Shortcuts", "About")
@@ -470,8 +470,15 @@ class SettingsTab(QWidget):
         self.update_btn.setProperty("compact", True)
         tip(self.update_btn, "Looks on GitHub for a newer LlamaMXD and for newer versions of ffmpeg, yt-dlp and "
                              "Deno. Nothing is downloaded until you say yes.")
-        self.update_flow = UpdateFlow(self.app, self.update_btn)
         version_l.addWidget(self.update_btn, 0, Qt.AlignVCenter)
+        # role="queue" is the quieter partner (secondary; primary in Terminal).
+        self.repair_btn = button(REPAIR_TEXT, role="queue", width=button_width_for(REPAIR_LABELS), height=22)
+        self.repair_btn.setProperty("compact", True)
+        tip(self.repair_btn, "Checks LlamaMXD's installed files against the list it was built with. If any are "
+                             "missing or damaged it can reinstall over them; your settings, presets and any newer "
+                             "tools are kept.")
+        version_l.addWidget(self.repair_btn, 0, Qt.AlignVCenter)
+        self.update_flow = UpdateFlow(self.app, self.update_btn, self.repair_btn)
         page.addWidget(version_row, 0, Qt.AlignLeft)
         scale.spacer(page, 6)
 

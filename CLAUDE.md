@@ -152,7 +152,8 @@ change here), and even `os._exit` runs the DLLs' unload code where it happens.
   the first 13 always present at the size needed.
 - `check_userdata` — where settings.json / presets.json resolve (source vs a simulated frozen build), the data folder made on demand, nothing read from or written beside the exe, and a save that reads back.
 - `check_updates` — `core/updates.py` offline: version ordering (a release above its own beta, `1.0` = `1.0.0`), what `check` reports for a faked GitHub (newer app, pre-releases only for someone on one, drafts and assets without a digest ignored, a 404, every request failing), downloads checked against SHA-256 from a local server, and the tool swap (replaced, rolled back, refused, done over a running exe).
-- `check_launch` — the launch-time update check, offscreen with a faked GitHub: the `update_check` setting's default and validation, the Performance dropdown (saving, Reset to Default), that launch starts a check only on Check on Start Up, and that a launch-time check is silent when offline / up to date while the About button is not (both prompt when there is something to offer). Shown to fail with each of those two behaviours broken.
+- `check_repair` — `core/repair.py` offline: the file list written and read back, each kind of damage reported (missing, same-size change, truncated, a bad / absent / wrongly shaped list; extra files ignored), a tool an update made newer accepted but an older / equal / unrunnable one not, the installer found for an exact version (drafts, missing checksums, pre-releases), and a downloaded installer reused only while its checksum matches.
+- `check_launch` — the launch-time update check and the Repair button, offscreen with a faked GitHub: the `update_check` setting's default and validation, the Performance dropdown (saving, Reset to Default), that launch starts a check only on Check on Start Up, and that a launch-time check is silent when offline / up to date while the About button is not (both prompt when there is something to offer), and Repair through every dialog (nothing to repair, declined, accepted down to the installer launch and closing the app, this version unpublished, a busy queue). Shown to fail with each of those two behaviours broken.
 - `check_orphans` — the real app (`main.main`, sandboxed, offscreen) as a child process imports the HDR
   fixture and turns HDR->SDR on, then closes its window, and a second run is killed outright
   (`Popen.kill`, like a crash or End Task) — each at the moment tone-map ffmpegs are running (a run
@@ -198,6 +199,7 @@ core/theme.py             brand palettes, contrast helpers, settings.json read/w
 core/userdata.py          where settings.json / presets.json live: the repo from source, %LOCALAPPDATA%\LlamaMXD once frozen
 core/updates.py           update checks + installs for LlamaMXD and the bundled tools, from GitHub releases (no Qt)
 core/update_check.py      Settings' "Check for Updates" names: Check on Start Up / Never (default Never)
+core/repair.py            files.json (every file's size + SHA-256, written at build) and verify(): what an installed copy is missing
 core/about.py             Settings' About page: repo / issue-tracker URLs, the GPL short notice, paths to LICENSE.txt and licenses/
 core/llamalog.py          LlamaLog: the rotating log file, crash hooks, URL scrubbing, per-job output ring buffer
 core/probe.py             ffprobe: probe_media, a file's real length, the HDR colour-tag check
@@ -3633,6 +3635,16 @@ also runs one 2.5s after the window is shown (`MainWindow.run_startup_update_che
   it is *not* in the tools job object that would kill it with the app) as `/SILENT /NORESTART /CLOSEAPPLICATIONS
   /RELAUNCH=1` and closes the app; the installer's `[Run]` entry with `Check: Relaunching` starts it again. A copy that
   isn't installed (`userdata.is_frozen()` false) can't update itself: its Yes opens the releases page.
+- **Repair** (the quieter button beside Check for Updates; `UpdateFlow.repair`). `packaging/build.py` writes `files.json` into the
+  app folder (size + SHA-256 of every file, the bundled tools' versions); Repair hashes the installed files against it on a worker
+  (`core.repair.verify`, a few seconds). Intact -> "Nothing to Repair". Missing / damaged -> a Yes / No naming up to six of them;
+  a tool that an in-app update made *newer* is not damage, an older / same-version-but-different / unrunnable one is. Yes finds the
+  published installer for exactly `VERSION` (`updates.release_for`; if that release is gone it offers the newest instead, with its own
+  question), downloads it (a copy already in `%TEMP%\LlamaMXD-update` whose checksum matches is reused) and hands over exactly like an
+  update: silent, `/RELAUNCH=1`, app closes. **Settings-safe**: a silent installer never resets settings, keeps newer tools, and
+  the data folder isn't touched. A copy without a `files.json` (an older install) can still reinstall, after saying it can't check.
+  Not installed (source) -> a message, nothing to repair. Refused while the Queue has unfinished jobs. Update and Repair share one
+  busy flag so only one runs at a time.
 - **Tool swaps** (`install_tool` / `_swap`): download, extract (`ffmpeg` brings `ffprobe` with it), run the new file's
   `--version`, then rename each old file to `.old`, move the new one in, run it again, and delete the `.old`; any failure
   restores every old file. A running exe can be renamed but not overwritten, which is why it is a rename. Leftover
@@ -3666,6 +3678,11 @@ beside its exe (`LICENSE.txt`, `licenses/`, the manual, the four tools), then co
   Inno's `{localappdata}` comes from Windows, not from the `LOCALAPPDATA` environment variable, so sandboxing that variable
   does *not* keep a test away from the real `%LOCALAPPDATA%\LlamaMXD` (an early repair test deleted a real `settings.json`
   that way).
+- **Nothing may be running from the install folder** before files are replaced or removed (`CloseRunningCopies`: every
+  `LlamaMXD.exe` by name, politely then by force, then `CloseTools`, a small PowerShell script that closes whatever runs from a
+  path *inside the folder* — a tool started by hand, say). It goes by path, never by name, so an ffmpeg elsewhere (on PATH, from
+  another program) is never touched, and it skips the uninstaller's own process. Setup does this in `PrepareToInstall` for an
+  existing install (asking first unless silent), the uninstaller after its own confirmation.
 - **Uninstall** closes every running LlamaMXD first (politely, then by force; asks unless silent), and `[UninstallDelete]`
   clears the app's own folders. Its "also delete settings?" question is skipped when silent.
 - **Shortcuts.** A Start Menu task (ticked) and a desktop task (unticked); the previous choice is remembered on upgrade.

@@ -100,9 +100,10 @@ def is_prerelease(text):
     return bool(key) and key[1] != _RELEASED
 
 
-def installed_version(spec):
-    """The installed version of a bundled tool (as the tool reports it), or None."""
-    path = tools.find_tool(spec["name"])
+def installed_version(spec, path=None):
+    """The version of a bundled tool (as the tool reports it), or None. `path` names a copy other than
+    the one the app would run."""
+    path = path or tools.find_tool(spec["name"])
     if not path:
         return None
     try:
@@ -143,24 +144,45 @@ def _asset(release, pattern):
     return None
 
 
-def _check_app(current):
-    """The newest published LlamaMXD installer that is newer than `current`, or None. A pre-release
-    is offered only to someone already on one."""
-    releases = _get_json(_API.format(repo=APP_REPO) + "?per_page=20")
-    if not releases:
-        return None
+def _installers(current):
+    """(version key, release, asset) of every published installer, newest first. A pre-release is
+    included only for someone already on one."""
+    releases = _get_json(_API.format(repo=APP_REPO) + "?per_page=20") or []
     allow_pre = is_prerelease(current)
-    best = None
+    found = []
     for release in releases:
         key = parse_version(release.get("tag_name"))
         if release.get("draft") or key is None or (release.get("prerelease") and not allow_pre):
             continue
         asset = _asset(release, APP_ASSET)
-        if asset and (best is None or key > best[0]):
-            best = (key, release, asset)
-    if best and best[0] > (parse_version(current) or ((0, 0, 0, 0), (-1, 0))):
-        return AppUpdate(best[1]["tag_name"].lstrip("v"), best[1].get("html_url", ""), best[2])
+        if asset:
+            found.append((key, release, asset))
+    found.sort(key=lambda item: item[0], reverse=True)
+    return found
+
+
+def _as_update(item):
+    return AppUpdate(item[1]["tag_name"].lstrip("v"), item[1].get("html_url", ""), item[2])
+
+
+def _check_app(current):
+    """The newest published LlamaMXD installer that is newer than `current`, or None."""
+    found = _installers(current)
+    if found and found[0][0] > (parse_version(current) or ((0, 0, 0, 0), (-1, 0))):
+        return _as_update(found[0])
     return None
+
+
+def release_for(version):
+    """The published installer for exactly `version`, or None."""
+    want = parse_version(version)
+    return next((_as_update(item) for item in _installers(version) if item[0] == want), None)
+
+
+def newest_installer(current):
+    """The newest published installer, whether or not it is newer than `current`, or None."""
+    found = _installers(current)
+    return _as_update(found[0]) if found else None
 
 
 def _check_tool(spec, report):
@@ -325,11 +347,25 @@ def _swap(folder, staged, verify):
         _remove(old)
 
 
+def _sha256_of(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def download_installer(update, progress=None):
-    """Download and verify LlamaMXD's installer into a temp folder; the path to it."""
+    """LlamaMXD's installer in a temp folder, downloaded and verified; one already there whose checksum
+    matches is reused, so a second attempt doesn't download it again."""
     folder = os.path.join(tempfile.gettempdir(), "LlamaMXD-update")
     os.makedirs(folder, exist_ok=True)
-    return download(update.asset, os.path.join(folder, update.asset.name), progress)
+    path = os.path.join(folder, update.asset.name)
+    if os.path.isfile(path) and _sha256_of(path) == update.asset.digest.split(":", 1)[1].lower():
+        if progress:
+            progress(update.asset.size, update.asset.size)
+        return path
+    return download(update.asset, path, progress)
 
 
 def launch_installer(path):

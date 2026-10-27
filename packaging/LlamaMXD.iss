@@ -304,6 +304,54 @@ begin
   Sleep(1000);   { let Windows release the files }
 end;
 
+{ PowerShell that closes every process running from inside a folder (LlamaMXD's own tools included): politely
+  first, then by force. It goes by the program's path, never its name, so an ffmpeg from somewhere else is left
+  alone; the uninstaller's own process is skipped. }
+function CloseToolsScript: String;
+begin
+  Result :=
+    'param([string]$Dir)' + #13#10 +
+    '$prefix = $Dir.TrimEnd(''\'') + ''\''' + #13#10 +
+    'function Mine { Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and $_.Name -notlike ''unins*'' } }' + #13#10 +
+    'Mine | ForEach-Object { try { $null = $_.CloseMainWindow() } catch {} }' + #13#10 +
+    'for ($i = 0; $i -lt 16 -and (Mine); $i++) { Start-Sleep -Milliseconds 500 }' + #13#10 +
+    'Mine | Stop-Process -Force -ErrorAction SilentlyContinue' + #13#10;
+end;
+
+procedure CloseTools(Dir: String);
+var
+  Path: String;
+  Code: Integer;
+begin
+  Path := ExpandConstant('{tmp}\close-tools.ps1');
+  SaveStringToFile(Path, CloseToolsScript, False);
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -ExecutionPolicy Bypass -File "' + Path + '" -Dir "' + Dir + '"', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  DeleteFile(Path);
+end;
+
+{ Every LlamaMXD, then anything else running from the install folder (a tool started by hand, say). }
+procedure CloseRunningCopies(Dir: String);
+begin
+  CloseApp;
+  CloseTools(Dir);
+end;
+
+{ Before files are replaced over an existing install: nothing may be running from it. }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if not DirExists(ExpandConstant('{app}')) then Exit;   { a first install has nothing to close }
+  if (not WizardSilent) and AppRunning then
+    if MsgBox('LlamaMXD is running. It has to be closed to install over it, and any unfinished jobs will be lost.' + #13#10#13#10 +
+              'Close it and continue?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDNO then
+    begin
+      Result := 'Setup was stopped because LlamaMXD is still running.';
+      Exit;
+    end;
+  CloseRunningCopies(ExpandConstant('{app}'));
+end;
+
 function InitializeUninstall: Boolean;
 begin
   Result := True;
@@ -359,7 +407,7 @@ var
   DataDir: String;
 begin
   { After the confirmation, before any file is removed. }
-  if CurUninstallStep = usUninstall then CloseApp;
+  if CurUninstallStep = usUninstall then CloseRunningCopies(ExpandConstant('{app}'));
   if CurUninstallStep <> usPostUninstall then Exit;
   DataDir := ExpandConstant('{localappdata}\LlamaMXD');
   if UninstallSilent or not DirExists(DataDir) then Exit;

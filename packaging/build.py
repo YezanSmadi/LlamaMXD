@@ -129,7 +129,9 @@ def main():
         if not os.path.isfile(src):
             sys.exit(f"missing bundled tool: {src}")
         shutil.copy2(src, tools)
-    print(f"built {APP} (v{version()})")
+    from core import repair
+    count = repair.write_manifest(APP, version(), bundled_tool_versions())
+    print(f"built {APP} (v{version()}), file list of {count} files")
     if "--installer" in sys.argv:
         build_installer()
 

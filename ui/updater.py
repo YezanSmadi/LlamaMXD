@@ -1,18 +1,22 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yezan Smadi
-"""Settings > About's "Check for Updates": asks GitHub, then offers a newer LlamaMXD and newer bundled
-tools one Yes / No question each. Downloads run off the GUI thread; the button shows their progress."""
+"""Settings > About's "Check for Updates" and "Repair": asks GitHub, then offers a newer LlamaMXD and newer
+bundled tools one Yes / No question each; Repair checks the installed files against their list and, if
+any are missing or damaged, reinstalls over the copy. Downloads run off the GUI thread; the buttons show progress."""
 from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 
-from core import llamalog, updates, userdata
+from core import llamalog, repair, updates, userdata
 from ui.widgets.dialogs import ask_yes_no, show_message
 from ui.widgets.panels import VERSION
 from ui.workers import emit_progress, run_async
 
 IDLE_TEXT = "Check for Updates"
-# Every label the button can show, so its width can be sized to the widest.
+REPAIR_TEXT = "Repair"
+# Every label each button can show, so its width can be sized to the widest.
 LABELS = (IDLE_TEXT, "Checking...", "Downloading 100%", "Updating 100%")
+REPAIR_LABELS = (REPAIR_TEXT, "Checking 100%", "Downloading 100%")
+_SHOWN_PROBLEMS = 6
 
 
 def _mb(size):
@@ -21,28 +25,41 @@ def _mb(size):
 
 
 class UpdateFlow:
-    """The Check for Updates button's behaviour."""
+    """The Check for Updates and Repair buttons' behaviour (one runs at a time)."""
 
-    def __init__(self, app, btn):
+    def __init__(self, app, btn, repair_btn=None):
         self.app = app
         self.btn = btn
+        self.repair_btn = repair_btn
+        self._shown = btn   # the button that is showing progress
         self._busy = False
         btn.clicked.connect(self.start)
+        if repair_btn:
+            repair_btn.clicked.connect(self.repair)
 
     # ------------------------------------------------------------------ #
     #  Button state
     # ------------------------------------------------------------------ #
+    def _buttons(self):
+        return [b for b in (self.btn, self.repair_btn) if b]
+
     def _set(self, text, busy=True):
         self._busy = busy
-        self.btn.setText(text)
-        self.btn.setEnabled(not busy)
+        self._shown.setText(text)
+        for button in self._buttons():
+            button.setEnabled(not busy)
 
     def _idle(self):
-        self._set(IDLE_TEXT, busy=False)
+        self.btn.setText(IDLE_TEXT)
+        if self.repair_btn:
+            self.repair_btn.setText(REPAIR_TEXT)
+        self._busy = False
+        for button in self._buttons():
+            button.setEnabled(True)
 
     def _show_progress(self, value):
         label, pct = value
-        self.btn.setText(f"{label} {pct}%")
+        self._shown.setText(f"{label} {pct}%")
 
     def _progress(self, label, before, grand):
         """A download callback reporting `label` and the share done of `grand` bytes (`before` already
@@ -57,12 +74,12 @@ class UpdateFlow:
                 emit_progress(self._show_progress, (label, pct))
         return report
 
-    def _queue_busy(self):
+    def _queue_busy(self, doing="check for updates"):
         """Say so and return True while jobs are unfinished: an update must not pull files out from under them."""
         if self.app.tabs["Queue"].pending_task_count() == 0:
             return False
         show_message(self.app, "Unfinished Jobs",
-                     "Finish or clear the jobs in the Queue first, then check for updates again.")
+                     f"Finish or clear the jobs in the Queue first, then {doing} again.")
         return True
 
     # ------------------------------------------------------------------ #
@@ -72,6 +89,7 @@ class UpdateFlow:
         """Check now. `startup` is the launch-time check: it says nothing unless there is something to offer."""
         if self._busy:
             return
+        self._shown = self.btn
         self._set("Checking...")
         run_async(updates.check, lambda report: self._on_report(report, startup), VERSION)
 
@@ -119,29 +137,112 @@ class UpdateFlow:
             return True
         if self._queue_busy():
             return True
+        self._download_and_install(update, self.btn, "Update")
+        return True
 
+    def _download_and_install(self, update, button, what):
+        """Download and verify `update`'s installer, then hand over to it (it closes this app and reopens it)."""
         def work():
             try:
                 return ("ok", updates.download_installer(update, self._progress("Downloading", 0, update.asset.size)))
             except updates.UpdateError as exc:
                 return ("error", str(exc))
 
+        self._shown = button
         self._set("Downloading 0%")
-        run_async(work, self._on_installer)
-        return True
+        run_async(work, lambda result: self._on_installer(result, what))
 
-    def _on_installer(self, result):
+    def _on_installer(self, result, what="Update"):
         self._idle()
         if result is None or result[0] != "ok":
-            show_message(self.app, "Couldn't Update LlamaMXD", result[1] if result else "The download failed.")
+            show_message(self.app, f"Couldn't {what} LlamaMXD", result[1] if result else "The download failed.")
             return
         try:
             updates.launch_installer(result[1])
         except OSError as exc:
             llamalog.get("updates").error("Couldn't start the installer: %s", exc)
-            show_message(self.app, "Couldn't Update LlamaMXD", f"The installer couldn't be started ({exc}).")
+            show_message(self.app, f"Couldn't {what} LlamaMXD", f"The installer couldn't be started ({exc}).")
             return
         QTimer.singleShot(300, self.app.close)
+
+    # ------------------------------------------------------------------ #
+    #  Repair
+    # ------------------------------------------------------------------ #
+    def repair(self):
+        """Check the installed files against the list built with them; offer to reinstall over any damage."""
+        if self._busy:
+            return
+        folder = repair.app_dir()
+        if folder is None:
+            show_message(self.app, "Repair LlamaMXD",
+                         "This copy of LlamaMXD isn't installed (it is running from its source folder), "
+                         "so there is nothing to repair.")
+            return
+        if self._queue_busy("repair"):
+            return
+        self._shown = self.repair_btn
+        self._set("Checking 0%")
+        last = [-1]
+
+        def progress(done, total):
+            pct = int(100 * done / total) if total else 100
+            if pct != last[0]:
+                last[0] = pct
+                emit_progress(self._show_progress, ("Checking", pct))
+
+        run_async(lambda: repair.verify(folder, progress), self._on_verified)
+
+    def _on_verified(self, result):
+        self._idle()
+        if result is None:
+            show_message(self.app, "Couldn't Check the Files", "Something went wrong. The log has the details.")
+            return
+        keeps = "Your settings, presets and any newer tools are kept. LlamaMXD will close and reopen."
+        if not result.manifest_found:
+            question = ("LlamaMXD can't check its files because this install has no file list. Reinstall it anyway?\n\n"
+                        f"This downloads the installer for version {VERSION} (a few hundred MB) and installs it over "
+                        f"this copy. {keeps}")
+        elif not result.problems:
+            show_message(self.app, "Nothing to Repair", f"All {result.total} of LlamaMXD's files are intact.")
+            return
+        else:
+            names = [f"{rel} ({why})" for rel, why in result.problems[:_SHOWN_PROBLEMS]]
+            more = len(result.problems) - len(names)
+            listing = "\n".join("• " + n for n in names) + (f"\n• and {more} more" if more > 0 else "")
+            question = (f"{len(result.problems)} of LlamaMXD's {result.total} files are missing or damaged:\n\n{listing}"
+                        f"\n\nRepair them? This downloads the installer for version {VERSION} (a few hundred MB) and "
+                        f"installs it over this copy. {keeps}")
+        if not ask_yes_no(self.app, "Repair LlamaMXD", question) or self._queue_busy("repair"):
+            return
+        self._shown = self.repair_btn
+        self._set("Checking...")
+
+        def lookup():
+            try:
+                exact = updates.release_for(VERSION)
+                return ("ok", exact) if exact else ("other", updates.newest_installer(VERSION))
+            except updates.UpdateError as exc:
+                return ("error", str(exc))
+
+        run_async(lookup, self._on_release)
+
+    def _on_release(self, result):
+        self._idle()
+        if result is None or result[0] == "error":
+            show_message(self.app, "Couldn't Repair LlamaMXD",
+                         result[1] if result else "Something went wrong. The log has the details.")
+            return
+        kind, update = result
+        if kind == "other":
+            if update is None:
+                show_message(self.app, "Couldn't Repair LlamaMXD",
+                             f"No installer for version {VERSION} (or any other) could be found on GitHub.")
+                return
+            if not ask_yes_no(self.app, "Repair LlamaMXD",
+                              f"The installer for version {VERSION} isn't published any more. Reinstall version "
+                              f"{update.version} instead? Your settings, presets and any newer tools are kept."):
+                return
+        self._download_and_install(update, self.repair_btn, "Repair")
 
     # ------------------------------------------------------------------ #
     #  Bundled tools
@@ -167,6 +268,7 @@ class UpdateFlow:
                 before += update.asset.size
             return results
 
+        self._shown = self.btn
         self._set("Updating 0%")
         run_async(work, self._on_tools_done)
 
