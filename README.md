@@ -5,7 +5,7 @@ LlamaMXD is a friendly, easy to use media multiplexer, transcoder and downloader
 
 
 ## Setup
-Setup is very simple. First download the latest installer from [Releases](https://github.com/YezanSmadi/LlamaMXD/releases). Next, run the setup wizard and choose your install 
+Setup is very simple. First, download the latest installer from [Releases](https://github.com/YezanSmadi/LlamaMXD/releases). Next, run the setup wizard and choose your install 
 location and whether you'd like a desktop/start menu shortcut or not, and you're done! LlamaMXD is ready for work!
 
 ### What LlamaMXD Does
