@@ -1,5 +1,6 @@
 # Welcome to LlamaMXD
 <img width="1920" height="800" alt="LlamaMXD Banner" src="https://github.com/user-attachments/assets/6b2aa305-6030-4561-ac29-018cdce36470" />
+
 LlamaMXD is a friendly, easy to use media multiplexer, transcoder and downloader for Windows that utilizes [ffmpeg](https://ffmpeg.org) and the [yt-dlp project](https://github.com/yt-dlp).
 
 
@@ -55,7 +56,7 @@ to tonemap HDR images to SDR.
 <img width="896" height="540" alt="downloader" src="https://github.com/user-attachments/assets/50106497-7170-4fd5-99c7-19a943631490" />
 </p>
 
-The LlamaMXD Downloader utilizes the power of the [yt-dlp](https://github.com/yt-dlp) to fetch and download video/audio from the web for download.
+The LlamaMXD Downloader utilizes the power of [yt-dlp](https://github.com/yt-dlp) to fetch and download video/audio from the web for download.
 
 ### Reporting problems
 ---
