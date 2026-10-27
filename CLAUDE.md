@@ -3623,9 +3623,9 @@ checks at startup, and the FAQ / manual say so — keep that true. A failure of 
   (`sha256:...`, added automatically on upload); an asset with no digest is ignored, and a mismatch deletes the file.
   A pre-release is offered only to someone already running one. The running version is `VERSION` in `ui/widgets/panels.py`.
 - **Flow.** LlamaMXD first, then the tools, one Yes / No each (`ask_yes_no`), the tool prompt listing each `name old -> new
-  (size)`. **A Yes on LlamaMXD skips the tools prompt**: the installer overwrites `dependables/` with the tools it was built
-  with, so updating tools first and then the app would downgrade them; they are checked on the next press. Both are refused
-  while the Queue has unfinished jobs. Downloads run on `run_async` workers and the button shows `Downloading N%` /
+  (size)`. **A Yes on LlamaMXD skips the tools prompt**; they are checked on the next press. (The installer used to overwrite
+  `dependables/` with the tools it was built with, which was the reason; it now keeps a tool that is newer — see "Installer"
+  below — so this is just the simpler flow.) Both are refused while the Queue has unfinished jobs. Downloads run on `run_async` workers and the button shows `Downloading N%` /
   `Updating N%`.
 - **The app update** downloads the installer to `%TEMP%\LlamaMXD-update`, then starts it detached (`DETACHED_PROCESS`, so
   it is *not* in the tools job object that would kill it with the app) as `/SILENT /NORESTART /CLOSEAPPLICATIONS
@@ -3641,6 +3641,33 @@ checks at startup, and the FAQ / manual say so — keep that true. A failure of 
   yt-dlp 2026.08.19 -> 2026.10.21 and Deno 2.9.7 -> 2.9.8 downloaded, verified and swapped, progress shown on the button,
   the repo's `dependables/` untouched. The app-update half (download, launch, relaunch) is covered by `check_updates` and
   a silent installer run, but not by a real published release: none exists yet.
+
+## Installer (`packaging/`)
+
+`python packaging/build.py --installer` freezes the app (PyInstaller, `LlamaMXD.spec`), copies in what the app looks up
+beside its exe (`LICENSE.txt`, `licenses/`, the manual, the four tools), then compiles `LlamaMXD.iss` (Inno Setup 6) into
+`build/installer/LlamaMXD-Setup-<version>.exe`. **Per-user** (`PrivilegesRequired=lowest`, `%LOCALAPPDATA%\Programs`), fixed
+`AppId`, so a newer installer upgrades in place. `build.py` passes `AppVersion` and the bundled tools' versions
+(`/DToolFfmpeg` etc.); a direct `ISCC` call without them stops with an `#error`.
+
+- **Look.** `WizardStyle=modern dynamic` (follows Windows' light / dark, read once at startup). The images are the logo alone
+  on transparent PNGs, black line art for light and white for dark (`wizard_images.py`, one file per DPI size; the large
+  image shows on the Welcome and Completing pages, the small one top-right). **The uninstaller is not given them**: its
+  progress form shows the app icon in a 32px slot, so the logos are also written into the script as Pascal
+  (`build/wizard/logos.inc`, two bytes per character, byte-exact) and the form's slot is resized to the installer's 58px.
+- **Already installed.** The same version shows a first page: Repair (default) / Uninstall, plus an unticked "Also reset my
+  settings" (deletes only `settings.json`; presets and logs stay). Repair skips the licence / folder / tasks / ready pages.
+  A newer installer is a plain upgrade; an older one over a newer install asks first. Silent runs (the in-app update) skip
+  all of it. **Tools**: a bundled tool is copied only if missing, unreadable or not newer than the installed one
+  (`ToolNeedsCopy`, comparing `--version` output), so an in-app tool update survives a repair or upgrade; `.old` / `.new` /
+  `.part` leftovers are removed (`[InstallDelete]`). **`/DATADIR=<folder>` redirects the reset step** — use it in any test:
+  Inno's `{localappdata}` comes from Windows, not from the `LOCALAPPDATA` environment variable, so sandboxing that variable
+  does *not* keep a test away from the real `%LOCALAPPDATA%\LlamaMXD` (an early repair test deleted a real `settings.json`
+  that way).
+- **Uninstall** closes every running LlamaMXD first (politely, then by force; asks unless silent), and `[UninstallDelete]`
+  clears the app's own folders. Its "also delete settings?" question is skipped when silent.
+- **Shortcuts.** A Start Menu task (ticked) and a desktop task (unticked); the previous choice is remembered on upgrade.
+- **No copy of the installer is kept in the install folder** (260MB for nothing); repair is re-running a downloaded installer.
 
 ## Download flow (YT-DLP)
 

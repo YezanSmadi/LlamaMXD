@@ -14,6 +14,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
 BUILD = os.path.join(ROOT, "build")
 DIST = os.path.join(BUILD, "dist")
 APP = os.path.join(DIST, "LlamaMXD")
@@ -79,6 +80,20 @@ def find_iscc():
     return next((c for c in candidates if c and os.path.isfile(c)), None)
 
 
+def bundled_tool_versions():
+    """The version of each tool in the built app folder, as the installer compares it with an installed one."""
+    from core import updates
+    found = {}
+    for spec in updates.TOOLS:
+        exe = os.path.join(APP, "dependables", spec["files"][0])
+        out = subprocess.run([exe, spec["flag"]], capture_output=True, text=True, timeout=30).stdout
+        match = re.search(spec["version"], out, re.M)
+        if not match:
+            sys.exit(f"couldn't read the bundled {spec['name']}'s version from {exe}")
+        found[spec["name"]] = match.group(1)
+    return found
+
+
 def build_installer():
     """Compile the Inno Setup script around the built app folder."""
     iscc = find_iscc()
@@ -88,7 +103,9 @@ def build_installer():
     nums = numeric_version(ver)
     import wizard_images
     wizard_images.make(os.path.join(BUILD, "wizard"))
+    tools = bundled_tool_versions()
     subprocess.run([iscc, f"/DAppVersion={ver}", "/DAppNumeric=" + ".".join(map(str, nums)),
+                    f"/DToolFfmpeg={tools['ffmpeg']}", f"/DToolYtdlp={tools['yt-dlp']}", f"/DToolDeno={tools['deno']}",
                     os.path.join(HERE, "LlamaMXD.iss")], check=True)
     print(f"installer in {os.path.join(BUILD, 'installer')}")
 
